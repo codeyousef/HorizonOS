@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+out/
+work/
+*.iso
+*.img
+*.qcow2
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+
+# Test VMs
+test-vms/
+*.vmdk
+*.vdi
+
+# OSTree repo (local testing)
+repo/
