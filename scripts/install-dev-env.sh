@@ -230,10 +230,9 @@ echo "${USERNAME}:${USER_PASSWORD}" | chpasswd
 
 # Configure sudoers
 echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
-EOF
 
 # Create initial setup script for first boot
-cat > /mnt/home/${USERNAME}/setup-horizonos.sh <<'SETUP'
+cat > /home/${USERNAME}/setup-horizonos.sh <<'SETUP'
 #!/bin/bash
 set -e
 
@@ -359,12 +358,12 @@ echo "  hos-status - Check OSTree status"
 echo ""
 SETUP
 
-chown ${USERNAME}:${USERNAME} /mnt/home/${USERNAME}/setup-horizonos.sh
-chmod +x /mnt/home/${USERNAME}/setup-horizonos.sh
+chown ${USERNAME}:${USERNAME} /home/${USERNAME}/setup-horizonos.sh
+chmod +x /home/${USERNAME}/setup-horizonos.sh
 
 # Create a desktop entry for the setup script
-mkdir -p /mnt/home/${USERNAME}/Desktop
-cat > /mnt/home/${USERNAME}/Desktop/setup-horizonos.desktop << DESKTOP
+mkdir -p /home/${USERNAME}/Desktop
+cat > /home/${USERNAME}/Desktop/setup-horizonos.desktop << DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Setup HorizonOS Dev
@@ -373,8 +372,9 @@ Exec=konsole -e bash /home/${USERNAME}/setup-horizonos.sh
 Icon=applications-development
 Terminal=true
 DESKTOP
-chmod +x /mnt/home/${USERNAME}/Desktop/setup-horizonos.desktop
-chown ${USERNAME}:${USERNAME} /mnt/home/${USERNAME}/Desktop/setup-horizonos.desktop
+chmod +x /home/${USERNAME}/Desktop/setup-horizonos.desktop
+chown ${USERNAME}:${USERNAME} /home/${USERNAME}/Desktop/setup-horizonos.desktop
+EOF
 
 echo ""
 echo -e "${GREEN}=====================================${NC}"
