@@ -1,6 +1,17 @@
 #!/bin/bash
 # HorizonOS Development Environment Installer
 # Run this from Arch Linux live ISO
+#
+# FIXES APPLIED:
+# 1. Check for UEFI boot mode before starting
+# 2. Better partition detection for both /dev/sdX and /dev/nvmeXnX devices  
+# 3. Fixed snapper configuration (removed manual @snapshots creation)
+# 4. Fixed user creation order (create user before chown)
+# 5. Added GRUB debug output and rootflags for btrfs
+# 6. Added boot verification steps
+# 7. Added EFI fallback boot entry
+# 8. Extended reboot timer with troubleshooting info
+#
 set -e
 
 # Colors for output
@@ -23,6 +34,13 @@ echo ""
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then 
     echo -e "${RED}Please run as root (use sudo)${NC}"
+    exit 1
+fi
+
+# Check if booted in UEFI mode
+if [ ! -d /sys/firmware/efi/efivars ]; then
+    echo -e "${RED}ERROR: Not booted in UEFI mode!${NC}"
+    echo "Please ensure UEFI boot is enabled in BIOS/UEFI settings"
     exit 1
 fi
 
@@ -83,19 +101,26 @@ sleep 2
 partprobe ${DISK}
 sleep 1
 
-# Format partitions
+# Format partitions - handle both partition naming schemes
 echo -e "${YELLOW}Formatting partitions...${NC}"
-mkfs.fat -F32 ${DISK}1 2>/dev/null || mkfs.fat -F32 ${DISK}p1
-mkfs.btrfs -f ${DISK}2 2>/dev/null || mkfs.btrfs -f ${DISK}p2
-
-# Set up partition variables
 if [ -e "${DISK}p1" ]; then
+    # NVMe style naming
     BOOT_PART="${DISK}p1"
     ROOT_PART="${DISK}p2"
-else
+elif [ -e "${DISK}1" ]; then
+    # Standard naming
     BOOT_PART="${DISK}1"
     ROOT_PART="${DISK}2"
+else
+    echo -e "${RED}ERROR: Cannot find partitions!${NC}"
+    exit 1
 fi
+
+echo "Boot partition: $BOOT_PART"
+echo "Root partition: $ROOT_PART"
+
+mkfs.fat -F32 $BOOT_PART
+mkfs.btrfs -f $ROOT_PART
 
 # Mount and create Btrfs subvolumes
 echo -e "${YELLOW}Creating Btrfs subvolumes...${NC}"
@@ -115,12 +140,23 @@ mount -o compress=zstd:1,noatime,subvol=@var $ROOT_PART /mnt/var
 
 # Install minimal system focused on HorizonOS development
 echo -e "${YELLOW}Installing base system and essential tools...${NC}"
-pacstrap /mnt base base-devel linux linux-firmware \
+
+# Detect CPU type for microcode
+CPU_VENDOR=$(grep -m1 vendor_id /proc/cpuinfo | cut -d: -f2 | tr -d ' ')
+if [[ "$CPU_VENDOR" == "GenuineIntel" ]]; then
+    MICROCODE="intel-ucode"
+elif [[ "$CPU_VENDOR" == "AuthenticAMD" ]]; then
+    MICROCODE="amd-ucode"
+else
+    MICROCODE=""
+fi
+
+pacstrap /mnt base base-devel linux linux-firmware $MICROCODE \
     btrfs-progs fish git neovim nano \
     networkmanager openssh \
     plasma-desktop sddm konsole dolphin \
     firefox \
-    grub efibootmgr \
+    grub efibootmgr os-prober \
     docker qemu-full libvirt \
     archiso arch-install-scripts ostree \
     kotlin gradle \
@@ -130,6 +166,26 @@ pacstrap /mnt base base-devel linux linux-firmware \
 # Generate fstab
 echo -e "${YELLOW}Generating fstab...${NC}"
 genfstab -U /mnt >> /mnt/etc/fstab
+
+# Verify fstab has correct entries
+echo -e "${YELLOW}Verifying fstab entries...${NC}"
+cat /mnt/etc/fstab
+
+# Save installation info for debugging
+cat > /mnt/root/install-info.txt << INFO
+HorizonOS Installation Info
+Date: $(date)
+Boot Partition: $BOOT_PART
+Root Partition: $ROOT_PART
+Disk: $DISK
+
+Partition Layout:
+$(lsblk $DISK)
+
+Btrfs Subvolumes:
+$(btrfs subvolume list /mnt)
+
+INFO
 
 # Chroot and configure system
 echo -e "${YELLOW}Configuring system...${NC}"
@@ -155,9 +211,33 @@ HOSTS
 sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block btrfs filesystems fsck)/' /etc/mkinitcpio.conf
 mkinitcpio -P
 
+# Verify kernel and initramfs were generated
+echo "Checking for kernel and initramfs..."
+ls -la /boot/
+
 # Install bootloader
-grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=HorizonOS-Dev
+echo "Installing GRUB..."
+# Ensure efivars are available
+mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null || true
+grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=HorizonOS-Dev --recheck --debug
+
+# Configure GRUB for Btrfs subvolumes
+# First, ensure GRUB can see the Btrfs root
+echo 'GRUB_CMDLINE_LINUX="rootflags=subvol=@"' >> /etc/default/grub
+echo 'GRUB_PRELOAD_MODULES="part_gpt part_msdos btrfs"' >> /etc/default/grub
+echo 'GRUB_ENABLE_LINUX_UUID=true' >> /etc/default/grub
+
+# Generate GRUB config
+echo "Generating GRUB configuration..."
 grub-mkconfig -o /boot/grub/grub.cfg
+
+# Verify EFI boot entry was created
+echo "EFI boot entries:"
+efibootmgr -v
+
+# Also create a fallback EFI boot entry
+mkdir -p /boot/EFI/BOOT
+cp /boot/EFI/HorizonOS-Dev/grubx64.efi /boot/EFI/BOOT/BOOTX64.EFI 2>/dev/null || true
 
 # Configure snapper (FIXED)
 # Create snapper configurations - it will create its own .snapshots subvolumes
@@ -374,6 +454,31 @@ Terminal=true
 DESKTOP
 chmod +x /home/${USERNAME}/Desktop/setup-horizonos.desktop
 chown ${USERNAME}:${USERNAME} /home/${USERNAME}/Desktop/setup-horizonos.desktop
+
+# Final verification before ending chroot
+echo ""
+echo "=== Boot Configuration Verification ==="
+echo "Checking boot files..."
+if [ -f /boot/vmlinuz-linux ] && [ -f /boot/initramfs-linux.img ]; then
+    echo "✓ Kernel and initramfs found"
+else
+    echo "✗ ERROR: Kernel or initramfs missing!"
+fi
+
+echo "Checking EFI boot entries..."
+efibootmgr -v
+
+echo "Checking GRUB installation..."
+if [ -d /boot/grub ] && [ -f /boot/grub/grub.cfg ]; then
+    echo "✓ GRUB installed"
+    echo "Root device in GRUB:"
+    grep -E "root=|rootflags=" /boot/grub/grub.cfg | head -5
+else
+    echo "✗ ERROR: GRUB not properly installed!"
+fi
+
+echo "Checking fstab..."
+cat /etc/fstab
 EOF
 
 echo ""
@@ -381,7 +486,7 @@ echo -e "${GREEN}=====================================${NC}"
 echo -e "${GREEN}Installation Complete!${NC}"
 echo -e "${GREEN}=====================================${NC}"
 echo ""
-echo "System will reboot in 10 seconds..."
+echo "System will reboot in 30 seconds..."
 echo ""
 echo "After reboot:"
 echo "1. Login as 'yousef' with your password"
@@ -392,6 +497,21 @@ echo "Default credentials:"
 echo "  Username: ${USERNAME}"
 echo "  Password: (what you entered)"
 echo ""
+echo -e "${YELLOW}=== TROUBLESHOOTING ===${NC}"
+echo "If system doesn't boot:"
+echo "1. Boot from live ISO again"
+echo "2. Mount system: "
+echo "   mount -o subvol=@ ${ROOT_PART} /mnt"
+echo "   mount ${BOOT_PART} /mnt/boot"
+echo "   arch-chroot /mnt"
+echo "3. Check logs:"
+echo "   journalctl -xb"
+echo "   dmesg | grep -i error"
+echo "4. Reinstall GRUB:"
+echo "   grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=HorizonOS --recheck"
+echo "   grub-mkconfig -o /boot/grub/grub.cfg"
+echo ""
+echo -e "${YELLOW}Press Ctrl+C to cancel reboot and debug${NC}"
 
-sleep 10
+sleep 30
 reboot
