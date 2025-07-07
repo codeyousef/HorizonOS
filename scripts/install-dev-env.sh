@@ -109,19 +109,18 @@ mount -o compress=zstd:1,noatime,subvol=@home $ROOT_PART /mnt/home
 mount -o compress=zstd:1,noatime,subvol=@snapshots $ROOT_PART /mnt/.snapshots
 mount -o compress=zstd:1,noatime,subvol=@var $ROOT_PART /mnt/var
 
-# Install base system with development tools
-echo -e "${YELLOW}Installing base system and development tools...${NC}"
+# Install minimal system focused on HorizonOS development
+echo -e "${YELLOW}Installing base system and essential tools...${NC}"
 pacstrap /mnt base base-devel linux linux-firmware \
-    btrfs-progs fish git git-lfs github-cli neovim vim nano \
-    networkmanager openssh wget curl \
-    plasma-meta kde-applications-meta sddm \
-    firefox konsole dolphin kate \
-    grub efibootmgr os-prober \
-    docker docker-compose qemu-full virt-manager \
-    archiso arch-install-scripts ostree flatpak \
-    kotlin java-runtime-common gradle \
-    rust go nodejs npm python python-pip \
-    htop btop neofetch \
+    btrfs-progs fish git neovim nano \
+    networkmanager openssh \
+    plasma-desktop sddm konsole dolphin \
+    firefox \
+    grub efibootmgr \
+    docker qemu-full libvirt \
+    archiso arch-install-scripts ostree \
+    kotlin gradle \
+    btop bat nano \
     snapper snap-pac grub-btrfs
 
 # Generate fstab
@@ -217,11 +216,14 @@ if ! command -v yay &> /dev/null; then
 fi
 
 # Install additional tools from AUR
-yay -S --noconfirm visual-studio-code-bin intellij-idea-ultimate-edition
+yay -S --noconfirm visual-studio-code-bin
 
+# Optional: Install more tools if needed
 echo ""
-echo "Note: IntelliJ IDEA Ultimate requires a license."
-echo "You can use the 30-day trial or enter your license key."
+echo "You can install additional tools later:"
+echo "  IntelliJ: yay -S intellij-idea-ultimate-edition"
+echo "  Git LFS: sudo pacman -S git-lfs"
+echo "  GitHub CLI: sudo pacman -S github-cli"
 echo ""
 
 # Set up Fish shell
