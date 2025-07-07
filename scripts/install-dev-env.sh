@@ -78,6 +78,11 @@ parted -s ${DISK} mkpart ESP fat32 1MiB 512MiB
 parted -s ${DISK} set 1 esp on
 parted -s ${DISK} mkpart primary btrfs 512MiB 100%
 
+# Wait for kernel to recognize partitions
+sleep 2
+partprobe ${DISK}
+sleep 1
+
 # Format partitions
 echo -e "${YELLOW}Formatting partitions...${NC}"
 mkfs.fat -F32 ${DISK}1 2>/dev/null || mkfs.fat -F32 ${DISK}p1
@@ -97,16 +102,15 @@ echo -e "${YELLOW}Creating Btrfs subvolumes...${NC}"
 mount $ROOT_PART /mnt
 btrfs subvolume create /mnt/@
 btrfs subvolume create /mnt/@home
-btrfs subvolume create /mnt/@snapshots
 btrfs subvolume create /mnt/@var
+# Don't create @snapshots - let snapper handle it
 umount /mnt
 
 # Mount subvolumes
 mount -o compress=zstd:1,noatime,subvol=@ $ROOT_PART /mnt
-mkdir -p /mnt/{boot,home,.snapshots,var}
+mkdir -p /mnt/{boot,home,var}
 mount $BOOT_PART /mnt/boot
 mount -o compress=zstd:1,noatime,subvol=@home $ROOT_PART /mnt/home
-mount -o compress=zstd:1,noatime,subvol=@snapshots $ROOT_PART /mnt/.snapshots
 mount -o compress=zstd:1,noatime,subvol=@var $ROOT_PART /mnt/var
 
 # Install minimal system focused on HorizonOS development
@@ -129,9 +133,9 @@ genfstab -U /mnt >> /mnt/etc/fstab
 
 # Chroot and configure system
 echo -e "${YELLOW}Configuring system...${NC}"
-arch-chroot /mnt /bin/bash <<EOF
+arch-chroot /mnt /bin/bash <<'EOF'
 # Set timezone
-ln -sf /usr/share/zoneinfo/${TIMEZONE} /etc/localtime
+ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 hwclock --systohc
 
 # Locale
@@ -140,11 +144,11 @@ locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
 
 # Hostname
-echo "${HOSTNAME}" > /etc/hostname
+echo "horizonos-dev" > /etc/hostname
 cat > /etc/hosts <<HOSTS
 127.0.0.1   localhost
 ::1         localhost
-127.0.1.1   ${HOSTNAME}.localdomain ${HOSTNAME}
+127.0.1.1   horizonos-dev.localdomain horizonos-dev
 HOSTS
 
 # mkinitcpio with btrfs
@@ -155,35 +159,50 @@ mkinitcpio -P
 grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=HorizonOS-Dev
 grub-mkconfig -o /boot/grub/grub.cfg
 
-# Set root password
-echo "root:${USER_PASSWORD}" | chpasswd
-
-# Create user with fish shell
-echo "Creating user: yousef"
-useradd -m -G wheel,docker,libvirt -s /usr/bin/fish ${USERNAME}
-echo "${USERNAME}:${USER_PASSWORD}" | chpasswd
-
-# Configure sudoers
-echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
-
-# Enable services
-systemctl enable NetworkManager
-systemctl enable sddm
-systemctl enable docker
-systemctl enable libvirtd
-systemctl enable sshd
-
-# Configure snapper
+# Configure snapper (FIXED)
+# Create snapper configurations - it will create its own .snapshots subvolumes
 snapper -c root create-config /
 snapper -c home create-config /home
+
+# Configure snapper settings for root
 snapper -c root set-config "TIMELINE_CREATE=yes"
 snapper -c root set-config "TIMELINE_CLEANUP=yes"
 snapper -c root set-config "TIMELINE_LIMIT_HOURLY=5"
 snapper -c root set-config "TIMELINE_LIMIT_DAILY=7"
 snapper -c root set-config "TIMELINE_LIMIT_WEEKLY=0"
+snapper -c root set-config "TIMELINE_LIMIT_MONTHLY=0"
+snapper -c root set-config "TIMELINE_LIMIT_YEARLY=0"
+
+# Set number cleanup limits for root
+snapper -c root set-config "NUMBER_CLEANUP=yes"
+snapper -c root set-config "NUMBER_MIN_AGE=1800"
+snapper -c root set-config "NUMBER_LIMIT=50"
+snapper -c root set-config "NUMBER_LIMIT_IMPORTANT=10"
+
+# Configure snapper settings for home
+snapper -c home set-config "TIMELINE_CREATE=yes"
+snapper -c home set-config "TIMELINE_CLEANUP=yes"
+snapper -c home set-config "TIMELINE_LIMIT_HOURLY=5"
+snapper -c home set-config "TIMELINE_LIMIT_DAILY=7"
+snapper -c home set-config "TIMELINE_LIMIT_WEEKLY=0"
+snapper -c home set-config "TIMELINE_LIMIT_MONTHLY=0"
+snapper -c home set-config "TIMELINE_LIMIT_YEARLY=0"
+
+# Enable snapper services
 systemctl enable snapper-timeline.timer
 systemctl enable snapper-cleanup.timer
-systemctl enable grub-btrfsd
+
+# Enable grub-btrfsd only if the .snapshots subvolume exists
+if btrfs subvolume list / | grep -q ".snapshots"; then
+    systemctl enable grub-btrfsd
+fi
+
+# Enable other services
+systemctl enable NetworkManager
+systemctl enable sddm
+systemctl enable docker
+systemctl enable libvirtd
+systemctl enable sshd
 
 # Make fish default for new users
 echo "/usr/bin/fish" >> /etc/shells
@@ -193,13 +212,28 @@ sed -i 's|SHELL=/bin/bash|SHELL=/usr/bin/fish|' /etc/default/useradd
 mkdir -p /etc/sddm.conf.d
 cat > /etc/sddm.conf.d/autologin.conf <<SDDM
 [Autologin]
-User=${USERNAME}
+User=yousef
 Session=plasma
 SDDM
+
+EOF
+
+# Use the password variables that were read earlier
+arch-chroot /mnt /bin/bash <<EOF
+# Set root password
+echo "root:${USER_PASSWORD}" | chpasswd
+
+# Create user with fish shell
+echo "Creating user: ${USERNAME}"
+useradd -m -G wheel,docker,libvirt -s /usr/bin/fish ${USERNAME}
+echo "${USERNAME}:${USER_PASSWORD}" | chpasswd
+
+# Configure sudoers
+echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
 EOF
 
 # Create initial setup script for first boot
-cat > /home/${USERNAME}/setup-horizonos.sh <<'SETUP'
+cat > /mnt/home/${USERNAME}/setup-horizonos.sh <<'SETUP'
 #!/bin/bash
 set -e
 
@@ -325,12 +359,12 @@ echo "  hos-status - Check OSTree status"
 echo ""
 SETUP
 
-chown ${USERNAME}:${USERNAME} /home/${USERNAME}/setup-horizonos.sh
-chmod +x /home/${USERNAME}/setup-horizonos.sh
+chown ${USERNAME}:${USERNAME} /mnt/home/${USERNAME}/setup-horizonos.sh
+chmod +x /mnt/home/${USERNAME}/setup-horizonos.sh
 
 # Create a desktop entry for the setup script
-mkdir -p /home/${USERNAME}/Desktop
-cat > /home/${USERNAME}/Desktop/setup-horizonos.desktop << DESKTOP
+mkdir -p /mnt/home/${USERNAME}/Desktop
+cat > /mnt/home/${USERNAME}/Desktop/setup-horizonos.desktop << DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Setup HorizonOS Dev
@@ -339,8 +373,8 @@ Exec=konsole -e bash /home/${USERNAME}/setup-horizonos.sh
 Icon=applications-development
 Terminal=true
 DESKTOP
-chmod +x /home/${USERNAME}/Desktop/setup-horizonos.desktop
-chown ${USERNAME}:${USERNAME} /home/${USERNAME}/Desktop/setup-horizonos.desktop
+chmod +x /mnt/home/${USERNAME}/Desktop/setup-horizonos.desktop
+chown ${USERNAME}:${USERNAME} /mnt/home/${USERNAME}/Desktop/setup-horizonos.desktop
 
 echo ""
 echo -e "${GREEN}=====================================${NC}"
