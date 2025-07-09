@@ -24,3 +24,6 @@ test-vms/
 
 # OSTree repo (local testing)
 repo/
+
+# ISO build directory
+iso/

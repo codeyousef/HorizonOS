@@ -4,7 +4,7 @@ set -euo pipefail
 # HorizonOS ISO Builder
 # This script creates a bootable ISO with OSTree support
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
 ISO_DIR="$PROJECT_ROOT/iso"
 WORK_DIR="$BUILD_DIR/archiso-work"
@@ -90,6 +90,7 @@ squashfs-tools
 
 # Live environment
 archinstall
+arch-install-scripts
 gptfdisk
 parted
 reflector
@@ -235,11 +236,29 @@ main() {
     
     # Configure bootloader
     echo "Installing bootloader..."
-    arch-chroot /mnt /bin/bash << 'CHROOT'
-# Install GRUB
-grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=HorizonOS
-grub-mkconfig -o /boot/grub/grub.cfg
-CHROOT
+    # Mount necessary filesystems for chroot
+    mount --bind /dev /mnt/dev
+    mount --bind /proc /mnt/proc
+    mount --bind /sys /mnt/sys
+    
+    # Install bootloader from outside chroot first
+    grub-install --target=x86_64-efi --efi-directory=/mnt/boot --boot-directory=/mnt/boot --bootloader-id=HorizonOS --removable
+    
+    # Create basic GRUB config for OSTree
+    mkdir -p /mnt/boot/grub
+    cat > /mnt/boot/grub/grub.cfg << 'GRUBCFG'
+set default=0
+set timeout=5
+
+menuentry 'HorizonOS' {
+    # OSTree will manage the actual boot entries
+    echo "Loading HorizonOS..."
+    # This will be replaced by ostree-grub-generator
+}
+GRUBCFG
+    
+    # Unmount bind mounts
+    umount /mnt/dev /mnt/proc /mnt/sys || true
     
     # Basic configuration
     echo "Configuring system..."
