@@ -1,0 +1,367 @@
+/* HorizonOS Waybar macOS Dock Style */
+
+/* Global Settings */
+* {
+    font-family: "SF Pro Display", "SF Pro Text", -apple-system, sans-serif;
+    font-size: 12px;
+    min-height: 0;
+}
+
+/* Dock Window */
+window#waybar.dock {
+    background: transparent;
+    color: #ffffff;
+}
+
+/* Main Container */
+.modules-center {
+    background: rgba(40, 40, 40, 0.7);
+    backdrop-filter: blur(50px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 8px 12px;
+    margin: 0;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3),
+                0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+}
+
+/* App Icons Base Style */
+#custom-finder,
+#custom-safari,
+#custom-mail,
+#custom-calendar,
+#custom-notes,
+#custom-music,
+#custom-messages,
+#custom-facetime,
+#custom-terminal,
+#custom-vscode,
+#custom-settings,
+#custom-trash {
+    background: transparent;
+    color: #ffffff;
+    padding: 0 8px;
+    margin: 0 2px;
+    font-size: 42px;
+    border-radius: 12px;
+    transition: all 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* App Icon Hover Effects */
+#custom-finder:hover,
+#custom-safari:hover,
+#custom-mail:hover,
+#custom-calendar:hover,
+#custom-notes:hover,
+#custom-music:hover,
+#custom-messages:hover,
+#custom-facetime:hover,
+#custom-terminal:hover,
+#custom-vscode:hover,
+#custom-settings:hover,
+#custom-trash:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-5px) scale(1.05);
+    filter: brightness(1.2);
+}
+
+/* Active App Indicator */
+#custom-finder.active,
+#custom-safari.active,
+#custom-mail.active,
+#custom-calendar.active,
+#custom-notes.active,
+#custom-music.active,
+#custom-messages.active,
+#custom-facetime.active,
+#custom-terminal.active,
+#custom-vscode.active,
+#custom-settings.active {
+    position: relative;
+}
+
+#custom-finder.active::after,
+#custom-safari.active::after,
+#custom-mail.active::after,
+#custom-calendar.active::after,
+#custom-notes.active::after,
+#custom-music.active::after,
+#custom-messages.active::after,
+#custom-facetime.active::after,
+#custom-terminal.active::after,
+#custom-vscode.active::after,
+#custom-settings.active::after {
+    content: "";
+    position: absolute;
+    bottom: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    box-shadow: 0 0 4px rgba(255, 255, 255, 0.6);
+}
+
+/* Taskbar (Running Apps) */
+#taskbar {
+    background: transparent;
+    padding: 0;
+    margin: 0 4px;
+}
+
+#taskbar button {
+    background: transparent;
+    border: none;
+    padding: 0 8px;
+    margin: 0 2px;
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 12px;
+    transition: all 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+#taskbar button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-5px) scale(1.05);
+}
+
+#taskbar button.active {
+    position: relative;
+}
+
+#taskbar button.active::after {
+    content: "";
+    position: absolute;
+    bottom: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    box-shadow: 0 0 4px rgba(255, 255, 255, 0.6);
+}
+
+#taskbar button.minimized {
+    opacity: 0.5;
+}
+
+#taskbar button.minimized:hover {
+    opacity: 0.8;
+}
+
+/* Separator */
+#custom-separator {
+    color: rgba(255, 255, 255, 0.2);
+    padding: 0 8px;
+    margin: 0 4px;
+    font-size: 16px;
+    font-weight: 100;
+}
+
+/* Trash Icon Special States */
+#custom-trash {
+    position: relative;
+}
+
+#custom-trash.empty {
+    opacity: 0.8;
+}
+
+#custom-trash.full::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    background: #ff3b30;
+    border-radius: 50%;
+    border: 2px solid rgba(40, 40, 40, 0.7);
+}
+
+/* Bounce Animation for Launching Apps */
+@keyframes bounce {
+    0%, 20%, 50%, 80%, 100% {
+        transform: translateY(0) scale(1);
+    }
+    40% {
+        transform: translateY(-30px) scale(1.1);
+    }
+    60% {
+        transform: translateY(-15px) scale(1.05);
+    }
+}
+
+.launching {
+    animation: bounce 1s ease-in-out;
+}
+
+/* Notification Badge */
+.notification-badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background: #ff3b30;
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 5px;
+    border-radius: 10px;
+    border: 2px solid rgba(40, 40, 40, 0.7);
+    min-width: 16px;
+    text-align: center;
+}
+
+/* Minimize Effect */
+@keyframes minimize-to-dock {
+    0% {
+        transform: scale(1) translateY(0);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(0.5) translateY(20px);
+        opacity: 0;
+    }
+}
+
+.minimizing {
+    animation: minimize-to-dock 0.3s ease-in-out;
+}
+
+/* Magnification Effect */
+.modules-center:hover > * {
+    transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* Adjacent icon magnification */
+.modules-center > *:hover {
+    transform: scale(1.2) translateY(-10px);
+}
+
+.modules-center > *:hover + * {
+    transform: scale(1.1) translateY(-5px);
+}
+
+.modules-center > *:has(+ *:hover) {
+    transform: scale(1.1) translateY(-5px);
+}
+
+/* Dock Tooltips */
+tooltip {
+    background: rgba(50, 50, 50, 0.95);
+    backdrop-filter: blur(50px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 4px 8px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+tooltip label {
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+/* Spring-loaded folders effect */
+.spring-loaded {
+    background: rgba(0, 122, 255, 0.2) !important;
+    border: 2px solid rgba(0, 122, 255, 0.5) !important;
+}
+
+/* Recently added indicator */
+.recently-added::before {
+    content: "";
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 8px;
+    height: 8px;
+    background: #007aff;
+    border-radius: 50%;
+    box-shadow: 0 0 8px rgba(0, 122, 255, 0.8);
+}
+
+/* Download progress indicator */
+.downloading {
+    position: relative;
+}
+
+.downloading::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, 
+        transparent 0%, 
+        #007aff 20%, 
+        #007aff 80%, 
+        transparent 100%);
+    border-radius: 2px;
+    animation: download-progress 2s linear infinite;
+}
+
+@keyframes download-progress {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+/* Mission Control Hint */
+.mission-control-hint {
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: #ffffff;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+}
+
+.modules-center:hover .mission-control-hint {
+    opacity: 1;
+}
+
+/* Focused Window Indicator */
+.focused-window {
+    box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.5);
+}
+
+/* Stage Manager Integration */
+.stage-manager-visible .modules-center {
+    transform: translateX(-100px);
+    transition: transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* Continuity Camera Indicator */
+.continuity-camera::before {
+    content: "📷";
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    font-size: 16px;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.1);
+        opacity: 0.8;
+    }
+}

@@ -1,0 +1,202 @@
+# HorizonOS Hyprland Desktop Package List
+# KDE-style desktop environment using Hyprland
+
+# Core Wayland Compositor
+hyprland
+xdg-desktop-portal-hyprland
+xdg-desktop-portal
+
+# Display Server Requirements
+wayland
+wayland-protocols
+wlroots
+xorg-xwayland
+
+# Session Management
+polkit-kde-agent
+wlogout
+
+# Status Bar and Launcher
+waybar
+wofi
+
+# Terminal Emulators
+konsole
+kitty
+
+# File Manager
+dolphin
+dolphin-plugins
+
+# Text Editors
+kate
+
+# KDE/Qt Integration
+qt5-wayland
+qt6-wayland
+plasma-framework5
+plasma-integration
+kde-gtk-config
+breeze
+breeze-gtk
+breeze-icons
+oxygen
+
+# GTK Support
+gtk3
+gtk4
+gsettings-desktop-schemas
+
+# Theme and Icons
+papirus-icon-theme
+arc-icon-theme
+ttf-noto-fonts
+ttf-noto-fonts-emoji
+ttf-font-awesome
+ttf-liberation
+ttf-dejavu
+ttf-hack
+noto-fonts-cjk
+
+# Audio Support
+pipewire
+pipewire-pulse
+pipewire-alsa
+pipewire-jack
+wireplumber
+pavucontrol
+pasystray
+playerctl
+pamixer
+
+# Network Management
+networkmanager
+network-manager-applet
+nm-connection-editor
+
+# Bluetooth
+bluez
+bluez-utils
+blueman
+
+# Screenshot and Screen Recording
+grim
+slurp
+wf-recorder
+swappy
+
+# Clipboard Management
+wl-clipboard
+cliphist
+
+# Notification Daemon
+dunst
+libnotify
+
+# Authentication
+gnome-keyring
+seahorse
+kwallet
+kwalletmanager
+
+# Display Configuration
+wlr-randr
+kanshi
+
+# Brightness Control
+brightnessctl
+light
+
+# Wallpaper
+swaybg
+hyprpaper
+
+# Lock Screen
+swaylock
+swaylock-effects
+swayidle
+
+# System Information
+neofetch
+htop
+btop
+
+# Development Tools (optional)
+code
+meld
+
+# Media Players
+mpv
+vlc
+
+# Image Viewers
+gwenview
+imv
+
+# PDF Viewer
+okular
+
+# Archive Manager
+ark
+
+# Calculator
+kcalc
+galculator
+
+# System Settings
+lxappearance-gtk3
+
+# Additional Utilities
+jq
+socat
+udiskie
+xdg-utils
+desktop-file-utils
+shared-mime-info
+
+# Flatpak Support (optional)
+flatpak
+xdg-desktop-portal-gtk
+
+# Power Management
+power-profiles-daemon
+upower
+
+# KDE Connect (optional)
+kdeconnect
+
+# Color Temperature
+wlsunset
+gammastep
+
+# GPU Utilities
+mesa-utils
+vulkan-tools
+
+# Input Method Framework (optional)
+fcitx5
+fcitx5-gtk
+fcitx5-qt
+fcitx5-configtool
+
+# Accessibility (optional)
+orca
+
+# Printer Support (optional)
+cups
+system-config-printer
+
+# Scanner Support (optional)
+simple-scan
+sane
+
+# Virtual Keyboard (for touch devices)
+squeekboard
+
+# Additional KDE Applications (optional)
+konsole
+kwrite
+kclock
+kdeconnect
+kdenlive
+krita

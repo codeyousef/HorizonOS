@@ -1,0 +1,59 @@
+# HorizonOS Wofi Configuration - Windows 11 Start Menu Style
+
+# Window settings
+width=680
+height=760
+location=bottom_left
+x_offset=0
+y_offset=-48
+no_actions=false
+orientation=vertical
+
+# Search settings
+prompt=Search for apps, settings, and documents
+filter_rate=100
+allow_markup=true
+no_actions=false
+halign=fill
+valign=start
+
+# Display settings
+mode=drun
+allow_images=true
+image_size=32
+gtk_dark=true
+insensitive=true
+hide_scroll=false
+content_halign=start
+normal_window=false
+layer=overlay
+lines=8
+columns=1
+
+# Behavior
+sort_order=default
+matching=fuzzy
+exec_search=true
+hide_search=false
+parse_search=true
+case_sensitive=false
+
+# Appearance
+line_wrap=off
+dynamic_lines=true
+print_command=false
+
+# Terminal
+term=alacritty
+
+# Cache
+cache_file=/tmp/wofi-windows11-cache
+
+# Style
+style=/home/yousef/.config/wofi/windows11/style.css
+
+# Windows 11 specific
+show_all=false
+markup_rows=true
+location=center
+no_input=false

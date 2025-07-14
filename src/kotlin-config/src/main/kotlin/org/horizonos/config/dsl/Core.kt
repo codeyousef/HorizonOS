@@ -17,6 +17,7 @@ class SystemConfiguration {
     private val services = mutableListOf<Service>()
     private val users = mutableListOf<User>()
     private val repositories = mutableListOf<Repository>()
+    private var desktopConfig: DesktopConfig? = null
 
     fun packages(block: PackagesContext.() -> Unit) {
         PackagesContext().apply(block).also {
@@ -41,6 +42,10 @@ class SystemConfiguration {
             repositories.addAll(it.repositories)
         }
     }
+    
+    fun desktop(block: DesktopContext.() -> Unit) {
+        desktopConfig = DesktopContext().apply(block).toConfig()
+    }
 
     fun toConfig(): CompiledConfig {
         return CompiledConfig(
@@ -48,7 +53,8 @@ class SystemConfiguration {
             packages = packages,
             services = services,
             users = users,
-            repositories = repositories
+            repositories = repositories,
+            desktop = desktopConfig
         )
     }
 }
@@ -188,6 +194,76 @@ class OstreeRepoConfig : RepoConfig() {
     }
 }
 
+// ===== Desktop Environment DSL =====
+
+@HorizonOSDsl
+class DesktopContext {
+    var environment: DesktopEnvironment = DesktopEnvironment.HYPRLAND
+    var autoLogin: Boolean = false
+    var autoLoginUser: String? = null
+    
+    private var hyprlandConfig: HyprlandConfig? = null
+    private var plasmaConfig: PlasmaConfig? = null
+    
+    fun hyprland(block: HyprlandContext.() -> Unit) {
+        hyprlandConfig = HyprlandContext().apply(block).toConfig()
+    }
+    
+    fun plasma(block: PlasmaContext.() -> Unit) {
+        plasmaConfig = PlasmaContext().apply(block).toConfig()
+    }
+    
+    fun toConfig(): DesktopConfig {
+        return DesktopConfig(
+            environment = environment,
+            autoLogin = autoLogin,
+            autoLoginUser = autoLoginUser,
+            hyprlandConfig = hyprlandConfig,
+            plasmaConfig = plasmaConfig
+        )
+    }
+}
+
+@HorizonOSDsl
+class HyprlandContext {
+    var theme: String = "breeze-dark"
+    var animations: Boolean = true
+    var gaps: Int = 10
+    var borderSize: Int = 2
+    var kdeIntegration: Boolean = true
+    var personalityMode: PersonalityMode = PersonalityMode.KDE
+    
+    fun toConfig(): HyprlandConfig {
+        return HyprlandConfig(
+            theme = theme,
+            animations = animations,
+            gaps = gaps,
+            borderSize = borderSize,
+            kdeIntegration = kdeIntegration,
+            personalityMode = personalityMode
+        )
+    }
+}
+
+@HorizonOSDsl
+class PlasmaContext {
+    var theme: String = "breeze-dark"
+    var lookAndFeel: String = "org.kde.breezedark.desktop"
+    var widgets: List<String> = emptyList()
+    
+    fun widgets(vararg names: String) {
+        widgets = names.toList()
+    }
+    
+    fun toConfig(): PlasmaConfig {
+        return PlasmaConfig(
+            theme = theme,
+            lookAndFeel = lookAndFeel,
+            widgets = widgets
+        )
+    }
+}
+
 // ===== Data Classes =====
 
 @Serializable
@@ -196,7 +272,8 @@ data class CompiledConfig(
     val packages: List<Package>,
     val services: List<Service>,
     val users: List<User>,
-    val repositories: List<Repository>
+    val repositories: List<Repository>,
+    val desktop: DesktopConfig? = null
 )
 
 @Serializable
@@ -263,6 +340,53 @@ data class OstreeRepository(
     override val priority: Int = 50,
     val branches: List<String> = emptyList()
 ) : Repository()
+
+// ===== Desktop Environment Classes =====
+
+@Serializable
+enum class DesktopEnvironment {
+    PLASMA,
+    HYPRLAND,
+    GNOME,
+    XFCE,
+    GRAPH
+}
+
+@Serializable
+enum class PersonalityMode {
+    KDE,
+    GNOME,
+    MACOS,
+    WINDOWS11,
+    I3,
+    CUSTOM
+}
+
+@Serializable
+data class DesktopConfig(
+    val environment: DesktopEnvironment,
+    val autoLogin: Boolean = false,
+    val autoLoginUser: String? = null,
+    val hyprlandConfig: HyprlandConfig? = null,
+    val plasmaConfig: PlasmaConfig? = null
+)
+
+@Serializable
+data class HyprlandConfig(
+    val theme: String,
+    val animations: Boolean,
+    val gaps: Int,
+    val borderSize: Int,
+    val kdeIntegration: Boolean,
+    val personalityMode: PersonalityMode
+)
+
+@Serializable
+data class PlasmaConfig(
+    val theme: String,
+    val lookAndFeel: String,
+    val widgets: List<String>
+)
 
 // ===== DSL Entry Point =====
 

@@ -1,0 +1,318 @@
+/* HorizonOS Waybar Windows 11 Style */
+
+/* Global Settings */
+* {
+    font-family: "Segoe UI", "Segoe UI Variable", sans-serif;
+    font-size: 12px;
+    min-height: 0;
+}
+
+/* Main Bar - Windows 11 Taskbar Style */
+window#waybar {
+    background: rgba(32, 32, 32, 0.85);
+    backdrop-filter: blur(20px);
+    color: #ffffff;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    transition: all 0.2s ease;
+}
+
+window#waybar.hidden {
+    opacity: 0;
+    margin-bottom: -48px;
+}
+
+/* Start Button */
+#custom-start {
+    padding: 0 16px;
+    margin: 6px 4px 6px 8px;
+    background: transparent;
+    color: #ffffff;
+    font-size: 20px;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+#custom-start:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+#custom-start:active {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* Search Box */
+#custom-search {
+    padding: 0 16px;
+    margin: 8px 4px;
+    min-width: 240px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    font-size: 13px;
+    transition: all 0.2s ease;
+}
+
+#custom-search:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* Task Bar */
+#taskbar {
+    margin: 0 8px;
+    padding: 0;
+}
+
+#taskbar button {
+    margin: 6px 2px;
+    padding: 0 8px;
+    min-width: 48px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    transition: all 0.15s ease;
+}
+
+#taskbar button:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+#taskbar button.active {
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 -3px 0 #0078d4;
+}
+
+#taskbar button.minimized {
+    opacity: 0.5;
+}
+
+/* System Tray */
+#tray {
+    margin: 0 4px;
+    padding: 0 8px;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+    animation: tray-attention 1s ease-in-out infinite;
+}
+
+@keyframes tray-attention {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* Right Side Modules */
+#custom-widgets,
+#network,
+#pulseaudio,
+#battery,
+#custom-notification,
+#clock,
+#custom-quick-settings {
+    padding: 0 10px;
+    margin: 8px 2px;
+    color: #ffffff;
+    background: transparent;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+#custom-widgets:hover,
+#network:hover,
+#pulseaudio:hover,
+#battery:hover,
+#custom-notification:hover,
+#clock:hover,
+#custom-quick-settings:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Widgets Button */
+#custom-widgets {
+    font-size: 18px;
+    padding: 0 12px;
+    margin-left: 8px;
+}
+
+/* Network Module */
+#network {
+    font-size: 16px;
+}
+
+#network.disconnected {
+    color: #ff6b6b;
+}
+
+#network.wifi {
+    color: #ffffff;
+}
+
+/* Audio Module */
+#pulseaudio {
+    font-size: 16px;
+}
+
+#pulseaudio.muted {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Battery Module */
+#battery {
+    font-size: 16px;
+}
+
+#battery.charging {
+    color: #4fc3f7;
+}
+
+#battery.warning:not(.charging) {
+    color: #ffb74d;
+    animation: battery-warning 2s ease-in-out infinite;
+}
+
+#battery.critical:not(.charging) {
+    color: #ff5252;
+    animation: battery-critical 1s ease-in-out infinite;
+}
+
+@keyframes battery-warning {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+@keyframes battery-critical {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+/* Notification Center */
+#custom-notification {
+    font-size: 16px;
+}
+
+#custom-notification.notification {
+    color: #0078d4;
+    animation: notification-pulse 2s ease-in-out infinite;
+}
+
+@keyframes notification-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Clock Module */
+#clock {
+    font-weight: 400;
+    margin-right: 4px;
+}
+
+/* Quick Settings */
+#custom-quick-settings {
+    font-size: 16px;
+    padding: 0 12px;
+    margin-right: 8px;
+}
+
+/* Tooltips - Windows 11 Style */
+tooltip {
+    background: rgba(32, 32, 32, 0.95);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 8px 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+tooltip label {
+    color: #ffffff;
+    font-size: 12px;
+}
+
+/* Windows 11 Focus States */
+button:focus {
+    outline: 2px solid #0078d4;
+    outline-offset: -2px;
+}
+
+/* Hover Effects */
+#modules-right > widget > * {
+    position: relative;
+}
+
+#modules-right > widget > *::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #0078d4;
+    transform: scaleX(0);
+    transition: transform 0.2s ease;
+}
+
+#modules-right > widget > *:hover::after {
+    transform: scaleX(1);
+}
+
+/* Special States */
+.modules-right > widget:last-child > * {
+    margin-right: 0;
+}
+
+.modules-left > widget:first-child > * {
+    margin-left: 0;
+}
+
+/* Windows 11 Animations */
+@keyframes slide-up {
+    from {
+        transform: translateY(48px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+window#waybar {
+    animation: slide-up 0.3s ease-out;
+}
+
+/* Centered Clock Alternative Layout */
+#modules-center {
+    margin: 0 auto;
+}
+
+/* Scrollbar Style */
+scrollbar {
+    background-color: transparent;
+}
+
+scrollbar slider {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    min-height: 20px;
+}
+
+scrollbar slider:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Windows 11 Taskbar Segments */
+#waybar > .horizontal {
+    padding: 0;
+}
+
+#waybar > .horizontal > box {
+    margin: 0;
+    padding: 0;
+}

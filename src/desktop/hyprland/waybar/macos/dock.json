@@ -1,0 +1,127 @@
+{
+    "name": "dock",
+    "layer": "top",
+    "position": "bottom",
+    "height": 68,
+    "spacing": 0,
+    "margin-top": 0,
+    "margin-bottom": 8,
+    "margin-left": 0,
+    "margin-right": 0,
+    "exclusive": false,
+    
+    "modules-center": [
+        "custom/finder",
+        "custom/safari",
+        "custom/mail",
+        "custom/calendar",
+        "custom/notes",
+        "custom/music",
+        "custom/messages",
+        "custom/facetime",
+        "wlr/taskbar",
+        "custom/separator",
+        "custom/terminal",
+        "custom/vscode",
+        "custom/settings",
+        "custom/trash"
+    ],
+    
+    "custom/finder": {
+        "format": "󰀶",
+        "on-click": "thunar",
+        "tooltip-format": "Finder"
+    },
+    
+    "custom/safari": {
+        "format": "󰎗",
+        "on-click": "firefox",
+        "tooltip-format": "Safari"
+    },
+    
+    "custom/mail": {
+        "format": "󰇮",
+        "on-click": "thunderbird",
+        "tooltip-format": "Mail"
+    },
+    
+    "custom/calendar": {
+        "format": "󰃭",
+        "on-click": "gnome-calendar",
+        "tooltip-format": "Calendar"
+    },
+    
+    "custom/notes": {
+        "format": "󰎞",
+        "on-click": "gnote",
+        "tooltip-format": "Notes"
+    },
+    
+    "custom/music": {
+        "format": "󰎆",
+        "on-click": "spotify",
+        "tooltip-format": "Music"
+    },
+    
+    "custom/messages": {
+        "format": "󰍩",
+        "on-click": "discord",
+        "tooltip-format": "Messages"
+    },
+    
+    "custom/facetime": {
+        "format": "󰕧",
+        "on-click": "~/.config/hypr/scripts/video-call.sh",
+        "tooltip-format": "FaceTime"
+    },
+    
+    "wlr/taskbar": {
+        "format": "{icon}",
+        "icon-size": 48,
+        "icon-theme": "BigSur",
+        "spacing": 8,
+        "tooltip-format": "{title}",
+        "on-click": "activate",
+        "on-click-middle": "close",
+        "on-click-right": "minimize",
+        "ignore-list": ["waybar"],
+        "app_ids-mapping": {
+            "firefox": "firefox",
+            "Alacritty": "terminal",
+            "thunar": "finder",
+            "code": "vscode"
+        }
+    },
+    
+    "custom/separator": {
+        "format": "|",
+        "tooltip": false
+    },
+    
+    "custom/terminal": {
+        "format": "󰆍",
+        "on-click": "alacritty",
+        "tooltip-format": "Terminal"
+    },
+    
+    "custom/vscode": {
+        "format": "󰨞",
+        "on-click": "code",
+        "tooltip-format": "Visual Studio Code"
+    },
+    
+    "custom/settings": {
+        "format": "󰒓",
+        "on-click": "gnome-control-center",
+        "tooltip-format": "System Preferences"
+    },
+    
+    "custom/trash": {
+        "format": "{}",
+        "exec": "~/.config/hypr/scripts/trash-status.sh",
+        "interval": 5,
+        "on-click": "~/.config/hypr/scripts/open-trash.sh",
+        "on-click-right": "~/.config/hypr/scripts/empty-trash.sh",
+        "return-type": "json"
+    }
+}

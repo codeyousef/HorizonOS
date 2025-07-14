@@ -1,0 +1,17 @@
+[Unit]
+Description=HorizonOS Waybar Status Bar (KDE Style)
+Documentation=https://github.com/Alexays/Waybar/wiki
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/waybar -c %h/.config/waybar/config-kde.json -s %h/.config/waybar/style-kde.css
+Restart=on-failure
+RestartSec=5
+
+# Kill only the waybar process
+KillMode=process
+
+[Install]
+WantedBy=hyprland-session.target

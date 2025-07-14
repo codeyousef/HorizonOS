@@ -1,0 +1,339 @@
+/* HorizonOS Wofi macOS Spotlight Style */
+
+/* Window */
+window {
+    margin: 0px;
+    background: transparent;
+    font-family: "SF Pro Display", "SF Pro Text", -apple-system, sans-serif;
+    font-size: 14px;
+}
+
+/* Main Container */
+#outer-box {
+    background: rgba(30, 30, 30, 0.98);
+    backdrop-filter: blur(50px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.5),
+                0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+    padding: 0;
+    margin: 0;
+}
+
+/* Search Input */
+#input {
+    background: rgba(50, 50, 50, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 12px 16px 12px 44px;
+    margin: 16px;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 400;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+#input:focus {
+    background: rgba(60, 60, 60, 0.6);
+    border-color: rgba(0, 122, 255, 0.5);
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+}
+
+/* Search Icon */
+#input::before {
+    content: "󰍉";
+    position: absolute;
+    left: 28px;
+    top: 28px;
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: "Font Awesome 6 Free";
+}
+
+/* Placeholder text */
+#input:placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Scrollbar */
+#scroll {
+    background: transparent;
+    border: none;
+    margin: 0;
+}
+
+#scroll scrollbar {
+    background: transparent;
+    border: none;
+    width: 6px;
+}
+
+#scroll scrollbar:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+#scroll scrollbar slider {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    min-height: 30px;
+}
+
+#scroll scrollbar slider:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Results Container */
+#inner-box {
+    background: transparent;
+    padding: 0 16px 16px 16px;
+    margin: 0;
+}
+
+/* Entry Items */
+#entry {
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 2px 0;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+#entry:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+#entry:selected {
+    background: rgba(0, 122, 255, 0.3);
+    outline: none;
+}
+
+#entry:selected #text {
+    color: #ffffff;
+}
+
+#entry:selected #desc {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* Entry Layout */
+#box {
+    padding: 0;
+    margin: 0;
+}
+
+/* Icon */
+#img {
+    margin-right: 12px;
+    padding: 4px;
+    background: transparent;
+}
+
+/* Main Text */
+#text {
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 400;
+    font-size: 14px;
+    margin: 0;
+}
+
+/* Description Text */
+#desc {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    margin: 0;
+    margin-top: 2px;
+}
+
+/* Unselected Entry Text */
+#unselected #text {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+#unselected #desc {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Category Headers */
+.category {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 12px 4px 12px;
+    margin-top: 8px;
+}
+
+/* Quick Actions Section */
+#quick-actions {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin-top: 8px;
+    padding-top: 8px;
+}
+
+/* Command Palette Style */
+#command {
+    background: rgba(40, 40, 40, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin: 4px 0;
+    color: rgba(255, 255, 255, 0.8);
+    font-family: "SF Mono", monospace;
+    font-size: 12px;
+}
+
+/* Keyboard Shortcuts */
+.shortcut {
+    background: rgba(60, 60, 60, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin-left: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    font-weight: 500;
+    float: right;
+}
+
+/* No Results */
+#empty {
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    padding: 40px;
+    font-size: 14px;
+}
+
+/* Loading State */
+.loading {
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    padding: 20px;
+}
+
+.loading::after {
+    content: "...";
+    animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes dots {
+    0%, 20% {
+        content: "";
+    }
+    40% {
+        content: ".";
+    }
+    60% {
+        content: "..";
+    }
+    80%, 100% {
+        content: "...";
+    }
+}
+
+/* Spotlight Suggestions */
+.suggestion {
+    background: rgba(255, 204, 0, 0.1);
+    border-left: 3px solid #ffcc00;
+    padding-left: 9px;
+}
+
+/* Web Results */
+.web-result {
+    position: relative;
+}
+
+.web-result::after {
+    content: "🌐";
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0.5;
+}
+
+/* Calculator Results */
+.calc-result {
+    background: rgba(52, 199, 89, 0.1);
+    border-left: 3px solid #34c759;
+    font-family: "SF Mono", monospace;
+}
+
+/* Definition Results */
+.definition {
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* File Results */
+.file-result #desc {
+    font-size: 11px;
+    opacity: 0.6;
+}
+
+/* Quick Look Preview */
+.preview {
+    background: rgba(40, 40, 40, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 12px;
+    margin: 8px 0;
+    max-height: 200px;
+    overflow: hidden;
+}
+
+/* Action Buttons */
+.action-button {
+    background: rgba(0, 122, 255, 0.2);
+    border: 1px solid rgba(0, 122, 255, 0.3);
+    border-radius: 6px;
+    padding: 4px 12px;
+    margin: 0 4px;
+    color: #007aff;
+    font-size: 12px;
+    transition: all 0.2s ease;
+}
+
+.action-button:hover {
+    background: rgba(0, 122, 255, 0.3);
+    border-color: rgba(0, 122, 255, 0.5);
+}
+
+/* Siri Suggestions */
+.siri-suggestion {
+    background: linear-gradient(135deg, 
+        rgba(255, 59, 48, 0.1),
+        rgba(255, 149, 0, 0.1),
+        rgba(52, 199, 89, 0.1),
+        rgba(0, 122, 255, 0.1),
+        rgba(88, 86, 214, 0.1));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: siri-glow 3s ease-in-out infinite;
+}
+
+@keyframes siri-glow {
+    0%, 100% {
+        opacity: 0.8;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+/* Privacy Indicator */
+.private-result {
+    position: relative;
+}
+
+.private-result::before {
+    content: "🔒";
+    position: absolute;
+    left: -20px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    opacity: 0.5;
+}

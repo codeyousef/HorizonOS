@@ -1,0 +1,299 @@
+/* HorizonOS Waybar KDE Breeze Style */
+
+/* Global Settings */
+* {
+    font-family: "Noto Sans", "Font Awesome 6 Free", "Font Awesome 6 Brands", sans-serif;
+    font-size: 13px;
+    min-height: 0;
+}
+
+/* Main Bar - KDE Panel Style */
+window#waybar {
+    background: rgba(49, 54, 59, 0.95); /* Breeze dark background */
+    color: #eff0f1; /* Breeze text color */
+    border-top: 1px solid rgba(61, 174, 233, 0.3); /* Subtle blue border */
+    transition: all 0.3s ease;
+}
+
+window#waybar.hidden {
+    opacity: 0.2;
+}
+
+/* Workspaces - KDE Style */
+#workspaces {
+    margin: 0 4px;
+    padding: 0;
+    background: transparent;
+}
+
+#workspaces button {
+    padding: 0 8px;
+    margin: 2px 2px;
+    min-width: 36px;
+    background: rgba(255, 255, 255, 0.03);
+    color: #eff0f1;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+#workspaces button:hover {
+    background: rgba(61, 174, 233, 0.2);
+    border-color: rgba(61, 174, 233, 0.4);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+#workspaces button.active {
+    background: rgba(61, 174, 233, 0.3);
+    border-color: #3daee9;
+    color: #ffffff;
+    box-shadow: 0 2px 6px rgba(61, 174, 233, 0.3);
+}
+
+#workspaces button.urgent {
+    background: rgba(237, 21, 21, 0.3);
+    border-color: #ed1515;
+    color: #ffffff;
+    animation: urgent-workspace 1s ease-in-out infinite;
+}
+
+@keyframes urgent-workspace {
+    0%, 100% { background: rgba(237, 21, 21, 0.3); }
+    50% { background: rgba(237, 21, 21, 0.5); }
+}
+
+/* Window Title */
+#window {
+    margin: 0 8px;
+    padding: 0 12px;
+    color: #eff0f1;
+    font-weight: 500;
+}
+
+window#waybar.empty #window {
+    background: transparent;
+}
+
+/* Task Bar - KDE Style */
+#taskbar {
+    margin: 0;
+    padding: 0;
+}
+
+#taskbar button {
+    margin: 2px 2px;
+    padding: 0 8px;
+    min-width: 150px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+#taskbar button:hover {
+    background: rgba(61, 174, 233, 0.2);
+    border-color: rgba(61, 174, 233, 0.4);
+}
+
+#taskbar button.active {
+    background: rgba(61, 174, 233, 0.25);
+    border-color: #3daee9;
+    box-shadow: 0 2px 4px rgba(61, 174, 233, 0.2);
+}
+
+#taskbar button.minimized {
+    opacity: 0.6;
+}
+
+/* System Tray */
+#tray {
+    margin: 0 4px;
+    padding: 0 4px;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+    background-color: rgba(237, 21, 21, 0.2);
+    border-radius: 4px;
+}
+
+/* Modules Common Style */
+#custom-launcher,
+#network,
+#pulseaudio,
+#battery,
+#clock,
+#custom-power {
+    padding: 0 12px;
+    margin: 2px 2px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+#custom-launcher:hover,
+#network:hover,
+#pulseaudio:hover,
+#battery:hover,
+#clock:hover,
+#custom-power:hover {
+    background: rgba(61, 174, 233, 0.15);
+    border-color: rgba(61, 174, 233, 0.3);
+}
+
+/* Application Launcher - KDE Style */
+#custom-launcher {
+    font-size: 20px;
+    color: #3daee9;
+    background: rgba(61, 174, 233, 0.1);
+    margin-left: 8px;
+    padding: 0 16px;
+}
+
+#custom-launcher:hover {
+    background: rgba(61, 174, 233, 0.25);
+    box-shadow: 0 2px 6px rgba(61, 174, 233, 0.3);
+}
+
+/* Network Module */
+#network {
+    color: #eff0f1;
+}
+
+#network.disconnected {
+    color: #ed1515;
+    background: rgba(237, 21, 21, 0.1);
+}
+
+#network.wifi {
+    color: #3daee9;
+}
+
+/* Audio Module */
+#pulseaudio {
+    color: #f67400;
+}
+
+#pulseaudio.muted {
+    color: #616569;
+    background: rgba(97, 101, 105, 0.2);
+}
+
+/* Battery Module */
+#battery {
+    color: #27ae60;
+}
+
+#battery.charging {
+    color: #3daee9;
+    background: rgba(61, 174, 233, 0.1);
+}
+
+#battery.warning:not(.charging) {
+    color: #f67400;
+    background: rgba(246, 116, 0, 0.1);
+    animation: battery-warning 2s ease-in-out infinite;
+}
+
+#battery.critical:not(.charging) {
+    color: #ed1515;
+    background: rgba(237, 21, 21, 0.2);
+    animation: battery-critical 1s ease-in-out infinite;
+}
+
+@keyframes battery-warning {
+    0%, 100% { background: rgba(246, 116, 0, 0.1); }
+    50% { background: rgba(246, 116, 0, 0.2); }
+}
+
+@keyframes battery-critical {
+    0%, 100% { background: rgba(237, 21, 21, 0.2); }
+    50% { background: rgba(237, 21, 21, 0.3); }
+}
+
+/* Clock Module */
+#clock {
+    color: #eff0f1;
+    font-weight: 500;
+}
+
+/* Power Button */
+#custom-power {
+    color: #ed1515;
+    margin-right: 8px;
+    padding: 0 14px;
+    font-size: 16px;
+}
+
+#custom-power:hover {
+    background: rgba(237, 21, 21, 0.2);
+    border-color: rgba(237, 21, 21, 0.4);
+}
+
+/* Separator */
+#custom-separator {
+    color: #616569;
+    padding: 0 4px;
+    font-size: 16px;
+    opacity: 0.5;
+}
+
+/* Tooltips - KDE Style */
+tooltip {
+    background: rgba(49, 54, 59, 0.98);
+    border: 1px solid #3daee9;
+    border-radius: 4px;
+    padding: 8px 12px;
+}
+
+tooltip label {
+    color: #eff0f1;
+    font-size: 12px;
+}
+
+/* Scrollbar Style */
+scrollbar {
+    background-color: transparent;
+}
+
+scrollbar slider {
+    background-color: rgba(97, 101, 105, 0.3);
+    border-radius: 4px;
+    min-height: 20px;
+}
+
+scrollbar slider:hover {
+    background-color: rgba(97, 101, 105, 0.5);
+}
+
+/* Menu Style */
+menu {
+    background: rgba(49, 54, 59, 0.98);
+    border: 1px solid rgba(61, 174, 233, 0.3);
+    border-radius: 4px;
+    padding: 4px;
+}
+
+menuitem {
+    padding: 6px 12px;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+}
+
+menuitem:hover {
+    background: rgba(61, 174, 233, 0.2);
+}
+
+/* Special States */
+.modules-right > widget:last-child > * {
+    margin-right: 0;
+}
+
+.modules-left > widget:first-child > * {
+    margin-left: 0;
+}

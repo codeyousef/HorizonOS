@@ -1,0 +1,431 @@
+/* HorizonOS GTK3 Theme - macOS Style */
+
+/* Color Definitions */
+@define-color bg_color #1e1e1e;
+@define-color fg_color #ffffff;
+@define-color base_color #282828;
+@define-color text_color #ffffff;
+@define-color selected_bg_color #0078d4;
+@define-color selected_fg_color #ffffff;
+@define-color tooltip_bg_color #323232;
+@define-color tooltip_fg_color #ffffff;
+
+/* macOS System Colors */
+@define-color macos_blue #007aff;
+@define-color macos_green #34c759;
+@define-color macos_indigo #5856d6;
+@define-color macos_orange #ff9500;
+@define-color macos_pink #ff2d55;
+@define-color macos_purple #af52de;
+@define-color macos_red #ff3b30;
+@define-color macos_teal #5ac8fa;
+@define-color macos_yellow #ffcc00;
+
+/* Window Background */
+window {
+    background-color: @bg_color;
+    color: @fg_color;
+}
+
+/* Decorations */
+decoration {
+    border-radius: 10px;
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.5);
+    margin: 10px;
+}
+
+/* Header Bar */
+headerbar {
+    background-color: rgba(40, 40, 40, 0.85);
+    color: @fg_color;
+    border: none;
+    border-radius: 10px 10px 0 0;
+    padding: 0 8px;
+    min-height: 28px;
+    backdrop-filter: blur(50px);
+}
+
+headerbar .title {
+    font-weight: 500;
+    font-size: 13px;
+}
+
+/* Traffic Light Buttons */
+headerbar button {
+    min-width: 12px;
+    min-height: 12px;
+    padding: 0;
+    margin: 0 4px;
+    border: none;
+    border-radius: 50%;
+    background: #606060;
+    color: transparent;
+}
+
+headerbar button.close {
+    background-color: #ff5f57;
+}
+
+headerbar button.close:hover {
+    background-color: #ff3b30;
+}
+
+headerbar button.minimize {
+    background-color: #ffbd2e;
+}
+
+headerbar button.minimize:hover {
+    background-color: #ffcc00;
+}
+
+headerbar button.maximize {
+    background-color: #28ca42;
+}
+
+headerbar button.maximize:hover {
+    background-color: #34c759;
+}
+
+/* Buttons */
+button {
+    background: linear-gradient(to bottom, #4a4a4a, #3a3a3a);
+    color: @fg_color;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-weight: 400;
+    font-size: 13px;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+button:hover {
+    background: linear-gradient(to bottom, #5a5a5a, #4a4a4a);
+}
+
+button:active {
+    background: linear-gradient(to bottom, #3a3a3a, #2a2a2a);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+button:disabled {
+    opacity: 0.4;
+}
+
+button.suggested-action {
+    background: linear-gradient(to bottom, #1080ff, #0070f0);
+    border-color: #0060d0;
+    color: #ffffff;
+}
+
+button.suggested-action:hover {
+    background: linear-gradient(to bottom, #2090ff, #1080ff);
+}
+
+/* Entry */
+entry {
+    background-color: rgba(60, 60, 60, 0.5);
+    color: @text_color;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 4px 8px;
+    caret-color: @macos_blue;
+    transition: all 0.2s ease;
+}
+
+entry:focus {
+    background-color: rgba(60, 60, 60, 0.6);
+    border-color: @macos_blue;
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
+}
+
+/* Lists */
+list {
+    background-color: @base_color;
+    color: @text_color;
+    border-radius: 6px;
+}
+
+list row {
+    padding: 8px 12px;
+    border-radius: 6px;
+}
+
+list row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+list row:selected {
+    background-color: @macos_blue;
+    color: @selected_fg_color;
+}
+
+/* Menus */
+menu,
+.menu,
+.context-menu {
+    background-color: rgba(45, 45, 45, 0.95);
+    color: @fg_color;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 4px 0;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(50px);
+}
+
+menuitem {
+    padding: 4px 20px;
+}
+
+menuitem:hover {
+    background-color: @macos_blue;
+    color: #ffffff;
+}
+
+/* Scrollbar */
+scrollbar {
+    background-color: transparent;
+    border: none;
+    width: 12px;
+}
+
+scrollbar slider {
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 10px;
+    min-width: 10px;
+    min-height: 30px;
+    margin: 1px;
+}
+
+scrollbar slider:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+}
+
+scrollbar slider:active {
+    background-color: rgba(255, 255, 255, 0.5);
+}
+
+/* Switch */
+switch {
+    background-color: rgba(120, 120, 120, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    min-width: 48px;
+    min-height: 28px;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+switch:checked {
+    background-color: @macos_green;
+    border-color: @macos_green;
+}
+
+switch slider {
+    background-color: #ffffff;
+    border-radius: 50%;
+    min-width: 26px;
+    min-height: 26px;
+    margin: 1px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Checkboxes and Radio Buttons */
+checkbutton check,
+radiobutton radio {
+    min-width: 16px;
+    min-height: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    background-color: rgba(60, 60, 60, 0.5);
+}
+
+radiobutton radio {
+    border-radius: 50%;
+}
+
+checkbutton check:checked {
+    background-color: @macos_blue;
+    border-color: @macos_blue;
+}
+
+checkbutton check:checked::before {
+    content: "✓";
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+radiobutton radio:checked {
+    background-color: @macos_blue;
+    border-color: @macos_blue;
+}
+
+radiobutton radio:checked::before {
+    content: "●";
+    color: #ffffff;
+    font-size: 8px;
+}
+
+/* Progress Bar */
+progressbar {
+    background-color: rgba(60, 60, 60, 0.3);
+    border-radius: 4px;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+progressbar progress {
+    background-color: @macos_blue;
+    border-radius: 4px;
+}
+
+/* Tooltips */
+tooltip {
+    background-color: rgba(50, 50, 50, 0.95);
+    color: @tooltip_fg_color;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 6px 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(50px);
+}
+
+/* Notebooks */
+notebook {
+    background-color: transparent;
+}
+
+notebook header {
+    background-color: rgba(40, 40, 40, 0.5);
+    border: none;
+    padding: 0;
+}
+
+notebook header.top {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+notebook tab {
+    background-color: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    padding: 8px 16px;
+    border: none;
+    font-weight: 400;
+}
+
+notebook tab:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+notebook tab:checked {
+    background-color: @base_color;
+    color: @fg_color;
+    box-shadow: 0 -3px 0 @macos_blue inset;
+}
+
+/* Toolbar */
+toolbar {
+    background-color: rgba(40, 40, 40, 0.85);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 4px;
+    backdrop-filter: blur(50px);
+}
+
+/* Sidebar */
+.sidebar {
+    background-color: rgba(30, 30, 30, 0.85);
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(50px);
+}
+
+/* Paned */
+paned separator {
+    background-color: rgba(255, 255, 255, 0.1);
+    min-width: 1px;
+    min-height: 1px;
+}
+
+/* Scale */
+scale {
+    background-color: rgba(60, 60, 60, 0.3);
+    border-radius: 10px;
+    min-height: 6px;
+}
+
+scale highlight {
+    background-color: @macos_blue;
+    border-radius: 10px;
+}
+
+scale slider {
+    background-color: #ffffff;
+    border-radius: 50%;
+    min-width: 18px;
+    min-height: 18px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Spinbutton */
+spinbutton {
+    background-color: rgba(60, 60, 60, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+}
+
+spinbutton button {
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+spinbutton button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Calendar */
+calendar {
+    background-color: @base_color;
+    color: @text_color;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 8px;
+}
+
+calendar:selected {
+    background-color: @macos_blue;
+    color: @selected_fg_color;
+    border-radius: 6px;
+}
+
+/* Infobar */
+infobar {
+    background-color: rgba(50, 50, 50, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 8px;
+    backdrop-filter: blur(50px);
+}
+
+/* macOS Specific Effects */
+/* Vibrancy effect for semi-transparent elements */
+.vibrancy {
+    backdrop-filter: blur(50px);
+}
+
+/* Focus ring */
+*:focus {
+    outline: 3px solid rgba(0, 122, 255, 0.5);
+    outline-offset: 2px;
+}
+
+/* Rounded corners for various elements */
+.rounded-corners {
+    border-radius: 6px;
+}
+
+/* Smooth transitions */
+* {
+    transition-property: background-color, border-color, box-shadow;
+    transition-duration: 0.2s;
+    transition-timing-function: ease-out;
+}

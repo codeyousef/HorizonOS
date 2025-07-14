@@ -1,0 +1,178 @@
+/* HorizonOS Waybar macOS Menu Bar Style */
+
+/* Global Settings */
+* {
+    font-family: "SF Pro Display", "SF Pro Text", -apple-system, sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    min-height: 0;
+}
+
+/* Menu Bar */
+window#waybar.menubar {
+    background: rgba(30, 30, 30, 0.85);
+    backdrop-filter: blur(50px);
+    color: #ffffff;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Apple Logo */
+#custom-apple {
+    padding: 0 14px;
+    font-size: 16px;
+    color: #ffffff;
+}
+
+#custom-apple:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* App Name */
+#custom-app-name {
+    padding: 0 12px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+/* Menu Items */
+#custom-menu-file,
+#custom-menu-edit,
+#custom-menu-view,
+#custom-menu-window,
+#custom-menu-help {
+    padding: 0 10px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+#custom-menu-file:hover,
+#custom-menu-edit:hover,
+#custom-menu-view:hover,
+#custom-menu-window:hover,
+#custom-menu-help:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Right Side Icons */
+#custom-spotlight,
+#custom-control-center,
+#network,
+#bluetooth,
+#pulseaudio,
+#battery,
+#custom-notification-center {
+    padding: 0 8px;
+    font-size: 16px;
+    color: #ffffff;
+}
+
+#custom-spotlight:hover,
+#custom-control-center:hover,
+#network:hover,
+#bluetooth:hover,
+#pulseaudio:hover,
+#battery:hover,
+#custom-notification-center:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+/* System Tray */
+#tray {
+    padding: 0 8px;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+}
+
+/* Clock */
+#clock {
+    padding: 0 12px;
+    font-weight: 400;
+    color: #ffffff;
+}
+
+#clock:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+/* Battery */
+#battery.charging {
+    color: #52d058;
+}
+
+#battery.warning:not(.charging) {
+    color: #f4a100;
+}
+
+#battery.critical:not(.charging) {
+    color: #ff3b30;
+}
+
+/* Network */
+#network.disconnected {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Bluetooth */
+#bluetooth.disabled {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Notification Center */
+#custom-notification-center {
+    font-size: 14px;
+    min-width: 20px;
+}
+
+#custom-notification-center.notification {
+    background: #ff3b30;
+    color: #ffffff;
+    border-radius: 10px;
+    padding: 0 6px;
+    margin: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* Tooltips */
+tooltip {
+    background: rgba(50, 50, 50, 0.95);
+    backdrop-filter: blur(50px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 6px 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+tooltip label {
+    color: #ffffff;
+    font-size: 13px;
+}
+
+/* Hover Effects */
+#modules-left > widget > *,
+#modules-right > widget > * {
+    transition: all 0.2s ease;
+    border-radius: 4px;
+}
+
+/* Focus States */
+button:focus {
+    outline: none;
+}
+
+/* Menu Bar Specific Layout */
+.modules-left {
+    margin-left: 0;
+}
+
+.modules-right {
+    margin-right: 0;
+}

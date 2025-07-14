@@ -1,0 +1,162 @@
+{
+    "name": "menubar",
+    "layer": "top",
+    "position": "top",
+    "height": 28,
+    "spacing": 0,
+    "margin-top": 0,
+    "margin-bottom": 0,
+    "margin-left": 0,
+    "margin-right": 0,
+    "exclusive": true,
+    
+    "modules-left": [
+        "custom/apple",
+        "custom/app-name",
+        "custom/menu-file",
+        "custom/menu-edit",
+        "custom/menu-view",
+        "custom/menu-window",
+        "custom/menu-help"
+    ],
+    
+    "modules-center": [
+    ],
+    
+    "modules-right": [
+        "custom/spotlight",
+        "custom/control-center",
+        "tray",
+        "network",
+        "bluetooth",
+        "pulseaudio",
+        "battery",
+        "clock",
+        "custom/notification-center"
+    ],
+    
+    "custom/apple": {
+        "format": "",
+        "on-click": "~/.config/hypr/scripts/apple-menu.sh",
+        "tooltip": false
+    },
+    
+    "custom/app-name": {
+        "format": "{}",
+        "exec": "~/.config/hypr/scripts/active-app-name.sh",
+        "interval": 1,
+        "tooltip": false
+    },
+    
+    "custom/menu-file": {
+        "format": "File",
+        "on-click": "~/.config/hypr/scripts/menu-action.sh file",
+        "tooltip": false
+    },
+    
+    "custom/menu-edit": {
+        "format": "Edit",
+        "on-click": "~/.config/hypr/scripts/menu-action.sh edit",
+        "tooltip": false
+    },
+    
+    "custom/menu-view": {
+        "format": "View",
+        "on-click": "~/.config/hypr/scripts/menu-action.sh view",
+        "tooltip": false
+    },
+    
+    "custom/menu-window": {
+        "format": "Window",
+        "on-click": "~/.config/hypr/scripts/menu-action.sh window",
+        "tooltip": false
+    },
+    
+    "custom/menu-help": {
+        "format": "Help",
+        "on-click": "~/.config/hypr/scripts/menu-action.sh help",
+        "tooltip": false
+    },
+    
+    "custom/spotlight": {
+        "format": "󰍉",
+        "on-click": "wofi --show drun --style ~/.config/wofi/macos/style.css --conf ~/.config/wofi/macos/config",
+        "tooltip": false
+    },
+    
+    "custom/control-center": {
+        "format": "󰐱",
+        "on-click": "~/.config/hypr/scripts/control-center.sh",
+        "tooltip": false
+    },
+    
+    "tray": {
+        "icon-size": 18,
+        "spacing": 8,
+        "show-passive-items": true
+    },
+    
+    "network": {
+        "format-wifi": "󰤨",
+        "format-ethernet": "󰈀",
+        "format-linked": "󰈀",
+        "format-disconnected": "󰤭",
+        "tooltip-format": "{ifname}: {ipaddr}\n{essid} ({signalStrength}%)",
+        "on-click": "~/.config/hypr/scripts/wifi-menu.sh"
+    },
+    
+    "bluetooth": {
+        "format": "󰂯",
+        "format-disabled": "󰂲",
+        "format-connected": "󰂱",
+        "tooltip-format": "{controller_alias}\n{num_connections} connected",
+        "on-click": "~/.config/hypr/scripts/bluetooth-menu.sh"
+    },
+    
+    "pulseaudio": {
+        "format": "{icon}",
+        "format-bluetooth": "{icon}",
+        "format-muted": "󰝟",
+        "format-icons": {
+            "headphone": "󰋋",
+            "hands-free": "󰋎",
+            "headset": "󰋎",
+            "phone": "",
+            "portable": "",
+            "car": "",
+            "default": ["󰕿", "󰖀", "󰕾"]
+        },
+        "tooltip-format": "{desc}: {volume}%",
+        "on-click": "pamixer -t",
+        "on-click-right": "pavucontrol",
+        "on-scroll-up": "pamixer -i 5",
+        "on-scroll-down": "pamixer -d 5"
+    },
+    
+    "battery": {
+        "states": {
+            "warning": 30,
+            "critical": 15
+        },
+        "format": "{icon}",
+        "format-charging": "󰂄",
+        "format-plugged": "󰚥",
+        "format-icons": ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"],
+        "tooltip-format": "{capacity}% - {timeTo}",
+        "on-click": "~/.config/hypr/scripts/battery-menu.sh"
+    },
+    
+    "clock": {
+        "format": "{:%a %b %d  %I:%M %p}",
+        "tooltip-format": "<tt>{calendar}</tt>",
+        "on-click": "~/.config/hypr/scripts/calendar.sh"
+    },
+    
+    "custom/notification-center": {
+        "format": "{}",
+        "exec": "~/.config/hypr/scripts/notification-count.sh",
+        "interval": 1,
+        "on-click": "~/.config/hypr/scripts/notification-center.sh",
+        "return-type": "json"
+    }
+}

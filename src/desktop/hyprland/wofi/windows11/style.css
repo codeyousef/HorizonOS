@@ -1,0 +1,321 @@
+/* HorizonOS Wofi Windows 11 Start Menu Style */
+
+/* Window */
+window {
+    margin: 0px;
+    background-color: rgba(36, 36, 36, 0.98);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 14px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    animation: start-menu-open 0.25s ease-out;
+}
+
+@keyframes start-menu-open {
+    from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Input Field - Windows 11 Search Box */
+#input {
+    margin: 16px;
+    padding: 12px 16px 12px 48px;
+    background-color: rgba(255, 255, 255, 0.05);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='%23ffffff'%3E%3Cpath d='M8.5 3a5.5 5.5 0 0 1 4.38 8.82l4.15 4.15a.75.75 0 0 1-1.06 1.06l-4.15-4.15A5.5 5.5 0 1 1 8.5 3zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'/%3E%3C/svg%3E");
+    background-position: 16px center;
+    background-repeat: no-repeat;
+    color: #ffffff;
+    font-size: 14px;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+#input:focus {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: #0078d4;
+    box-shadow: 0 0 0 1px #0078d4;
+}
+
+#input::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Pinned Section Header */
+#outer-box::before {
+    content: "Pinned";
+    display: block;
+    padding: 8px 24px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Outer Box (scrollable area) */
+#outer-box {
+    margin: 0px;
+    padding: 0px 8px 16px 8px;
+    background-color: transparent;
+}
+
+/* Scroll Container */
+#scroll {
+    margin: 0px;
+    padding: 0px;
+    background-color: transparent;
+}
+
+/* Inner Box (contains all entries) */
+#inner-box {
+    margin: 0px;
+    padding: 0px 8px;
+    background-color: transparent;
+    spacing: 2px;
+}
+
+/* Individual Entry - Windows 11 Start Menu Item */
+#entry {
+    margin: 2px 0px;
+    padding: 8px 16px;
+    background-color: transparent;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    outline: none;
+    transition: all 0.15s ease;
+}
+
+#entry:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+#entry:selected {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+#entry:selected * {
+    color: #ffffff;
+}
+
+/* Entry Box (icon + text container) */
+#box {
+    margin: 0px;
+    padding: 0px;
+    orientation: horizontal;
+    spacing: 12px;
+}
+
+/* Icon */
+#icon {
+    margin: 0px;
+    padding: 0px;
+    background-color: transparent;
+}
+
+/* Text */
+#text {
+    margin: 0px;
+    padding: 0px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+    font-weight: 400;
+    background-color: transparent;
+}
+
+#text:selected {
+    color: #ffffff;
+}
+
+/* Mode Switcher (hidden in Windows 11 style) */
+#mode-switcher {
+    display: none;
+}
+
+/* Scrollbar - Windows 11 Style */
+scrollbar {
+    width: 3px;
+    margin: 4px;
+    background-color: transparent;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+#scroll:hover scrollbar {
+    opacity: 1;
+}
+
+scrollbar slider {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 1.5px;
+    min-height: 30px;
+    transition: all 0.2s ease;
+}
+
+scrollbar slider:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+    width: 6px;
+}
+
+scrollbar slider:active {
+    background-color: rgba(255, 255, 255, 0.4);
+}
+
+/* Recommended Section */
+#inner-box > #entry:nth-child(4)::before {
+    content: "Recommended";
+    display: block;
+    position: absolute;
+    top: -20px;
+    left: 24px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Power Button Area */
+#outer-box::after {
+    content: "";
+    display: block;
+    height: 48px;
+    margin-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(to right, 
+        transparent 20%, 
+        rgba(255, 255, 255, 0.05) 20% 40%,
+        transparent 40% 60%,
+        rgba(255, 255, 255, 0.05) 60% 80%,
+        transparent 80%);
+}
+
+/* All Apps Button Styling */
+#entry.all-apps {
+    margin-top: 8px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+#entry.all-apps:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+#entry.all-apps #text {
+    font-weight: 500;
+    color: #0078d4;
+}
+
+/* Category headers */
+#entry.category {
+    padding: 12px 24px 6px 24px;
+    margin-top: 16px;
+    font-weight: 600;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+    text-transform: none;
+    letter-spacing: 0;
+    background-color: transparent;
+    border: none;
+}
+
+#entry.category:first-child {
+    margin-top: 0px;
+}
+
+/* Search Results Header */
+#entry.search-header {
+    padding: 8px 24px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    background-color: transparent;
+}
+
+/* No Results Message */
+#message {
+    margin: 40px;
+    padding: 20px;
+    color: rgba(255, 255, 255, 0.6);
+    text-align: center;
+    font-size: 14px;
+}
+
+/* Loading Spinner */
+#spinner {
+    margin: 40px;
+    color: #0078d4;
+}
+
+/* Windows 11 Specific Classes */
+.pinned #icon {
+    background-color: rgba(255, 255, 255, 0.05);
+    padding: 8px;
+    border-radius: 4px;
+}
+
+.recent {
+    opacity: 0.8;
+}
+
+.tile-small {
+    width: 96px;
+    height: 96px;
+    margin: 4px;
+    padding: 8px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    text-align: center;
+}
+
+.tile-medium {
+    width: 200px;
+    height: 96px;
+    margin: 4px;
+    padding: 8px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.tile-large {
+    width: 200px;
+    height: 200px;
+    margin: 4px;
+    padding: 8px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+/* Focus States */
+#entry:focus {
+    outline: 2px solid #0078d4;
+    outline-offset: -2px;
+}
+
+/* Animation for entries */
+#entry {
+    animation: fade-in 0.2s ease-out;
+    animation-fill-mode: both;
+}
+
+#entry:nth-child(1) { animation-delay: 0.05s; }
+#entry:nth-child(2) { animation-delay: 0.10s; }
+#entry:nth-child(3) { animation-delay: 0.15s; }
+#entry:nth-child(4) { animation-delay: 0.20s; }
+#entry:nth-child(5) { animation-delay: 0.25s; }
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

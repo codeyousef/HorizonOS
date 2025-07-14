@@ -1,0 +1,381 @@
+/* HorizonOS GTK3 Theme - Windows 11 Style */
+
+/* Color Definitions */
+@define-color bg_color #202020;
+@define-color fg_color #ffffff;
+@define-color base_color #2d2d2d;
+@define-color text_color #ffffff;
+@define-color selected_bg_color #0078d4;
+@define-color selected_fg_color #ffffff;
+@define-color tooltip_bg_color #303030;
+@define-color tooltip_fg_color #ffffff;
+
+/* Window Background */
+window {
+    background-color: @bg_color;
+    color: @fg_color;
+}
+
+/* Decorations */
+decoration {
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    margin: 10px;
+}
+
+/* Header Bar */
+headerbar {
+    background-color: @bg_color;
+    color: @fg_color;
+    border: none;
+    border-radius: 8px 8px 0 0;
+    padding: 0 4px;
+    min-height: 32px;
+}
+
+headerbar .title {
+    font-weight: 400;
+    font-size: 12px;
+}
+
+headerbar button {
+    min-width: 46px;
+    min-height: 32px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: @fg_color;
+}
+
+headerbar button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+headerbar button:active {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+headerbar button.close:hover {
+    background-color: #c42b1c;
+}
+
+/* Buttons */
+button {
+    background-color: #3a3a3a;
+    color: @fg_color;
+    border: 1px solid #515151;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-weight: 400;
+    transition: all 0.2s ease;
+}
+
+button:hover {
+    background-color: #4a4a4a;
+    border-color: #616161;
+}
+
+button:active {
+    background-color: #2a2a2a;
+}
+
+button:disabled {
+    opacity: 0.5;
+}
+
+button.suggested-action {
+    background-color: @selected_bg_color;
+    border-color: @selected_bg_color;
+    color: @selected_fg_color;
+}
+
+button.suggested-action:hover {
+    background-color: #106ebe;
+}
+
+/* Entry */
+entry {
+    background-color: @base_color;
+    color: @text_color;
+    border: 1px solid #515151;
+    border-radius: 4px;
+    padding: 6px 8px;
+    caret-color: @selected_bg_color;
+}
+
+entry:focus {
+    border-color: @selected_bg_color;
+    box-shadow: 0 0 0 1px @selected_bg_color;
+}
+
+/* Lists */
+list {
+    background-color: @base_color;
+    color: @text_color;
+}
+
+list row {
+    padding: 6px 12px;
+    border-radius: 4px;
+}
+
+list row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+list row:selected {
+    background-color: @selected_bg_color;
+    color: @selected_fg_color;
+}
+
+/* Menus */
+menu,
+.menu,
+.context-menu {
+    background-color: #2b2b2b;
+    color: @fg_color;
+    border: 1px solid #515151;
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+menuitem {
+    padding: 6px 12px;
+    border-radius: 4px;
+}
+
+menuitem:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Scrollbar */
+scrollbar {
+    background-color: transparent;
+    border: none;
+}
+
+scrollbar slider {
+    background-color: #606060;
+    border-radius: 10px;
+    min-width: 12px;
+    min-height: 12px;
+    margin: 2px;
+}
+
+scrollbar slider:hover {
+    background-color: #8b8b8b;
+}
+
+scrollbar slider:active {
+    background-color: #a0a0a0;
+}
+
+/* Switch */
+switch {
+    background-color: #3a3a3a;
+    border: 2px solid #515151;
+    border-radius: 12px;
+    min-width: 40px;
+    min-height: 24px;
+}
+
+switch:checked {
+    background-color: @selected_bg_color;
+    border-color: @selected_bg_color;
+}
+
+switch slider {
+    background-color: #ffffff;
+    border-radius: 50%;
+    min-width: 20px;
+    min-height: 20px;
+    margin: 2px;
+}
+
+/* Checkboxes and Radio Buttons */
+checkbutton check,
+radiobutton radio {
+    min-width: 16px;
+    min-height: 16px;
+    border: 2px solid #8b8b8b;
+    border-radius: 4px;
+    background-color: transparent;
+}
+
+radiobutton radio {
+    border-radius: 50%;
+}
+
+checkbutton check:checked,
+radiobutton radio:checked {
+    background-color: @selected_bg_color;
+    border-color: @selected_bg_color;
+}
+
+/* Progress Bar */
+progressbar {
+    background-color: #3a3a3a;
+    border-radius: 4px;
+}
+
+progressbar progress {
+    background-color: @selected_bg_color;
+    border-radius: 4px;
+}
+
+/* Tooltips */
+tooltip {
+    background-color: @tooltip_bg_color;
+    color: @tooltip_fg_color;
+    border: 1px solid #515151;
+    border-radius: 4px;
+    padding: 6px 8px;
+}
+
+/* Notebooks */
+notebook {
+    background-color: @bg_color;
+}
+
+notebook header {
+    background-color: @bg_color;
+    border: none;
+}
+
+notebook tab {
+    background-color: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 8px 16px;
+    border: none;
+}
+
+notebook tab:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: @fg_color;
+}
+
+notebook tab:checked {
+    background-color: @base_color;
+    color: @fg_color;
+    border-bottom: 2px solid @selected_bg_color;
+}
+
+/* Toolbar */
+toolbar {
+    background-color: @bg_color;
+    border: none;
+    padding: 4px;
+}
+
+/* Sidebar */
+.sidebar {
+    background-color: #1b1b1b;
+    border-right: 1px solid #3a3a3a;
+}
+
+/* Paned */
+paned separator {
+    background-color: #3a3a3a;
+    min-width: 1px;
+    min-height: 1px;
+}
+
+/* Frames */
+frame {
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+}
+
+/* Scale */
+scale {
+    background-color: #3a3a3a;
+    border-radius: 4px;
+    min-height: 4px;
+}
+
+scale highlight {
+    background-color: @selected_bg_color;
+    border-radius: 4px;
+}
+
+scale slider {
+    background-color: @selected_bg_color;
+    border-radius: 50%;
+    min-width: 16px;
+    min-height: 16px;
+}
+
+/* Spinbutton */
+spinbutton {
+    background-color: @base_color;
+    border: 1px solid #515151;
+    border-radius: 4px;
+}
+
+spinbutton button {
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+/* Calendar */
+calendar {
+    background-color: @base_color;
+    color: @text_color;
+    border: 1px solid #515151;
+    border-radius: 4px;
+}
+
+calendar:selected {
+    background-color: @selected_bg_color;
+    color: @selected_fg_color;
+}
+
+/* Infobar */
+infobar {
+    background-color: #3a3a3a;
+    border: 1px solid #515151;
+    border-radius: 4px;
+    padding: 8px;
+}
+
+/* Levelbar */
+levelbar block {
+    background-color: @selected_bg_color;
+    border-radius: 2px;
+}
+
+/* Print Dialog */
+printdialog paper {
+    background-color: white;
+    border: 1px solid #515151;
+}
+
+/* Application specific tweaks */
+/* File Chooser */
+filechooser {
+    background-color: @bg_color;
+}
+
+/* Terminal */
+vte-terminal {
+    background-color: #0c0c0c;
+    color: #cccccc;
+}
+
+/* Fluent Design Effects */
+@keyframes reveal-effect {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.reveal-on-hover:hover {
+    animation: reveal-effect 0.2s ease-out;
+}

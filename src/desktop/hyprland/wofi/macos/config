@@ -1,0 +1,46 @@
+# HorizonOS Wofi Configuration - macOS Spotlight Style
+
+# Window settings
+width=680
+height=400
+location=center
+show=drun
+prompt=Search
+filter_rate=100
+allow_markup=true
+no_actions=false
+halign=fill
+orientation=vertical
+content_halign=fill
+insensitive=true
+allow_images=true
+image_size=24
+hide_scroll=true
+
+# macOS-specific behavior
+always_parse_args=false
+show_all=false
+print_command=true
+layer=overlay
+normal_window=false
+
+# Search behavior
+matching=fuzzy
+sort_order=default
+
+# Performance
+gtk_dark=true
+cache_file=/tmp/wofi-cache-macos
+
+# Terminal
+term=alacritty
+
+# Icons
+icon_theme=BigSur
+
+# Don't show on all outputs
+monitor=
+
+# Key bindings (macOS style)
+key_expand=Tab
+key_exit=Escape

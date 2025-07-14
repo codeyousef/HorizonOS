@@ -69,5 +69,27 @@ horizonOS {
         add("extra", "https://mirror.archlinux.org/extra/os/x86_64") {
             priority = 20
         }
+        
+        // HorizonOS OSTree repository
+        ostree("horizonos", "https://ostree.horizonos.org") {
+            branch("stable")
+            branch("testing")
+            gpgCheck = true
+        }
+    }
+    
+    // Desktop environment configuration
+    desktop {
+        environment = DesktopEnvironment.HYPRLAND
+        autoLogin = false
+        
+        hyprland {
+            theme = "breeze-dark"
+            animations = true
+            gaps = 10
+            borderSize = 2
+            kdeIntegration = true
+            personalityMode = PersonalityMode.KDE
+        }
     }
 }
