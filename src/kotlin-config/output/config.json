@@ -1,0 +1,53 @@
+{
+    "system": {
+        "hostname": "compiled-system",
+        "timezone": "UTC",
+        "locale": "en_US.UTF-8"
+    },
+    "packages": [
+        {
+            "name": "base",
+            "action": "INSTALL"
+        },
+        {
+            "name": "linux",
+            "action": "INSTALL"
+        },
+        {
+            "name": "btrfs-progs",
+            "action": "INSTALL"
+        },
+        {
+            "name": "networkmanager",
+            "action": "INSTALL"
+        }
+    ],
+    "services": [
+        {
+            "name": "NetworkManager",
+            "enabled": true,
+            "config": {
+            }
+        },
+        {
+            "name": "sshd",
+            "enabled": true,
+            "config": {
+            }
+        }
+    ],
+    "users": [
+        {
+            "name": "admin",
+            "uid": 1000,
+            "shell": "/usr/bin/fish",
+            "groups": [
+                "wheel",
+                "users"
+            ],
+            "homeDir": "/home/admin"
+        }
+    ],
+    "repositories": [
+    ]
+}

@@ -27,3 +27,31 @@ repo/
 
 # ISO build directory
 iso/
+
+# Gradle build files
+.gradle/
+**/build/
+gradle-app.setting
+.gradletasknamecache
+
+# Temporary fix scripts
+fix-*.sh
+
+# Validation scripts (keep validate-iso.sh)
+validate-foundation.sh
+
+# Kotlin compiled files
+*.class
+*.kotlin_module
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Editor backup files
+*.backup
+*.orig
+
+# Log files
+*.log

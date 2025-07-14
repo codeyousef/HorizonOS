@@ -1,4 +1,3 @@
-// src/kotlin-config/src/main/kotlin/org/horizonos/config/dsl/Core.kt
 package org.horizonos.config.dsl
 
 import kotlinx.serialization.Serializable
@@ -13,36 +12,36 @@ class SystemConfiguration {
     var hostname: String = "horizonos"
     var timezone: String = "UTC"
     var locale: String = "en_US.UTF-8"
-    
+
     private val packages = mutableListOf<Package>()
     private val services = mutableListOf<Service>()
     private val users = mutableListOf<User>()
     private val repositories = mutableListOf<Repository>()
-    
+
     fun packages(block: PackagesContext.() -> Unit) {
         PackagesContext().apply(block).also {
             packages.addAll(it.packages)
         }
     }
-    
+
     fun services(block: ServicesContext.() -> Unit) {
         ServicesContext().apply(block).also {
             services.addAll(it.services)
         }
     }
-    
+
     fun users(block: UsersContext.() -> Unit) {
         UsersContext().apply(block).also {
             users.addAll(it.users)
         }
     }
-    
+
     fun repositories(block: RepositoriesContext.() -> Unit) {
         RepositoriesContext().apply(block).also {
             repositories.addAll(it.repositories)
         }
     }
-    
+
     fun toConfig(): CompiledConfig {
         return CompiledConfig(
             system = SystemConfig(hostname, timezone, locale),
@@ -59,15 +58,15 @@ class SystemConfiguration {
 @HorizonOSDsl
 class PackagesContext {
     internal val packages = mutableListOf<Package>()
-    
+
     fun install(vararg names: String) {
         packages.addAll(names.map { Package(it, PackageAction.INSTALL) })
     }
-    
+
     fun remove(vararg names: String) {
         packages.addAll(names.map { Package(it, PackageAction.REMOVE) })
     }
-    
+
     fun group(name: String, block: GroupContext.() -> Unit) {
         val group = GroupContext(name).apply(block)
         packages.addAll(group.packages)
@@ -77,10 +76,10 @@ class PackagesContext {
 @HorizonOSDsl
 class GroupContext(private val groupName: String) {
     internal val packages = mutableListOf<Package>()
-    
+
     fun install(vararg names: String) {
-        packages.addAll(names.map { 
-            Package(it, PackageAction.INSTALL, group = groupName) 
+        packages.addAll(names.map {
+            Package(it, PackageAction.INSTALL, group = groupName)
         })
     }
 }
@@ -90,23 +89,24 @@ class GroupContext(private val groupName: String) {
 @HorizonOSDsl
 class ServicesContext {
     internal val services = mutableListOf<Service>()
-    
+
     fun enable(name: String, block: ServiceConfig.() -> Unit = {}) {
         val config = ServiceConfig().apply(block)
         services.add(Service(name, enabled = true, config = config))
     }
-    
+
     fun disable(name: String) {
         services.add(Service(name, enabled = false))
     }
 }
 
+@Serializable
 @HorizonOSDsl
 class ServiceConfig {
     var autoRestart: Boolean = true
     var restartOnFailure: Boolean = true
     val environment = mutableMapOf<String, String>()
-    
+
     fun env(key: String, value: String) {
         environment[key] = value
     }
@@ -117,7 +117,7 @@ class ServiceConfig {
 @HorizonOSDsl
 class UsersContext {
     internal val users = mutableListOf<User>()
-    
+
     fun user(name: String, block: UserConfig.() -> Unit) {
         val config = UserConfig().apply(block)
         users.add(User(
@@ -136,7 +136,7 @@ class UserConfig {
     var shell: String = "/usr/bin/fish"
     var homeDir: String? = null
     internal val groups = mutableSetOf<String>()
-    
+
     fun groups(vararg names: String) {
         groups.addAll(names)
     }
@@ -147,10 +147,10 @@ class UserConfig {
 @HorizonOSDsl
 class RepositoriesContext {
     internal val repositories = mutableListOf<Repository>()
-    
+
     fun add(name: String, url: String, block: RepoConfig.() -> Unit = {}) {
         val config = RepoConfig().apply(block)
-        repositories.add(Repository(
+        repositories.add(PackageRepository(
             name = name,
             url = url,
             enabled = config.enabled,
@@ -158,7 +158,7 @@ class RepositoriesContext {
             priority = config.priority
         ))
     }
-    
+
     fun ostree(name: String, url: String, block: OstreeRepoConfig.() -> Unit = {}) {
         val config = OstreeRepoConfig().apply(block)
         repositories.add(OstreeRepository(
@@ -173,7 +173,7 @@ class RepositoriesContext {
 }
 
 @HorizonOSDsl
-class RepoConfig {
+open class RepoConfig {
     var enabled: Boolean = true
     var gpgCheck: Boolean = true
     var priority: Int = 50
@@ -182,7 +182,7 @@ class RepoConfig {
 @HorizonOSDsl
 class OstreeRepoConfig : RepoConfig() {
     internal val branches = mutableListOf<String>()
-    
+
     fun branch(name: String) {
         branches.add(name)
     }
@@ -234,14 +234,25 @@ data class User(
     val homeDir: String
 )
 
+// ===== Repository Classes =====
+
 @Serializable
-open class Repository(
-    open val name: String,
-    open val url: String,
-    open val enabled: Boolean = true,
-    open val gpgCheck: Boolean = true,
-    open val priority: Int = 50
-)
+sealed class Repository {
+    abstract val name: String
+    abstract val url: String
+    abstract val enabled: Boolean
+    abstract val gpgCheck: Boolean
+    abstract val priority: Int
+}
+
+@Serializable
+data class PackageRepository(
+    override val name: String,
+    override val url: String,
+    override val enabled: Boolean = true,
+    override val gpgCheck: Boolean = true,
+    override val priority: Int = 50
+) : Repository()
 
 @Serializable
 data class OstreeRepository(
@@ -251,7 +262,7 @@ data class OstreeRepository(
     override val gpgCheck: Boolean = true,
     override val priority: Int = 50,
     val branches: List<String> = emptyList()
-) : Repository(name, url, enabled, gpgCheck, priority)
+) : Repository()
 
 // ===== DSL Entry Point =====
 
