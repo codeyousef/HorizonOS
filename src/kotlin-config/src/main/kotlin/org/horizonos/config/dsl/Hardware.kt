@@ -6,8 +6,105 @@ import org.horizonos.config.dsl.hardware.*
 /**
  * Hardware Configuration DSL for HorizonOS
  * 
- * Provides type-safe configuration for hardware components including
- * GPU drivers, input devices, displays, power management, and thermal control.
+ * Provides comprehensive hardware configuration and driver management for HorizonOS systems.
+ * This module handles automatic hardware detection, driver installation, and optimization
+ * for various hardware components including graphics cards, input devices, displays,
+ * power management, and specialized hardware.
+ * 
+ * ## Hardware Categories:
+ * - **Graphics**: GPU drivers (NVIDIA, AMD, Intel), multi-GPU setups, hardware acceleration
+ * - **Display**: Monitor configuration, resolution, refresh rates, color calibration
+ * - **Input**: Keyboard, mouse, touchpad, touchscreen, gaming controllers
+ * - **Audio**: Sound cards, speakers, microphones, audio routing
+ * - **Power**: Battery management, CPU frequency scaling, power profiles
+ * - **Thermal**: Temperature monitoring, fan control, thermal throttling
+ * - **Storage**: SSD/HDD configuration, SMART monitoring, RAID controllers
+ * - **Networking**: WiFi cards, Bluetooth adapters, Ethernet controllers
+ * - **USB**: USB device management, power delivery, device-specific drivers
+ * - **Sensors**: Temperature, humidity, accelerometer, gyroscope sensors
+ * 
+ * ## Key Features:
+ * - **Automatic Detection**: Hardware is automatically detected and configured
+ * - **Driver Management**: Automatic driver installation and updates
+ * - **Performance Optimization**: Hardware-specific performance tuning
+ * - **Power Efficiency**: Intelligent power management and energy savings
+ * - **Hot-plug Support**: Dynamic hardware addition and removal
+ * - **Multi-GPU Support**: Advanced GPU configuration for gaming/compute workloads
+ * 
+ * ## Basic Usage:
+ * ```kotlin
+ * hardware {
+ *     gpu {
+ *         vendor = GPUVendor.NVIDIA
+ *         driver = "nvidia-dkms"
+ *         cuda = true
+ *         
+ *         performance {
+ *             profile = PerformanceProfile.HIGH_PERFORMANCE
+ *             overclocking = false
+ *         }
+ *     }
+ *     
+ *     display {
+ *         monitor("primary") {
+ *             resolution = "1920x1080"
+ *             refreshRate = 60
+ *             position = DisplayPosition.PRIMARY
+ *         }
+ *         
+ *         monitor("secondary") {
+ *             resolution = "1920x1080"
+ *             refreshRate = 60
+ *             position = DisplayPosition.RIGHT
+ *         }
+ *     }
+ *     
+ *     power {
+ *         profile = PowerProfile.BALANCED
+ *         
+ *         cpu {
+ *             governor = "schedutil"
+ *             maxFrequency = "auto"
+ *         }
+ *         
+ *         battery {
+ *             chargingThreshold = 80
+ *             lowBatteryWarning = 20
+ *         }
+ *     }
+ *     
+ *     audio {
+ *         backend = AudioBackend.PIPEWIRE
+ *         
+ *         device("speakers") {
+ *             type = AudioDeviceType.OUTPUT
+ *             channels = 2
+ *             sampleRate = 44100
+ *         }
+ *     }
+ * }
+ * ```
+ * 
+ * ## Hardware Profiles:
+ * HorizonOS supports different hardware profiles optimized for specific use cases:
+ * - **Desktop**: Optimized for desktop workstations with focus on performance
+ * - **Laptop**: Optimized for laptops with focus on battery life and portability
+ * - **Gaming**: Optimized for gaming with high-performance graphics and low latency
+ * - **Server**: Optimized for server hardware with focus on reliability and efficiency
+ * - **Embedded**: Optimized for embedded systems with minimal resource usage
+ * 
+ * @since 1.0
+ * @see [GPUConfig] for graphics card configuration
+ * @see [DisplayConfig] for display and monitor configuration
+ * @see [PowerConfig] for power management configuration
+ * @see [AudioConfig] for audio system configuration
+ * @see [Security] for hardware security features
+ * @see [SecurityConfig] for security configuration
+ * @see [Network] for network hardware configuration
+ * @see [NetworkConfig] for network interfaces and connectivity
+ * @see [Boot] for hardware boot configuration
+ * @see [Storage] for storage hardware configuration
+ * @see [horizonOS] for main system configuration entry point
  */
 
 // ===== Main Hardware Configuration =====

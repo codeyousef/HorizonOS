@@ -16,8 +16,131 @@ import kotlin.time.Duration.Companion.seconds
 /**
  * Network Configuration DSL for HorizonOS
  * 
- * Provides type-safe configuration for all networking aspects including
- * interfaces, WiFi, VPN, firewall, DNS, and advanced networking features.
+ * Provides comprehensive network configuration and management for HorizonOS systems.
+ * This module handles network interfaces, wireless connectivity, VPN connections,
+ * firewall rules, DNS configuration, and advanced networking features with a focus
+ * on security, performance, and reliability.
+ * 
+ * ## Network Components:
+ * - **Interfaces**: Ethernet, WiFi, bridge, bond, and virtual interfaces
+ * - **Wireless**: WiFi network configuration, enterprise authentication
+ * - **VPN**: WireGuard, OpenVPN, IPSec tunnel configuration
+ * - **Firewall**: iptables, nftables, firewalld integration
+ * - **DNS**: DNS resolution, caching, DNS-over-HTTPS/TLS
+ * - **Routing**: Static routes, policy routing, traffic shaping
+ * - **Monitoring**: Network traffic monitoring and alerting
+ * - **Security**: Network security policies and intrusion detection
+ * 
+ * ## Key Features:
+ * - **Auto-configuration**: Automatic network detection and configuration
+ * - **Failover**: Automatic network failover and redundancy
+ * - **Security**: Built-in firewall and network security features
+ * - **Performance**: Network optimization and quality of service
+ * - **Monitoring**: Real-time network monitoring and diagnostics
+ * - **IPv6 Support**: Full IPv6 support with dual-stack configuration
+ * 
+ * ## Basic Usage:
+ * ```kotlin
+ * network {
+ *     interface("eth0") {
+ *         type = InterfaceType.ETHERNET
+ *         dhcp = true
+ *         
+ *         // Static IP configuration
+ *         staticIP {
+ *             address = "192.168.1.100"
+ *             netmask = "255.255.255.0"
+ *             gateway = "192.168.1.1"
+ *         }
+ *     }
+ *     
+ *     wifi {
+ *         network("home-network") {
+ *             ssid = "MyHomeWiFi"
+ *             security = WiFiSecurity.WPA2_PSK
+ *             password = "secure_password"
+ *             autoConnect = true
+ *         }
+ *         
+ *         network("work-network") {
+ *             ssid = "CorporateWiFi"
+ *             security = WiFiSecurity.WPA2_ENTERPRISE
+ *             eap {
+ *                 method = EAPMethod.PEAP
+ *                 identity = "username"
+ *                 password = "password"
+ *             }
+ *         }
+ *     }
+ *     
+ *     vpn {
+ *         wireguard("office-vpn") {
+ *             privateKey = "client_private_key"
+ *             publicKey = "server_public_key"
+ *             endpoint = "vpn.company.com:51820"
+ *             allowedIPs = listOf("10.0.0.0/8")
+ *         }
+ *     }
+ *     
+ *     firewall {
+ *         enabled = true
+ *         defaultPolicy = FirewallPolicy.DROP
+ *         
+ *         rule {
+ *             port = 22
+ *             protocol = NetworkProtocol.TCP
+ *             action = FirewallAction.ACCEPT
+ *             comment = "SSH access"
+ *         }
+ *         
+ *         rule {
+ *             port = 80
+ *             protocol = NetworkProtocol.TCP
+ *             action = FirewallAction.ACCEPT
+ *             comment = "HTTP access"
+ *         }
+ *     }
+ *     
+ *     dns {
+ *         servers = listOf("1.1.1.1", "8.8.8.8")
+ *         dnssec = true
+ *         dnsOverHttps = true
+ *         
+ *         cache {
+ *             enabled = true
+ *             size = "100M"
+ *             ttl = 3600
+ *         }
+ *     }
+ * }
+ * ```
+ * 
+ * ## Network Profiles:
+ * HorizonOS supports different network profiles for various environments:
+ * - **Home**: Optimized for home networks with basic security
+ * - **Office**: Enterprise-grade security with VPN and authentication
+ * - **Public**: High-security profile for public WiFi networks
+ * - **Server**: Server-optimized with advanced firewall and monitoring
+ * - **Mobile**: Optimized for mobile/cellular connections
+ * 
+ * ## Security Features:
+ * - **Firewall**: Stateful firewall with intrusion detection
+ * - **VPN**: Secure VPN connections with modern protocols
+ * - **Encryption**: WiFi WPA3 and enterprise authentication
+ * - **DNS Security**: DNS filtering and DNS-over-HTTPS
+ * - **Network Isolation**: VLAN and network segmentation support
+ * 
+ * @since 1.0
+ * @see [NetworkInterface] for network interface configuration
+ * @see [WiFiNetwork] for wireless network configuration
+ * @see [VPNConnection] for VPN connection configuration
+ * @see [FirewallConfig] for firewall configuration
+ * @see [Security] for security policies and configurations
+ * @see [SecurityConfig] for security configuration
+ * @see [Services] for network services and daemon management
+ * @see [Hardware] for network hardware configuration
+ * @see [Storage] for network storage configuration
+ * @see [horizonOS] for main system configuration entry point
  */
 
 // ===== Network Configuration =====
