@@ -7,6 +7,7 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import kotlinx.serialization.json.Json
 import org.horizonos.config.dsl.*
+import org.horizonos.config.compiler.*
 import java.io.File
 import java.nio.file.Files
 
@@ -24,10 +25,10 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = ConfigGenerator(tempDir)
+        val generator = EnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
-        val jsonFile = File(tempDir, "config.json")
+        val jsonFile = File(tempDir, "json/config.json")
         jsonFile.exists() shouldBe true
         
         val jsonContent = jsonFile.readText()
@@ -53,10 +54,10 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = ConfigGenerator(tempDir)
+        val generator = EnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
-        val scriptFile = File(tempDir, "scripts/install-packages.sh")
+        val scriptFile = File(tempDir, "scripts/package-manager.sh")
         scriptFile.exists() shouldBe true
         scriptFile.canExecute() shouldBe true
         
@@ -82,10 +83,10 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = ConfigGenerator(tempDir)
+        val generator = EnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
-        val scriptFile = File(tempDir, "scripts/configure-services.sh")
+        val scriptFile = File(tempDir, "scripts/service-manager.sh")
         scriptFile.exists() shouldBe true
         scriptFile.canExecute() shouldBe true
         
@@ -113,10 +114,10 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = ConfigGenerator(tempDir)
+        val generator = EnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
-        val scriptFile = File(tempDir, "scripts/create-users.sh")
+        val scriptFile = File(tempDir, "scripts/user-manager.sh")
         scriptFile.exists() shouldBe true
         scriptFile.canExecute() shouldBe true
         
@@ -144,19 +145,20 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = ConfigGenerator(tempDir)
+        val generator = EnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
-        val repoFile = File(tempDir, "configs/pacman-repos.conf")
-        repoFile.exists() shouldBe true
+        // The new generator includes repository configuration in the repository-config.sh script
+        val repoScript = File(tempDir, "scripts/repository-config.sh")
+        repoScript.exists() shouldBe true
         
-        val repoContent = repoFile.readText()
+        val repoContent = repoScript.readText()
         repoContent shouldContain "[core]"
         repoContent shouldContain "Server = https://mirror.archlinux.org/core"
         repoContent shouldContain "SigLevel = Never"
         repoContent shouldContain "[extra]"
         repoContent shouldContain "Server = https://mirror.archlinux.org/extra"
-        repoContent shouldNotContain "horizonos"  // OSTree repos not in pacman config
+        repoContent shouldContain "ostree remote add"  // OSTree repos are handled separately
         
         tempDir.deleteRecursively()
     }
@@ -169,7 +171,7 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = ConfigGenerator(tempDir)
+        val generator = EnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         val scriptFile = File(tempDir, "scripts/deploy.sh")
@@ -178,12 +180,12 @@ class CompilerTest : StringSpec({
         
         val scriptContent = scriptFile.readText()
         scriptContent shouldContain "#!/bin/bash"
-        scriptContent shouldContain "echo 'test-system' > /etc/hostname"
-        scriptContent shouldContain "ln -sf /usr/share/zoneinfo/America/New_York /etc/localtime"
-        scriptContent shouldContain "echo 'LANG=en_US.UTF-8' > /etc/locale.conf"
-        scriptContent shouldContain "./install-packages.sh"
-        scriptContent shouldContain "./configure-services.sh"
-        scriptContent shouldContain "./create-users.sh"
+        scriptContent shouldContain "# Run all configuration scripts"
+        scriptContent shouldContain "./system-config.sh"
+        scriptContent shouldContain "./package-manager.sh"
+        scriptContent shouldContain "./service-manager.sh"
+        scriptContent shouldContain "./user-manager.sh"
+        scriptContent shouldContain "./repository-config.sh"
         
         tempDir.deleteRecursively()
     }
@@ -194,7 +196,7 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = ConfigGenerator(tempDir)
+        val generator = EnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         File(tempDir, "scripts").exists() shouldBe true
@@ -211,15 +213,15 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = ConfigGenerator(tempDir)
+        val generator = EnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         // Should still generate basic files
-        File(tempDir, "config.json").exists() shouldBe true
+        File(tempDir, "json/config.json").exists() shouldBe true
         File(tempDir, "scripts/deploy.sh").exists() shouldBe true
         
         // Package script should exist but be minimal
-        val packageScript = File(tempDir, "scripts/install-packages.sh")
+        val packageScript = File(tempDir, "scripts/package-manager.sh")
         packageScript.exists() shouldBe true
         val packageContent = packageScript.readText()
         packageContent shouldContain "#!/bin/bash"
