@@ -21,6 +21,22 @@ sealed class ValidationError(open val message: String) {
     data class ConflictingPackages(val packageName: String) : ValidationError("Package $packageName has conflicting install/remove actions")
     data class MissingAutoLoginUser(val autoLoginUser: String) : ValidationError("Auto-login user '$autoLoginUser' is not defined")
     data class InvalidDesktopConfig(override val message: String) : ValidationError("Invalid desktop configuration: $message")
+    data class InvalidBootEntryPath(val path: String) : ValidationError("Invalid boot entry path: $path")
+    data class InvalidKernelParameter(val parameter: String) : ValidationError("Invalid kernel parameter: $parameter")
+    data class InvalidModule(val module: String) : ValidationError("Invalid module name: $module")
+    data class InvalidInitramfsHook(val hook: String) : ValidationError("Invalid initramfs hook: $hook")
+    data class InvalidPlymouthTheme(val theme: String) : ValidationError("Invalid Plymouth theme: $theme")
+    data class ConflictingBootEntries(val title: String) : ValidationError("Duplicate boot entry title: $title")
+    data class InvalidSecureBootKey(val keyPath: String) : ValidationError("Invalid Secure Boot key path: $keyPath")
+    data class InvalidGPUDriver(val driver: String) : ValidationError("Invalid GPU driver: $driver")
+    data class InvalidDisplayResolution(val resolution: String) : ValidationError("Invalid display resolution: $resolution")
+    data class InvalidRefreshRate(val rate: Double) : ValidationError("Invalid refresh rate: $rate")
+    data class InvalidAudioDevice(val device: String) : ValidationError("Invalid audio device: $device")
+    data class InvalidPowerProfile(override val message: String) : ValidationError("Invalid power configuration: $message")
+    data class ConflictingMonitors(val name: String) : ValidationError("Duplicate monitor configuration: $name")
+    data class InvalidThermalZone(val zone: String) : ValidationError("Invalid thermal zone: $zone")
+    data class InvalidBluetoothAddress(val address: String) : ValidationError("Invalid Bluetooth address: $address")
+    data class InvalidUSBDevice(val device: String) : ValidationError("Invalid USB device identifier: $device")
 }
 
 class ValidationResult(val errors: List<ValidationError>) {
@@ -61,6 +77,16 @@ object ConfigurationValidator {
         // Validate desktop configuration
         config.desktop?.let { desktop ->
             errors.addAll(validateDesktopConfig(desktop, config.users))
+        }
+        
+        // Validate boot configuration
+        config.boot?.let { boot ->
+            errors.addAll(validateBootConfig(boot))
+        }
+        
+        // Validate hardware configuration
+        config.hardware?.let { hardware ->
+            errors.addAll(validateHardwareConfig(hardware))
         }
         
         return ValidationResult(errors)
@@ -223,6 +249,449 @@ object ConfigurationValidator {
         return errors
     }
     
+    private fun validateBootConfig(boot: BootConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate bootloader configuration
+        errors.addAll(validateBootloaderConfig(boot.bootloader))
+        
+        // Validate kernel configuration
+        errors.addAll(validateKernelConfig(boot.kernel))
+        
+        // Validate initramfs configuration
+        errors.addAll(validateInitramfsConfig(boot.initramfs))
+        
+        // Validate Plymouth configuration
+        errors.addAll(validatePlymouthConfig(boot.plymouth))
+        
+        // Validate Secure Boot configuration
+        errors.addAll(validateSecureBootConfig(boot.secureBoot))
+        
+        return errors
+    }
+    
+    private fun validateBootloaderConfig(bootloader: BootloaderConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate boot entries
+        bootloader.entries.forEach { entry ->
+            // Validate Linux kernel path
+            if (!isValidBootEntryPath(entry.linux)) {
+                errors.add(ValidationError.InvalidBootEntryPath(entry.linux))
+            }
+            
+            // Validate initrd path if provided
+            entry.initrd?.let { initrd ->
+                if (!isValidBootEntryPath(initrd)) {
+                    errors.add(ValidationError.InvalidBootEntryPath(initrd))
+                }
+            }
+            
+            // Validate devicetree path if provided
+            entry.devicetree?.let { dt ->
+                if (!isValidBootEntryPath(dt)) {
+                    errors.add(ValidationError.InvalidBootEntryPath(dt))
+                }
+            }
+        }
+        
+        // Check for duplicate boot entry titles
+        val duplicateTitles = bootloader.entries.groupBy { it.title }
+            .filter { it.value.size > 1 }
+            .keys
+        duplicateTitles.forEach { title ->
+            errors.add(ValidationError.ConflictingBootEntries(title))
+        }
+        
+        return errors
+    }
+    
+    private fun validateKernelConfig(kernel: KernelConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate kernel parameters
+        kernel.parameters.forEach { param ->
+            if (!isValidKernelParameter(param.name)) {
+                errors.add(ValidationError.InvalidKernelParameter(param.name))
+            }
+        }
+        
+        // Validate kernel modules
+        kernel.modules.blacklist.forEach { module ->
+            if (!isValidModuleName(module)) {
+                errors.add(ValidationError.InvalidModule(module))
+            }
+        }
+        
+        kernel.modules.load.forEach { module ->
+            if (!isValidModuleName(module)) {
+                errors.add(ValidationError.InvalidModule(module))
+            }
+        }
+        
+        kernel.modules.options.keys.forEach { module ->
+            if (!isValidModuleName(module)) {
+                errors.add(ValidationError.InvalidModule(module))
+            }
+        }
+        
+        // Validate kernel variants
+        kernel.variants.forEach { variant ->
+            variant.parameters.forEach { param ->
+                if (!isValidKernelParameter(param.name)) {
+                    errors.add(ValidationError.InvalidKernelParameter(param.name))
+                }
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validateInitramfsConfig(initramfs: InitramfsConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate modules
+        initramfs.modules.forEach { module ->
+            if (!isValidModuleName(module)) {
+                errors.add(ValidationError.InvalidModule(module))
+            }
+        }
+        
+        // Validate hooks
+        initramfs.hooks.forEach { hook ->
+            if (!isValidInitramfsHook(hook)) {
+                errors.add(ValidationError.InvalidInitramfsHook(hook))
+            }
+        }
+        
+        // Validate files (basic path validation)
+        initramfs.files.forEach { file ->
+            if (!isValidBootEntryPath(file)) {
+                errors.add(ValidationError.InvalidBootEntryPath(file))
+            }
+        }
+        
+        // Validate custom scripts
+        initramfs.customScripts.forEach { script ->
+            if (!isValidBootEntryPath(script)) {
+                errors.add(ValidationError.InvalidBootEntryPath(script))
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validatePlymouthConfig(plymouth: PlymouthConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate theme name
+        if (!isValidPlymouthTheme(plymouth.theme)) {
+            errors.add(ValidationError.InvalidPlymouthTheme(plymouth.theme))
+        }
+        
+        // Validate modules
+        plymouth.modules.forEach { module ->
+            if (!isValidModuleName(module)) {
+                errors.add(ValidationError.InvalidModule(module))
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validateSecureBootConfig(secureBoot: SecureBootConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate Secure Boot keys if provided
+        secureBoot.keys?.let { keys ->
+            keys.platform?.let { path ->
+                if (!isValidSecureBootKeyPath(path)) {
+                    errors.add(ValidationError.InvalidSecureBootKey(path))
+                }
+            }
+            
+            keys.keyExchange?.let { path ->
+                if (!isValidSecureBootKeyPath(path)) {
+                    errors.add(ValidationError.InvalidSecureBootKey(path))
+                }
+            }
+            
+            keys.signature?.let { path ->
+                if (!isValidSecureBootKeyPath(path)) {
+                    errors.add(ValidationError.InvalidSecureBootKey(path))
+                }
+            }
+            
+            keys.forbidden?.let { path ->
+                if (!isValidSecureBootKeyPath(path)) {
+                    errors.add(ValidationError.InvalidSecureBootKey(path))
+                }
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validateHardwareConfig(hardware: HardwareConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate GPU configuration
+        errors.addAll(validateGPUConfig(hardware.gpu))
+        
+        // Validate display configuration
+        errors.addAll(validateDisplayConfig(hardware.display))
+        
+        // Validate power configuration
+        errors.addAll(validatePowerConfig(hardware.power))
+        
+        // Validate audio configuration
+        errors.addAll(validateAudioConfig(hardware.audio))
+        
+        // Validate Bluetooth configuration
+        errors.addAll(validateBluetoothConfig(hardware.bluetooth))
+        
+        // Validate USB configuration
+        errors.addAll(validateUSBConfig(hardware.usb))
+        
+        // Validate thermal configuration
+        errors.addAll(validateThermalConfig(hardware.thermal))
+        
+        return errors
+    }
+    
+    private fun validateGPUConfig(gpu: GPUConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate GPU drivers
+        gpu.drivers.forEach { driver ->
+            // Validate driver options
+            driver.options.keys.forEach { option ->
+                if (!isValidGPUOption(option)) {
+                    errors.add(ValidationError.InvalidGPUDriver("Invalid driver option: $option"))
+                }
+            }
+            
+            // Validate firmware files
+            driver.firmwareFiles.forEach { firmware ->
+                if (!isValidBootEntryPath(firmware)) {
+                    errors.add(ValidationError.InvalidBootEntryPath(firmware))
+                }
+            }
+            
+            // Validate blacklisted drivers
+            driver.blacklistedDrivers.forEach { blacklisted ->
+                if (!isValidModuleName(blacklisted)) {
+                    errors.add(ValidationError.InvalidModule(blacklisted))
+                }
+            }
+        }
+        
+        // Validate multi-GPU configuration
+        gpu.multiGPU?.let { multiGPU ->
+            multiGPU.primaryGPU?.let { primary ->
+                if (!isValidGPUIdentifier(primary)) {
+                    errors.add(ValidationError.InvalidGPUDriver("Invalid primary GPU identifier: $primary"))
+                }
+            }
+            
+            multiGPU.discreteGPU?.let { discrete ->
+                if (!isValidGPUIdentifier(discrete)) {
+                    errors.add(ValidationError.InvalidGPUDriver("Invalid discrete GPU identifier: $discrete"))
+                }
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validateDisplayConfig(display: DisplayConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate monitors
+        display.monitors.forEach { monitor ->
+            // Validate resolution
+            monitor.resolution?.let { resolution ->
+                if (!isValidResolution(resolution)) {
+                    errors.add(ValidationError.InvalidDisplayResolution("${resolution.width}x${resolution.height}"))
+                }
+            }
+            
+            // Validate refresh rate
+            monitor.refreshRate?.let { rate ->
+                if (!isValidRefreshRate(rate)) {
+                    errors.add(ValidationError.InvalidRefreshRate(rate))
+                }
+            }
+            
+            // Validate color profile path
+            monitor.colorProfile?.let { profile ->
+                if (!isValidColorProfilePath(profile)) {
+                    errors.add(ValidationError.InvalidBootEntryPath(profile))
+                }
+            }
+            
+            // Validate gamma values
+            if (!isValidGamma(monitor.gamma.red) || 
+                !isValidGamma(monitor.gamma.green) || 
+                !isValidGamma(monitor.gamma.blue)) {
+                errors.add(ValidationError.InvalidDisplayResolution("Invalid gamma values for monitor ${monitor.name}"))
+            }
+        }
+        
+        // Check for duplicate monitor names
+        val duplicateMonitors = display.monitors.groupBy { it.name }
+            .filter { it.value.size > 1 }
+            .keys
+        duplicateMonitors.forEach { monitorName ->
+            errors.add(ValidationError.ConflictingMonitors(monitorName))
+        }
+        
+        // Validate color management
+        display.color.profiles.forEach { profile ->
+            if (!isValidColorProfilePath(profile.path)) {
+                errors.add(ValidationError.InvalidBootEntryPath(profile.path))
+            }
+        }
+        
+        // Validate night light schedule
+        if (display.nightLight.schedule == NightLightSchedule.MANUAL) {
+            if (!isValidTimeFormat(display.nightLight.manualStart) || 
+                !isValidTimeFormat(display.nightLight.manualEnd)) {
+                errors.add(ValidationError.InvalidDisplayResolution("Invalid night light schedule times"))
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validatePowerConfig(power: PowerConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate CPU power configuration
+        power.cpu.minFreq?.let { freq ->
+            if (!isValidFrequency(freq)) {
+                errors.add(ValidationError.InvalidPowerProfile("Invalid minimum CPU frequency: $freq"))
+            }
+        }
+        
+        power.cpu.maxFreq?.let { freq ->
+            if (!isValidFrequency(freq)) {
+                errors.add(ValidationError.InvalidPowerProfile("Invalid maximum CPU frequency: $freq"))
+            }
+        }
+        
+        // Validate C-state configuration
+        power.cpu.cStates.disabledStates.forEach { state ->
+            if (state < 0 || state > 10) {
+                errors.add(ValidationError.InvalidPowerProfile("Invalid C-state: $state"))
+            }
+        }
+        
+        // Validate P-state configuration
+        if (power.cpu.pStates.minPerf < 0 || power.cpu.pStates.minPerf > 100) {
+            errors.add(ValidationError.InvalidPowerProfile("Invalid minimum P-state performance: ${power.cpu.pStates.minPerf}"))
+        }
+        
+        if (power.cpu.pStates.maxPerf < 0 || power.cpu.pStates.maxPerf > 100) {
+            errors.add(ValidationError.InvalidPowerProfile("Invalid maximum P-state performance: ${power.cpu.pStates.maxPerf}"))
+        }
+        
+        // Validate battery configuration
+        if (power.battery.chargingThreshold.startThreshold < 0 || power.battery.chargingThreshold.startThreshold > 100) {
+            errors.add(ValidationError.InvalidPowerProfile("Invalid charging start threshold: ${power.battery.chargingThreshold.startThreshold}"))
+        }
+        
+        if (power.battery.chargingThreshold.stopThreshold < 0 || power.battery.chargingThreshold.stopThreshold > 100) {
+            errors.add(ValidationError.InvalidPowerProfile("Invalid charging stop threshold: ${power.battery.chargingThreshold.stopThreshold}"))
+        }
+        
+        return errors
+    }
+    
+    private fun validateAudioConfig(audio: AudioConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate audio devices
+        audio.devices.forEach { device ->
+            if (!isValidAudioDeviceName(device.name)) {
+                errors.add(ValidationError.InvalidAudioDevice(device.name))
+            }
+            
+            // Validate sample rate
+            if (!isValidSampleRate(device.sampleRate)) {
+                errors.add(ValidationError.InvalidAudioDevice("Invalid sample rate: ${device.sampleRate}"))
+            }
+            
+            // Validate bit depth
+            if (!isValidBitDepth(device.bitDepth)) {
+                errors.add(ValidationError.InvalidAudioDevice("Invalid bit depth: ${device.bitDepth}"))
+            }
+            
+            // Validate buffer size
+            if (!isValidBufferSize(device.bufferSize)) {
+                errors.add(ValidationError.InvalidAudioDevice("Invalid buffer size: ${device.bufferSize}"))
+            }
+        }
+        
+        // Validate volume configuration
+        if (audio.volume.master < 0 || audio.volume.master > audio.volume.maxVolume) {
+            errors.add(ValidationError.InvalidAudioDevice("Invalid master volume: ${audio.volume.master}"))
+        }
+        
+        return errors
+    }
+    
+    private fun validateBluetoothConfig(bluetooth: BluetoothConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate Bluetooth devices
+        bluetooth.devices.forEach { device ->
+            if (!isValidBluetoothAddress(device.address)) {
+                errors.add(ValidationError.InvalidBluetoothAddress(device.address))
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validateUSBConfig(usb: USBConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate USB devices
+        usb.devices.forEach { device ->
+            if (!isValidUSBVendorId(device.vendorId) || !isValidUSBProductId(device.productId)) {
+                errors.add(ValidationError.InvalidUSBDevice("${device.vendorId}:${device.productId}"))
+            }
+        }
+        
+        // Validate autosuspend blacklist
+        usb.autosuspend.blacklist.forEach { device ->
+            if (!isValidUSBDeviceIdentifier(device)) {
+                errors.add(ValidationError.InvalidUSBDevice(device))
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validateThermalConfig(thermal: ThermalConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate thermal zones
+        thermal.zones.forEach { zone ->
+            if (!isValidThermalZoneName(zone.name)) {
+                errors.add(ValidationError.InvalidThermalZone(zone.name))
+            }
+            
+            // Validate temperature thresholds
+            if (zone.criticalTemp <= zone.hotTemp || zone.hotTemp <= zone.passiveTemp) {
+                errors.add(ValidationError.InvalidThermalZone("Invalid temperature thresholds for zone ${zone.name}"))
+            }
+        }
+        
+        return errors
+    }
+    
     // Validation helper functions
     private fun isValidHostname(hostname: String): Boolean {
         return hostname.matches(Regex("^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$"))
@@ -271,5 +740,113 @@ object ConfigurationValidator {
     
     private fun isValidBranch(branch: String): Boolean {
         return branch.matches(Regex("^[a-zA-Z0-9._/-]+$")) && branch.isNotBlank()
+    }
+    
+    private fun isValidBootEntryPath(path: String): Boolean {
+        // Validate boot entry paths (kernel, initrd, devicetree, files)
+        return path.isNotBlank() && 
+               (path.startsWith("/") || path.startsWith("\\") || 
+                path.matches(Regex("^[a-zA-Z0-9._/-]+$")))
+    }
+    
+    private fun isValidKernelParameter(parameter: String): Boolean {
+        // Validate kernel parameter names (basic validation)
+        return parameter.matches(Regex("^[a-zA-Z0-9._-]+$")) && parameter.isNotBlank()
+    }
+    
+    private fun isValidModuleName(module: String): Boolean {
+        // Validate kernel module names
+        return module.matches(Regex("^[a-zA-Z0-9._-]+$")) && module.isNotBlank()
+    }
+    
+    private fun isValidInitramfsHook(hook: String): Boolean {
+        // Validate initramfs hook names
+        return hook.matches(Regex("^[a-zA-Z0-9._-]+$")) && hook.isNotBlank()
+    }
+    
+    private fun isValidPlymouthTheme(theme: String): Boolean {
+        // Validate Plymouth theme names
+        return theme.matches(Regex("^[a-zA-Z0-9._-]+$")) && theme.isNotBlank()
+    }
+    
+    private fun isValidSecureBootKeyPath(keyPath: String): Boolean {
+        // Validate Secure Boot key file paths
+        return keyPath.isNotBlank() && 
+               keyPath.startsWith("/") &&
+               (keyPath.endsWith(".esl") || keyPath.endsWith(".auth") || 
+                keyPath.endsWith(".crt") || keyPath.endsWith(".pem") ||
+                keyPath.endsWith(".der") || keyPath.endsWith(".key"))
+    }
+    
+    // Hardware validation helper functions
+    private fun isValidGPUOption(option: String): Boolean {
+        return option.matches(Regex("^[a-zA-Z0-9._-]+$")) && option.isNotBlank()
+    }
+    
+    private fun isValidGPUIdentifier(identifier: String): Boolean {
+        return identifier.matches(Regex("^[a-zA-Z0-9:._-]+$")) && identifier.isNotBlank()
+    }
+    
+    private fun isValidResolution(resolution: Resolution): Boolean {
+        return resolution.width > 0 && resolution.height > 0 &&
+               resolution.width <= 8192 && resolution.height <= 8192
+    }
+    
+    private fun isValidRefreshRate(rate: Double): Boolean {
+        return rate > 0 && rate <= 500.0
+    }
+    
+    private fun isValidColorProfilePath(path: String): Boolean {
+        return path.isNotBlank() && path.startsWith("/") &&
+               (path.endsWith(".icc") || path.endsWith(".icm"))
+    }
+    
+    private fun isValidGamma(gamma: Double): Boolean {
+        return gamma > 0.0 && gamma <= 3.0
+    }
+    
+    private fun isValidTimeFormat(time: String): Boolean {
+        return time.matches(Regex("^([01]?[0-9]|2[0-3]):[0-5][0-9]$"))
+    }
+    
+    private fun isValidFrequency(freq: String): Boolean {
+        return freq.matches(Regex("^\\d+(\\.\\d+)?[MG]Hz$"))
+    }
+    
+    private fun isValidAudioDeviceName(name: String): Boolean {
+        return name.matches(Regex("^[a-zA-Z0-9._: -]+$")) && name.isNotBlank()
+    }
+    
+    private fun isValidSampleRate(rate: Int): Boolean {
+        return rate in listOf(8000, 11025, 16000, 22050, 44100, 48000, 88200, 96000, 176400, 192000)
+    }
+    
+    private fun isValidBitDepth(depth: Int): Boolean {
+        return depth in listOf(8, 16, 24, 32)
+    }
+    
+    private fun isValidBufferSize(size: Int): Boolean {
+        return size > 0 && (size and (size - 1)) == 0 // Power of 2
+    }
+    
+    private fun isValidBluetoothAddress(address: String): Boolean {
+        return address.matches(Regex("^[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}$"))
+    }
+    
+    private fun isValidUSBVendorId(vendorId: String): Boolean {
+        return vendorId.matches(Regex("^[0-9A-Fa-f]{4}$"))
+    }
+    
+    private fun isValidUSBProductId(productId: String): Boolean {
+        return productId.matches(Regex("^[0-9A-Fa-f]{4}$"))
+    }
+    
+    private fun isValidUSBDeviceIdentifier(identifier: String): Boolean {
+        return identifier.matches(Regex("^[0-9A-Fa-f]{4}:[0-9A-Fa-f]{4}$")) ||
+               identifier.matches(Regex("^[a-zA-Z0-9._-]+$"))
+    }
+    
+    private fun isValidThermalZoneName(name: String): Boolean {
+        return name.matches(Regex("^[a-zA-Z0-9._-]+$")) && name.isNotBlank()
     }
 }
