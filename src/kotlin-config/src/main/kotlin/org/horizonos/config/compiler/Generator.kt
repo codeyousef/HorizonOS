@@ -91,6 +91,14 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         config.storage?.let {
             File(outputDir, "json/storage.json").writeText(json.encodeToString(it))
         }
+        
+        config.security?.let {
+            File(outputDir, "json/security.json").writeText(json.encodeToString(it))
+        }
+        
+        config.enhancedServices?.let {
+            File(outputDir, "json/enhanced-services.json").writeText(json.encodeToString(it))
+        }
     }
     
     private fun generateYamlOutput(config: CompiledConfig) {
@@ -227,6 +235,8 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             config.boot?.let { appendLine("./boot-config.sh") }
             config.hardware?.let { appendLine("./hardware-config.sh") }
             config.storage?.let { appendLine("./storage-config.sh") }
+            config.security?.let { appendLine("./security-config.sh") }
+            config.enhancedServices?.let { appendLine("./enhanced-services-config.sh") }
             config.desktop?.let { appendLine("./desktop-setup.sh") }
             config.automation?.let { appendLine("./automation-setup.sh") }
             appendLine()
@@ -258,6 +268,12 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         
         // Storage configuration script
         config.storage?.let { generateStorageScript(config) }
+        
+        // Security configuration script
+        config.security?.let { generateSecurityScript(config) }
+        
+        // Enhanced services configuration script
+        config.enhancedServices?.let { generateEnhancedServicesScript(config) }
         
         // Desktop setup script
         config.desktop?.let { generateDesktopScript(config) }
@@ -1787,6 +1803,1199 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             script.setExecutable(true)
             generatedFiles.add(GeneratedFile("scripts/storage-config.sh", FileType.SHELL))
         }
+    }
+    
+    private fun generateSecurityScript(config: CompiledConfig) {
+        config.security?.let { security ->
+            val script = File(outputDir, "scripts/security-config.sh")
+            script.writeText(buildString {
+                appendLine("#!/bin/bash")
+                appendLine("# Security Configuration")
+                appendLine("# Generated from HorizonOS Kotlin DSL")
+                appendLine()
+                appendLine("set -euo pipefail")
+                appendLine()
+                appendLine("echo 'Configuring security...'")
+                appendLine()
+                
+                // SSH configuration
+                if (security.ssh.enabled) {
+                    appendLine("# SSH Configuration")
+                    appendLine("cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup")
+                    appendLine()
+                    appendLine("cat > /etc/ssh/sshd_config <<EOF")
+                    appendLine("# HorizonOS SSH Configuration")
+                    appendLine("Port ${security.ssh.port}")
+                    security.ssh.listenAddress.forEach { addr ->
+                        appendLine("ListenAddress $addr")
+                    }
+                    appendLine("Protocol ${security.ssh.protocol.name.lowercase()}")
+                    appendLine()
+                    
+                    // Authentication settings
+                    appendLine("# Authentication")
+                    appendLine("PubkeyAuthentication ${if (security.ssh.authentication.publicKey) "yes" else "no"}")
+                    appendLine("PasswordAuthentication ${if (security.ssh.authentication.password) "yes" else "no"}")
+                    appendLine("KerberosAuthentication ${if (security.ssh.authentication.kerberos) "yes" else "no"}")
+                    appendLine("GSSAPIAuthentication ${if (security.ssh.authentication.gssapi) "yes" else "no"}")
+                    appendLine("HostbasedAuthentication ${if (security.ssh.authentication.hostbased) "yes" else "no"}")
+                    appendLine("ChallengeResponseAuthentication ${if (security.ssh.authentication.challenge) "yes" else "no"}")
+                    appendLine("MaxAuthTries ${security.ssh.authentication.maxAuthTries}")
+                    appendLine("LoginGraceTime ${security.ssh.authentication.loginGraceTime.inWholeSeconds}")
+                    appendLine("PermitEmptyPasswords ${if (security.ssh.authentication.permitEmptyPasswords) "yes" else "no"}")
+                    appendLine()
+                    
+                    // Access control
+                    if (security.ssh.access.allowUsers.isNotEmpty()) {
+                        appendLine("AllowUsers ${security.ssh.access.allowUsers.joinToString(" ")}")
+                    }
+                    if (security.ssh.access.allowGroups.isNotEmpty()) {
+                        appendLine("AllowGroups ${security.ssh.access.allowGroups.joinToString(" ")}")
+                    }
+                    if (security.ssh.access.denyUsers.isNotEmpty()) {
+                        appendLine("DenyUsers ${security.ssh.access.denyUsers.joinToString(" ")}")
+                    }
+                    if (security.ssh.access.denyGroups.isNotEmpty()) {
+                        appendLine("DenyGroups ${security.ssh.access.denyGroups.joinToString(" ")}")
+                    }
+                    appendLine("PermitRootLogin ${security.ssh.access.permitRoot.name.lowercase().replace("_", "-")}")
+                    appendLine("MaxSessions ${security.ssh.access.maxSessions}")
+                    appendLine("MaxStartups ${security.ssh.access.maxStartups}")
+                    appendLine()
+                    
+                    // Security settings
+                    appendLine("# Security")
+                    appendLine("StrictModes ${if (security.ssh.security.strictModes) "yes" else "no"}")
+                    appendLine("IgnoreRhosts ${if (security.ssh.security.ignorerhosts) "yes" else "no"}")
+                    appendLine("IgnoreUserKnownHosts ${if (security.ssh.security.ignoreUserKnownHosts) "yes" else "no"}")
+                    appendLine("PrintMotd ${if (security.ssh.security.printMotd) "yes" else "no"}")
+                    appendLine("PrintLastLog ${if (security.ssh.security.printLastLog) "yes" else "no"}")
+                    appendLine("TCPKeepAlive ${if (security.ssh.security.tcpKeepAlive) "yes" else "no"}")
+                    appendLine("Compression ${security.ssh.security.compression.name.lowercase()}")
+                    appendLine("UseDNS ${if (security.ssh.security.useDNS) "yes" else "no"}")
+                    appendLine()
+                    
+                    // Encryption settings
+                    if (security.ssh.encryption.ciphers.isNotEmpty()) {
+                        appendLine("Ciphers ${security.ssh.encryption.ciphers.joinToString(",")}")
+                    }
+                    if (security.ssh.encryption.macs.isNotEmpty()) {
+                        appendLine("MACs ${security.ssh.encryption.macs.joinToString(",")}")
+                    }
+                    if (security.ssh.encryption.kex.isNotEmpty()) {
+                        appendLine("KexAlgorithms ${security.ssh.encryption.kex.joinToString(",")}")
+                    }
+                    if (security.ssh.encryption.hostKeyAlgorithms.isNotEmpty()) {
+                        appendLine("HostKeyAlgorithms ${security.ssh.encryption.hostKeyAlgorithms.joinToString(",")}")
+                    }
+                    if (security.ssh.encryption.pubkeyAcceptedAlgorithms.isNotEmpty()) {
+                        appendLine("PubkeyAcceptedAlgorithms ${security.ssh.encryption.pubkeyAcceptedAlgorithms.joinToString(",")}")
+                    }
+                    appendLine()
+                    
+                    // Client alive settings
+                    appendLine("ClientAliveInterval ${security.ssh.access.clientAlive.interval.inWholeSeconds}")
+                    appendLine("ClientAliveCountMax ${security.ssh.access.clientAlive.maxCount}")
+                    appendLine()
+                    
+                    // Banner
+                    security.ssh.banner?.let { banner ->
+                        appendLine("Banner /etc/ssh/banner")
+                        appendLine("EOF")
+                        appendLine()
+                        appendLine("echo '$banner' > /etc/ssh/banner")
+                        appendLine()
+                    } ?: run {
+                        appendLine("EOF")
+                        appendLine()
+                    }
+                    
+                    // Generate host keys
+                    if (security.ssh.keys.keyGeneration.autoGenerate) {
+                        appendLine("# Generate SSH host keys")
+                        security.ssh.keys.keyGeneration.keyTypes.forEach { keyType ->
+                            when (keyType) {
+                                SSHKeyType.ED25519 -> {
+                                    appendLine("ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ''")
+                                }
+                                SSHKeyType.ECDSA -> {
+                                    val bits = security.ssh.keys.keyGeneration.bits[keyType] ?: 256
+                                    appendLine("ssh-keygen -t ecdsa -b $bits -f /etc/ssh/ssh_host_ecdsa_key -N ''")
+                                }
+                                SSHKeyType.RSA -> {
+                                    val bits = security.ssh.keys.keyGeneration.bits[keyType] ?: 4096
+                                    appendLine("ssh-keygen -t rsa -b $bits -f /etc/ssh/ssh_host_rsa_key -N ''")
+                                }
+                                SSHKeyType.DSA -> {
+                                    appendLine("ssh-keygen -t dsa -f /etc/ssh/ssh_host_dsa_key -N ''")
+                                }
+                            }
+                        }
+                        appendLine()
+                    }
+                    
+                    // Restart SSH service
+                    appendLine("systemctl restart sshd.service")
+                    appendLine("systemctl enable sshd.service")
+                    appendLine()
+                }
+                
+                // Sudo configuration
+                if (security.sudo.enabled) {
+                    appendLine("# Sudo Configuration")
+                    appendLine("cp /etc/sudoers /etc/sudoers.backup")
+                    appendLine()
+                    appendLine("cat > /etc/sudoers.d/horizonos <<EOF")
+                    appendLine("# HorizonOS Sudo Configuration")
+                    appendLine()
+                    
+                    // Defaults
+                    val defaults = security.sudo.defaults
+                    appendLine("# Defaults")
+                    if (defaults.requirePassword) {
+                        appendLine("Defaults !authenticate")
+                    } else {
+                        appendLine("Defaults authenticate")
+                    }
+                    appendLine("Defaults passwd_timeout=${defaults.passwordTimeout.inWholeMinutes}")
+                    appendLine("Defaults passwd_tries=${defaults.passwordRetries}")
+                    appendLine("Defaults logfile=${defaults.logFile}")
+                    appendLine("Defaults secure_path=\"${defaults.secure_path}\"")
+                    if (defaults.env_reset) {
+                        appendLine("Defaults env_reset")
+                    }
+                    if (defaults.env_keep.isNotEmpty()) {
+                        appendLine("Defaults env_keep += \"${defaults.env_keep.joinToString(" ")}\"")
+                    }
+                    if (defaults.env_delete.isNotEmpty()) {
+                        appendLine("Defaults env_delete += \"${defaults.env_delete.joinToString(" ")}\"")
+                    }
+                    appendLine()
+                    
+                    // User aliases
+                    security.sudo.aliases.users.forEach { (alias, users) ->
+                        appendLine("User_Alias $alias = ${users.joinToString(", ")}")
+                    }
+                    
+                    // Host aliases
+                    security.sudo.aliases.hosts.forEach { (alias, hosts) ->
+                        appendLine("Host_Alias $alias = ${hosts.joinToString(", ")}")
+                    }
+                    
+                    // Command aliases
+                    security.sudo.aliases.commands.forEach { (alias, commands) ->
+                        appendLine("Cmnd_Alias $alias = ${commands.joinToString(", ")}")
+                    }
+                    
+                    // RunAs aliases
+                    security.sudo.aliases.runAs.forEach { (alias, users) ->
+                        appendLine("Runas_Alias $alias = ${users.joinToString(", ")}")
+                    }
+                    
+                    if (security.sudo.aliases.users.isNotEmpty() || 
+                        security.sudo.aliases.hosts.isNotEmpty() ||
+                        security.sudo.aliases.commands.isNotEmpty() ||
+                        security.sudo.aliases.runAs.isNotEmpty()) {
+                        appendLine()
+                    }
+                    
+                    // Sudo rules
+                    appendLine("# Sudo Rules")
+                    security.sudo.rules.forEach { rule ->
+                        val tags = if (rule.tags.isNotEmpty()) {
+                            rule.tags.joinToString(": ", postfix = ": ")
+                        } else ""
+                        
+                        val options = if (rule.options.isNotEmpty()) {
+                            " " + rule.options.joinToString(" ")
+                        } else ""
+                        
+                        val ruleStr = "${rule.user} ${rule.host} = (${rule.runAs}) $tags${rule.commands.joinToString(", ")}$options"
+                        
+                        rule.comment?.let { comment ->
+                            appendLine("# $comment")
+                        }
+                        appendLine(ruleStr)
+                    }
+                    
+                    appendLine("EOF")
+                    appendLine()
+                    appendLine("visudo -c -f /etc/sudoers.d/horizonos")
+                    appendLine()
+                }
+                
+                // PAM configuration
+                if (security.pam.enabled) {
+                    appendLine("# PAM Configuration")
+                    
+                    // Password policy
+                    val passPolicy = security.pam.passwordPolicy
+                    appendLine("# Configure password policy")
+                    appendLine("cat > /etc/security/pwquality.conf <<EOF")
+                    appendLine("minlen = ${passPolicy.minLength}")
+                    appendLine("maxrepeat = ${passPolicy.maxRepeats}")
+                    appendLine("maxsequence = ${passPolicy.maxSequential}")
+                    if (passPolicy.requireUppercase) appendLine("ucredit = -1")
+                    if (passPolicy.requireLowercase) appendLine("lcredit = -1")
+                    if (passPolicy.requireNumbers) appendLine("dcredit = -1")
+                    if (passPolicy.requireSpecial) appendLine("ocredit = -1")
+                    appendLine("remember = ${passPolicy.historySize}")
+                    if (passPolicy.dictionary.enabled) {
+                        appendLine("dictcheck = 1")
+                        if (passPolicy.dictionary.dictionaries.isNotEmpty()) {
+                            appendLine("dictpath = ${passPolicy.dictionary.dictionaries.first()}")
+                        }
+                    }
+                    appendLine("EOF")
+                    appendLine()
+                    
+                    // Account lockout
+                    if (security.pam.lockout.enabled) {
+                        appendLine("# Configure account lockout")
+                        appendLine("cat > /etc/security/faillock.conf <<EOF")
+                        appendLine("deny = ${security.pam.lockout.maxAttempts}")
+                        appendLine("fail_interval = ${security.pam.lockout.resetAfter.inWholeSeconds}")
+                        appendLine("unlock_time = ${security.pam.lockout.lockoutDuration.inWholeSeconds}")
+                        if (security.pam.lockout.rootExempt) {
+                            appendLine("even_deny_root")
+                        }
+                        appendLine("EOF")
+                        appendLine()
+                    }
+                    
+                    // Two-factor authentication
+                    if (security.pam.twoFactor.enabled) {
+                        appendLine("# Configure two-factor authentication")
+                        when (security.pam.twoFactor.method) {
+                            TwoFactorMethod.TOTP -> {
+                                appendLine("# Install Google Authenticator PAM module")
+                                appendLine("pacman -S --noconfirm libpam-google-authenticator")
+                                appendLine()
+                                appendLine("# Configure TOTP for required users")
+                                security.pam.twoFactor.required.forEach { user ->
+                                    appendLine("sudo -u $user google-authenticator -t -d -f -r 3 -R 30 -W")
+                                }
+                            }
+                            else -> {
+                                appendLine("# Two-factor method ${security.pam.twoFactor.method} configuration")
+                            }
+                        }
+                        appendLine()
+                    }
+                }
+                
+                // Fail2ban configuration
+                if (security.fail2ban.enabled) {
+                    appendLine("# Fail2ban Configuration")
+                    appendLine("systemctl enable fail2ban.service")
+                    appendLine()
+                    appendLine("cat > /etc/fail2ban/jail.local <<EOF")
+                    appendLine("[DEFAULT]")
+                    appendLine("bantime = ${security.fail2ban.bantime.inWholeSeconds}")
+                    appendLine("findtime = ${security.fail2ban.findtime.inWholeSeconds}")
+                    appendLine("maxretry = ${security.fail2ban.maxretry}")
+                    appendLine("backend = ${security.fail2ban.backend.name.lowercase()}")
+                    appendLine("usedns = ${security.fail2ban.usedns.name.lowercase()}")
+                    appendLine("ignoreip = ${security.fail2ban.ignoreip.joinToString(" ")}")
+                    appendLine()
+                    
+                    // Jail configurations
+                    security.fail2ban.jails.forEach { jail ->
+                        appendLine("[${jail.name}]")
+                        appendLine("enabled = ${jail.enabled}")
+                        appendLine("filter = ${jail.filter}")
+                        appendLine("logpath = ${jail.logpath.joinToString(" ")}")
+                        appendLine("action = ${jail.action}")
+                        appendLine("port = ${jail.port}")
+                        appendLine("protocol = ${jail.protocol}")
+                        jail.bantime?.let { appendLine("bantime = ${it.inWholeSeconds}") }
+                        jail.findtime?.let { appendLine("findtime = ${it.inWholeSeconds}") }
+                        jail.maxretry?.let { appendLine("maxretry = $it") }
+                        if (jail.ignoreip.isNotEmpty()) {
+                            appendLine("ignoreip = ${jail.ignoreip.joinToString(" ")}")
+                        }
+                        appendLine()
+                    }
+                    
+                    appendLine("EOF")
+                    appendLine()
+                    appendLine("systemctl start fail2ban.service")
+                    appendLine()
+                }
+                
+                // Firewall configuration
+                if (security.firewall.enabled) {
+                    appendLine("# Firewall Configuration")
+                    
+                    when (security.firewall.backend) {
+                        FirewallBackend.IPTABLES -> {
+                            appendLine("# Configure iptables")
+                            appendLine("iptables -F")
+                            appendLine("iptables -X")
+                            appendLine("iptables -t nat -F")
+                            appendLine("iptables -t nat -X")
+                            appendLine()
+                            
+                            appendLine("# Set default policies")
+                            appendLine("iptables -P INPUT ${security.firewall.defaultPolicy}")
+                            appendLine("iptables -P FORWARD ${security.firewall.defaultPolicy}")
+                            appendLine("iptables -P OUTPUT ACCEPT")
+                            appendLine()
+                            
+                            appendLine("# Allow loopback")
+                            appendLine("iptables -A INPUT -i lo -j ACCEPT")
+                            appendLine("iptables -A OUTPUT -o lo -j ACCEPT")
+                            appendLine()
+                            
+                            appendLine("# Allow established connections")
+                            appendLine("iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT")
+                            appendLine()
+                            
+                            // Custom rules
+                            security.firewall.rules.forEach { rule ->
+                                val cmd = buildString {
+                                    append("iptables -A ${rule.chain}")
+                                    rule.source?.let { append(" -s $it") }
+                                    rule.destination?.let { append(" -d $it") }
+                                    rule.protocol?.let { append(" -p ${it.name.lowercase()}") }
+                                    rule.port?.let { append(" --dport $it") }
+                                    rule.interface?.let { append(" -i $it") }
+                                    if (rule.state.isNotEmpty()) {
+                                        append(" -m state --state ${rule.state.joinToString(",")}")
+                                    }
+                                    append(" -j ${rule.action}")
+                                    rule.comment?.let { append(" -m comment --comment \"$it\"") }
+                                }
+                                appendLine(cmd)
+                            }
+                            
+                            appendLine()
+                            appendLine("# Save iptables rules")
+                            appendLine("iptables-save > /etc/iptables/iptables.rules")
+                            appendLine("systemctl enable iptables.service")
+                        }
+                        FirewallBackend.FIREWALLD -> {
+                            appendLine("# Configure firewalld")
+                            appendLine("systemctl enable firewalld.service")
+                            appendLine("systemctl start firewalld.service")
+                            appendLine()
+                            
+                            // Configure zones
+                            security.firewall.zones.forEach { zone ->
+                                appendLine("# Configure zone: ${zone.name}")
+                                zone.interfaces.forEach { iface ->
+                                    appendLine("firewall-cmd --zone=${zone.name} --add-interface=$iface --permanent")
+                                }
+                                zone.sources.forEach { source ->
+                                    appendLine("firewall-cmd --zone=${zone.name} --add-source=$source --permanent")
+                                }
+                                zone.services.forEach { service ->
+                                    appendLine("firewall-cmd --zone=${zone.name} --add-service=$service --permanent")
+                                }
+                                zone.ports.forEach { port ->
+                                    appendLine("firewall-cmd --zone=${zone.name} --add-port=$port --permanent")
+                                }
+                                if (zone.masquerade) {
+                                    appendLine("firewall-cmd --zone=${zone.name} --add-masquerade --permanent")
+                                }
+                                appendLine()
+                            }
+                            
+                            appendLine("firewall-cmd --reload")
+                        }
+                        else -> {
+                            appendLine("# Firewall backend ${security.firewall.backend} configuration")
+                        }
+                    }
+                    appendLine()
+                }
+                
+                // SELinux configuration
+                if (security.selinux.enabled) {
+                    appendLine("# SELinux Configuration")
+                    appendLine("# Set SELinux mode")
+                    appendLine("setenforce ${if (security.selinux.mode == SELinuxMode.ENFORCING) "1" else "0"}")
+                    appendLine("sed -i 's/^SELINUX=.*/SELINUX=${security.selinux.mode.name.lowercase()}/' /etc/selinux/config")
+                    appendLine()
+                    
+                    // SELinux booleans
+                    security.selinux.booleans.forEach { (boolean, value) ->
+                        appendLine("setsebool -P $boolean ${if (value) "on" else "off"}")
+                    }
+                    
+                    if (security.selinux.booleans.isNotEmpty()) {
+                        appendLine()
+                    }
+                    
+                    // Load SELinux modules
+                    security.selinux.modules.forEach { module ->
+                        if (module.enabled) {
+                            appendLine("# Load SELinux module: ${module.name}")
+                            module.source?.let { source ->
+                                appendLine("semodule -i $source")
+                            } ?: run {
+                                appendLine("semodule -e ${module.name}")
+                            }
+                        } else {
+                            appendLine("semodule -d ${module.name}")
+                        }
+                    }
+                    
+                    if (security.selinux.modules.isNotEmpty()) {
+                        appendLine()
+                    }
+                }
+                
+                // AppArmor configuration
+                if (security.apparmor.enabled) {
+                    appendLine("# AppArmor Configuration")
+                    appendLine("systemctl enable apparmor.service")
+                    appendLine("systemctl start apparmor.service")
+                    appendLine()
+                    
+                    // Profile management
+                    security.apparmor.enforce.forEach { profile ->
+                        appendLine("aa-enforce $profile")
+                    }
+                    
+                    security.apparmor.complain.forEach { profile ->
+                        appendLine("aa-complain $profile")
+                    }
+                    
+                    security.apparmor.disable.forEach { profile ->
+                        appendLine("aa-disable $profile")
+                    }
+                    
+                    if (security.apparmor.enforce.isNotEmpty() || 
+                        security.apparmor.complain.isNotEmpty() || 
+                        security.apparmor.disable.isNotEmpty()) {
+                        appendLine()
+                    }
+                }
+                
+                // GPG configuration
+                if (security.gpg.enabled) {
+                    appendLine("# GPG Configuration")
+                    appendLine("mkdir -p /etc/gnupg")
+                    appendLine()
+                    appendLine("cat > /etc/gnupg/gpg.conf <<EOF")
+                    appendLine("# HorizonOS GPG Configuration")
+                    appendLine("keyserver ${security.gpg.keyserver}")
+                    security.gpg.keyserverOptions.forEach { option ->
+                        appendLine("keyserver-options $option")
+                    }
+                    security.gpg.defaultKey?.let { key ->
+                        appendLine("default-key $key")
+                    }
+                    security.gpg.defaultRecipient?.let { recipient ->
+                        appendLine("default-recipient $recipient")
+                    }
+                    appendLine("trust-model ${security.gpg.trustModel.name.lowercase()}")
+                    if (security.gpg.cipherPrefs.isNotEmpty()) {
+                        appendLine("personal-cipher-preferences ${security.gpg.cipherPrefs.joinToString(" ")}")
+                    }
+                    if (security.gpg.digestPrefs.isNotEmpty()) {
+                        appendLine("personal-digest-preferences ${security.gpg.digestPrefs.joinToString(" ")}")
+                    }
+                    if (security.gpg.compressPrefs.isNotEmpty()) {
+                        appendLine("personal-compress-preferences ${security.gpg.compressPrefs.joinToString(" ")}")
+                    }
+                    appendLine("EOF")
+                    appendLine()
+                    
+                    // Import GPG keys
+                    security.gpg.keys.forEach { key ->
+                        appendLine("# Import GPG key: ${key.keyId}")
+                        key.keyFile?.let { keyFile ->
+                            appendLine("gpg --import $keyFile")
+                        }
+                        appendLine("gpg --edit-key ${key.keyId} trust quit")
+                    }
+                    
+                    if (security.gpg.keys.isNotEmpty()) {
+                        appendLine()
+                    }
+                }
+                
+                // Audit configuration
+                if (security.audit.enabled) {
+                    appendLine("# Audit Configuration")
+                    appendLine("systemctl enable auditd.service")
+                    appendLine()
+                    appendLine("cat > /etc/audit/auditd.conf <<EOF")
+                    appendLine("# HorizonOS Audit Configuration")
+                    appendLine("log_file = /var/log/audit/audit.log")
+                    appendLine("log_format = ${security.audit.logFormat}")
+                    appendLine("log_group = ${security.audit.logGroup}")
+                    appendLine("priority_boost = ${security.audit.priority}")
+                    appendLine("flush = INCREMENTAL_ASYNC")
+                    appendLine("freq = 50")
+                    appendLine("max_log_file = ${security.audit.maxLogFile}")
+                    appendLine("num_logs = 5")
+                    appendLine("max_log_file_action = ${security.audit.maxLogFileAction}")
+                    appendLine("space_left = ${security.audit.spaceLeft}")
+                    appendLine("space_left_action = ${security.audit.spaceLeftAction}")
+                    appendLine("admin_space_left = ${security.audit.adminSpaceLeft}")
+                    appendLine("admin_space_left_action = ${security.audit.adminSpaceLeftAction}")
+                    appendLine("disk_full_action = ${security.audit.diskFull}")
+                    appendLine("disk_error_action = ${security.audit.diskError}")
+                    appendLine("use_libwrap = yes")
+                    security.audit.tcpListenPort?.let { port ->
+                        appendLine("tcp_listen_port = $port")
+                        appendLine("tcp_listen_queue = ${security.audit.tcpListenQueue}")
+                        appendLine("tcp_max_per_addr = ${security.audit.tcpMaxPerAddr}")
+                        appendLine("tcp_client_max_idle = ${security.audit.tcpClientMaxIdle}")
+                    }
+                    appendLine("distribute_network = ${if (security.audit.distributeNetwork) "yes" else "no"}")
+                    appendLine("name_format = ${security.audit.nameFormat}")
+                    security.audit.name?.let { name ->
+                        appendLine("name = $name")
+                    }
+                    appendLine("EOF")
+                    appendLine()
+                    
+                    // Audit rules
+                    if (security.audit.rules.isNotEmpty()) {
+                        appendLine("cat > /etc/audit/rules.d/horizonos.rules <<EOF")
+                        appendLine("# HorizonOS Audit Rules")
+                        security.audit.rules.forEach { rule ->
+                            if (rule.enabled) {
+                                appendLine("# ${rule.name}")
+                                appendLine(rule.rule)
+                            }
+                        }
+                        appendLine("EOF")
+                        appendLine()
+                    }
+                    
+                    appendLine("systemctl start auditd.service")
+                    appendLine()
+                }
+                
+                // TPM configuration
+                if (security.tpm.enabled) {
+                    appendLine("# TPM Configuration")
+                    appendLine("modprobe tpm_tis")
+                    appendLine("modprobe tpm_crb")
+                    appendLine()
+                    
+                    if (security.tpm.ownership.takeOwnership) {
+                        appendLine("# Take TPM ownership")
+                        when (security.tpm.version) {
+                            TPMVersion.TPM2 -> {
+                                appendLine("tpm2_startup -c")
+                                appendLine("tpm2_clear")
+                                security.tpm.ownership.ownerPassword?.let { password ->
+                                    appendLine("echo '$password' | tpm2_changeauth -c owner")
+                                }
+                            }
+                            TPMVersion.TPM1 -> {
+                                appendLine("# TPM 1.2 ownership")
+                                security.tpm.ownership.ownerPassword?.let { password ->
+                                    appendLine("echo '$password' | tpm_takeownership")
+                                }
+                            }
+                        }
+                        appendLine()
+                    }
+                    
+                    if (security.tpm.ima.enabled) {
+                        appendLine("# Configure IMA/EVM")
+                        appendLine("echo 'ima_policy=${security.tpm.ima.policy}' >> /etc/default/grub")
+                        appendLine("echo 'ima_template=${security.tpm.ima.template}' >> /etc/default/grub")
+                        appendLine("echo 'ima_hash=${security.tpm.ima.hash}' >> /etc/default/grub")
+                        appendLine("grub-mkconfig -o /boot/grub/grub.cfg")
+                        appendLine()
+                    }
+                }
+                
+                // Certificate management
+                if (security.certificates.enabled) {
+                    appendLine("# Certificate Management")
+                    
+                    if (security.certificates.ca.enabled) {
+                        appendLine("# Setup Certificate Authority")
+                        appendLine("mkdir -p ${security.certificates.ca.path}")
+                        appendLine("mkdir -p ${security.certificates.ca.keyPath}")
+                        appendLine("chmod 700 ${security.certificates.ca.keyPath}")
+                        appendLine()
+                    }
+                    
+                    // Configure certificates
+                    security.certificates.certificates.forEach { cert ->
+                        appendLine("# Configure certificate: ${cert.name}")
+                        appendLine("mkdir -p \$(dirname ${cert.certFile})")
+                        appendLine("mkdir -p \$(dirname ${cert.keyFile})")
+                        
+                        if (cert.autoRenew) {
+                            appendLine("# Setup auto-renewal for ${cert.name}")
+                            appendLine("systemctl enable cert-renew@${cert.name}.timer")
+                        }
+                        appendLine()
+                    }
+                    
+                    // Update certificate store
+                    appendLine("${security.certificates.store.updateCommand}")
+                    appendLine("${security.certificates.store.rehashCommand} ${security.certificates.store.path}")
+                    appendLine()
+                }
+                
+                // Compliance scanning
+                if (security.compliance.enabled) {
+                    appendLine("# Compliance Configuration")
+                    
+                    security.compliance.frameworks.forEach { framework ->
+                        if (framework.enabled) {
+                            appendLine("# Configure ${framework.name} ${framework.version}")
+                            framework.profiles.forEach { profile ->
+                                appendLine("# Apply profile: $profile")
+                            }
+                        }
+                    }
+                    
+                    if (security.compliance.scanning.enabled) {
+                        appendLine("# Setup compliance scanning")
+                        appendLine("systemctl enable compliance-scan.timer")
+                        if (security.compliance.scanning.remediate) {
+                            appendLine("systemctl enable compliance-remediate.service")
+                        }
+                    }
+                    appendLine()
+                }
+                
+                appendLine("echo 'Security configuration completed.'")
+            })
+            script.setExecutable(true)
+            generatedFiles.add(GeneratedFile("scripts/security-config.sh", FileType.SHELL))
+        }
+    }
+    
+    private fun generateEnhancedServicesScript(config: CompiledConfig) {
+        config.enhancedServices?.let { services ->
+            val script = File(outputDir, "scripts/enhanced-services-config.sh")
+            script.writeText(buildString {
+                appendLine("#!/bin/bash")
+                appendLine("# Enhanced Services Configuration")
+                appendLine("# Generated from HorizonOS Kotlin DSL")
+                appendLine()
+                appendLine("set -euo pipefail")
+                appendLine()
+                appendLine("echo 'Configuring enhanced services...'")
+                appendLine()
+                
+                // Database services
+                if (services.databases.isNotEmpty()) {
+                    appendLine("# === Database Services ===")
+                    services.databases.forEach { db ->
+                        appendLine("echo 'Configuring ${db.type.name.lowercase()} database...'")
+                        
+                        when (db.type) {
+                            DatabaseType.POSTGRESQL -> generatePostgreSQLConfig(db)
+                            DatabaseType.MYSQL -> generateMySQLConfig(db)
+                            DatabaseType.REDIS -> generateRedisConfig(db)
+                            DatabaseType.MONGODB -> generateMongoDBConfig(db)
+                            DatabaseType.SQLITE -> generateSQLiteConfig(db)
+                        }
+                        
+                        if (db.enabled) {
+                            appendLine("systemctl enable ${getDatabaseServiceName(db.type)}")
+                            if (db.autoStart) {
+                                appendLine("systemctl start ${getDatabaseServiceName(db.type)}")
+                            }
+                        }
+                        appendLine()
+                    }
+                }
+                
+                // Web server services
+                if (services.webServers.isNotEmpty()) {
+                    appendLine("# === Web Server Services ===")
+                    services.webServers.forEach { webServer ->
+                        appendLine("echo 'Configuring ${webServer.type.name.lowercase()} web server...'")
+                        
+                        when (webServer.type) {
+                            WebServerType.NGINX -> generateNginxConfig(webServer)
+                            WebServerType.APACHE -> generateApacheConfig(webServer)
+                            WebServerType.CADDY -> generateCaddyConfig(webServer)
+                            WebServerType.LIGHTTPD -> generateLighttpdConfig(webServer)
+                        }
+                        
+                        if (webServer.enabled) {
+                            appendLine("systemctl enable ${getWebServerServiceName(webServer.type)}")
+                            if (webServer.autoStart) {
+                                appendLine("systemctl start ${getWebServerServiceName(webServer.type)}")
+                            }
+                        }
+                        appendLine()
+                    }
+                }
+                
+                // Container services
+                if (services.containers.isNotEmpty()) {
+                    appendLine("# === Container Services ===")
+                    services.containers.forEach { container ->
+                        appendLine("echo 'Configuring ${container.runtime.name.lowercase()} container runtime...'")
+                        
+                        when (container.runtime) {
+                            ContainerRuntime.DOCKER -> generateDockerConfig(container)
+                            ContainerRuntime.PODMAN -> generatePodmanConfig(container)
+                            ContainerRuntime.SYSTEMD_NSPAWN -> generateSystemdNspawnConfig(container)
+                        }
+                        
+                        if (container.enabled) {
+                            appendLine("systemctl enable ${getContainerServiceName(container.runtime)}")
+                            if (container.autoStart) {
+                                appendLine("systemctl start ${getContainerServiceName(container.runtime)}")
+                            }
+                        }
+                        appendLine()
+                    }
+                }
+                
+                // Message queue services
+                if (services.messageQueues.isNotEmpty()) {
+                    appendLine("# === Message Queue Services ===")
+                    services.messageQueues.forEach { mq ->
+                        appendLine("echo 'Configuring ${mq.type.name.lowercase()} message queue...'")
+                        
+                        when (mq.type) {
+                            MessageQueueType.RABBITMQ -> generateRabbitMQConfig(mq)
+                            MessageQueueType.KAFKA -> generateKafkaConfig(mq)
+                            MessageQueueType.NATS -> generateNATSConfig(mq)
+                            MessageQueueType.REDIS_STREAMS -> generateRedisStreamsConfig(mq)
+                        }
+                        
+                        if (mq.enabled) {
+                            appendLine("systemctl enable ${getMessageQueueServiceName(mq.type)}")
+                            if (mq.autoStart) {
+                                appendLine("systemctl start ${getMessageQueueServiceName(mq.type)}")
+                            }
+                        }
+                        appendLine()
+                    }
+                }
+                
+                // Monitoring services
+                if (services.monitoring.isNotEmpty()) {
+                    appendLine("# === Monitoring Services ===")
+                    services.monitoring.forEach { monitoring ->
+                        appendLine("echo 'Configuring ${monitoring.type.name.lowercase()} monitoring...'")
+                        
+                        when (monitoring.type) {
+                            MonitoringType.PROMETHEUS -> generatePrometheusConfig(monitoring)
+                            MonitoringType.GRAFANA -> generateGrafanaConfig(monitoring)
+                            MonitoringType.JAEGER -> generateJaegerConfig(monitoring)
+                            MonitoringType.ZIPKIN -> generateZipkinConfig(monitoring)
+                        }
+                        
+                        if (monitoring.enabled) {
+                            appendLine("systemctl enable ${getMonitoringServiceName(monitoring.type)}")
+                            if (monitoring.autoStart) {
+                                appendLine("systemctl start ${getMonitoringServiceName(monitoring.type)}")
+                            }
+                        }
+                        appendLine()
+                    }
+                }
+                
+                // Custom systemd units
+                if (services.systemdUnits.isNotEmpty()) {
+                    appendLine("# === Custom Systemd Units ===")
+                    services.systemdUnits.forEach { unit ->
+                        appendLine("echo 'Creating systemd unit: ${unit.name}...'")
+                        generateSystemdUnitFile(unit)
+                        appendLine("systemctl daemon-reload")
+                        
+                        if (unit.wantedBy.isNotEmpty()) {
+                            appendLine("systemctl enable ${unit.name}.${unit.unitType.name.lowercase()}")
+                        }
+                        appendLine()
+                    }
+                }
+                
+                appendLine("echo 'Enhanced services configuration completed.'")
+            })
+            script.setExecutable(true)
+            generatedFiles.add(GeneratedFile("scripts/enhanced-services-config.sh", FileType.SHELL))
+        }
+    }
+    
+    private fun StringBuilder.generatePostgreSQLConfig(db: DatabaseService) {
+        appendLine("# PostgreSQL Configuration")
+        appendLine("mkdir -p ${db.dataDirectory}")
+        appendLine("chown postgres:postgres ${db.dataDirectory}")
+        
+        db.postgresConfig?.let { postgres ->
+            appendLine("cat > /etc/postgresql/postgresql.conf <<EOF")
+            appendLine("# PostgreSQL Configuration - Generated by HorizonOS")
+            appendLine("max_connections = ${postgres.maxConnections}")
+            appendLine("shared_buffers = ${postgres.sharedBuffers}")
+            appendLine("effective_cache_size = ${postgres.effectiveCacheSize}")
+            appendLine("maintenance_work_mem = ${postgres.maintenanceWorkMem}")
+            appendLine("checkpoint_completion_target = ${postgres.checkpointCompletionTarget}")
+            appendLine("wal_buffers = ${postgres.walBuffers}")
+            appendLine("default_statistics_target = ${postgres.defaultStatisticsTarget}")
+            appendLine("log_min_duration_statement = ${postgres.logMinDurationStatement}")
+            appendLine("log_connections = ${if (postgres.logConnections) "on" else "off"}")
+            appendLine("log_disconnections = ${if (postgres.logDisconnections) "on" else "off"}")
+            appendLine("log_lock_waits = ${if (postgres.logLockWaits) "on" else "off"}")
+            appendLine("log_statement = '${postgres.logStatement}'")
+            appendLine("log_line_prefix = '${postgres.logLinePrefix}'")
+            appendLine("EOF")
+            appendLine()
+            
+            if (postgres.extensions.isNotEmpty()) {
+                appendLine("# Enable PostgreSQL extensions")
+                postgres.extensions.forEach { ext ->
+                    appendLine("sudo -u postgres psql -c \"CREATE EXTENSION IF NOT EXISTS $ext;\"")
+                }
+            }
+        }
+        
+        // Create databases and users
+        if (db.databases.isNotEmpty()) {
+            appendLine("# Create databases")
+            db.databases.forEach { database ->
+                appendLine("sudo -u postgres createdb ${database.name} --encoding=${database.charset} --locale=${database.collation}")
+                database.owner?.let { owner ->
+                    appendLine("sudo -u postgres psql -c \"ALTER DATABASE ${database.name} OWNER TO $owner;\"")
+                }
+            }
+        }
+        
+        if (db.users.isNotEmpty()) {
+            appendLine("# Create users")
+            db.users.forEach { user ->
+                appendLine("sudo -u postgres psql -c \"CREATE USER ${user.name} WITH PASSWORD '${user.password}';\"")
+                user.privileges.forEach { privilege ->
+                    user.databases.forEach { database ->
+                        appendLine("sudo -u postgres psql -c \"GRANT $privilege ON DATABASE $database TO ${user.name};\"")
+                    }
+                }
+            }
+        }
+    }
+    
+    private fun StringBuilder.generateMySQLConfig(db: DatabaseService) {
+        appendLine("# MySQL Configuration")
+        appendLine("mkdir -p ${db.dataDirectory}")
+        appendLine("chown mysql:mysql ${db.dataDirectory}")
+        
+        db.mysqlConfig?.let { mysql ->
+            appendLine("cat > /etc/mysql/mysql.conf.d/horizonos.cnf <<EOF")
+            appendLine("# MySQL Configuration - Generated by HorizonOS")
+            appendLine("[mysqld]")
+            appendLine("max_connections = ${mysql.maxConnections}")
+            appendLine("innodb_buffer_pool_size = ${mysql.innodbBufferPoolSize}")
+            appendLine("innodb_log_file_size = ${mysql.innodbLogFileSize}")
+            appendLine("innodb_file_per_table = ${if (mysql.innodbFilePerTable) 1 else 0}")
+            appendLine("query_cache_type = ${if (mysql.queryCache) 1 else 0}")
+            appendLine("query_cache_size = ${mysql.queryCacheSize}")
+            appendLine("tmp_table_size = ${mysql.tmpTableSize}")
+            appendLine("max_heap_table_size = ${mysql.maxHeapTableSize}")
+            appendLine("slow_query_log = ${if (mysql.slowQueryLog) 1 else 0}")
+            appendLine("long_query_time = ${mysql.longQueryTime}")
+            appendLine("binlog_format = ${mysql.binlogFormat}")
+            appendLine("character-set-server = ${mysql.serverCharset}")
+            appendLine("collation-server = ${mysql.serverCollation}")
+            appendLine("EOF")
+        }
+    }
+    
+    private fun StringBuilder.generateRedisConfig(db: DatabaseService) {
+        appendLine("# Redis Configuration")
+        appendLine("mkdir -p ${db.dataDirectory}")
+        appendLine("chown redis:redis ${db.dataDirectory}")
+        
+        db.redisConfig?.let { redis ->
+            appendLine("cat > /etc/redis/redis.conf <<EOF")
+            appendLine("# Redis Configuration - Generated by HorizonOS")
+            appendLine("port ${db.port}")
+            appendLine("bind 127.0.0.1")
+            appendLine("maxmemory ${redis.maxMemory}")
+            appendLine("maxmemory-policy ${redis.maxMemoryPolicy}")
+            appendLine("databases ${redis.databases}")
+            appendLine("timeout ${redis.timeout}")
+            appendLine("tcp-keepalive ${redis.tcpKeepalive}")
+            
+            when (redis.persistenceMode) {
+                RedisPersistence.RDB -> {
+                    redis.rdbSavePolicy.forEach { policy ->
+                        appendLine("save $policy")
+                    }
+                }
+                RedisPersistence.AOF -> {
+                    appendLine("appendonly yes")
+                    appendLine("auto-aof-rewrite-percentage 100")
+                    appendLine("auto-aof-rewrite-min-size 64mb")
+                }
+                RedisPersistence.BOTH -> {
+                    redis.rdbSavePolicy.forEach { policy ->
+                        appendLine("save $policy")
+                    }
+                    appendLine("appendonly yes")
+                }
+                RedisPersistence.NONE -> {
+                    appendLine("save \"\"")
+                    appendLine("appendonly no")
+                }
+            }
+            
+            if (redis.requirepass && redis.password != null) {
+                appendLine("requirepass ${redis.password}")
+            }
+            
+            redis.replication?.let { repl ->
+                appendLine("slaveof ${repl.masterHost} ${repl.masterPort}")
+                appendLine("slave-read-only yes")
+                appendLine("repl-diskless-sync ${if (repl.replicationDisklessSync) "yes" else "no"}")
+            }
+            
+            appendLine("EOF")
+        }
+    }
+    
+    private fun StringBuilder.generateNginxConfig(webServer: WebServerService) {
+        appendLine("# Nginx Configuration")
+        appendLine("mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled")
+        
+        webServer.nginxConfig?.let { nginx ->
+            appendLine("cat > /etc/nginx/nginx.conf <<EOF")
+            appendLine("# Nginx Configuration - Generated by HorizonOS")
+            appendLine("user nginx;")
+            appendLine("worker_processes ${nginx.workerProcesses};")
+            appendLine("error_log /var/log/nginx/error.log;")
+            appendLine("pid /run/nginx.pid;")
+            appendLine()
+            appendLine("events {")
+            appendLine("    worker_connections ${nginx.workerConnections};")
+            appendLine("}")
+            appendLine()
+            appendLine("http {")
+            appendLine("    include /etc/nginx/mime.types;")
+            appendLine("    default_type application/octet-stream;")
+            appendLine("    keepalive_timeout ${nginx.keepaliveTimeout};")
+            appendLine("    client_max_body_size ${nginx.clientMaxBodySize};")
+            
+            if (nginx.gzipCompression) {
+                appendLine("    gzip on;")
+                appendLine("    gzip_types ${nginx.gzipTypes.joinToString(" ")};")
+            }
+            
+            // Upstreams
+            nginx.upstreams.forEach { upstream ->
+                appendLine()
+                appendLine("    upstream ${upstream.name} {")
+                when (upstream.loadBalancing) {
+                    LoadBalancingMethod.LEAST_CONN -> appendLine("        least_conn;")
+                    LoadBalancingMethod.IP_HASH -> appendLine("        ip_hash;")
+                    LoadBalancingMethod.WEIGHTED -> appendLine("        # Weighted round robin (default)")
+                    LoadBalancingMethod.ROUND_ROBIN -> {} // Default, no directive needed
+                }
+                upstream.servers.forEach { server ->
+                    appendLine("        server $server;")
+                }
+                appendLine("    }")
+            }
+            
+            appendLine("    include /etc/nginx/sites-enabled/*;")
+            appendLine("}")
+            appendLine("EOF")
+        }
+        
+        // Generate virtual host files
+        webServer.virtualHosts.forEach { vhost ->
+            appendLine("cat > /etc/nginx/sites-available/${vhost.serverName} <<EOF")
+            appendLine("server {")
+            appendLine("    listen ${vhost.port};")
+            appendLine("    server_name ${vhost.serverName};")
+            
+            vhost.documentRoot?.let { docRoot ->
+                appendLine("    root $docRoot;")
+            }
+            
+            appendLine("    index ${vhost.directoryIndex.joinToString(" ")};")
+            
+            // Locations
+            vhost.locations.forEach { location ->
+                appendLine()
+                appendLine("    location ${location.path} {")
+                location.proxyPass?.let { proxy ->
+                    appendLine("        proxy_pass $proxy;")
+                }
+                location.alias?.let { alias ->
+                    appendLine("        alias $alias;")
+                }
+                location.headers.forEach { (name, value) ->
+                    appendLine("        proxy_set_header $name $value;")
+                }
+                appendLine("    }")
+            }
+            
+            appendLine("}")
+            appendLine("EOF")
+            appendLine("ln -sf /etc/nginx/sites-available/${vhost.serverName} /etc/nginx/sites-enabled/")
+        }
+    }
+    
+    private fun StringBuilder.generateSystemdUnitFile(unit: SystemdUnit) {
+        val unitFileName = "${unit.name}.${unit.unitType.name.lowercase()}"
+        appendLine("cat > /etc/systemd/system/$unitFileName <<EOF")
+        appendLine("# ${unit.description}")
+        appendLine("# Generated by HorizonOS Kotlin DSL")
+        appendLine()
+        
+        // [Unit] section
+        appendLine("[Unit]")
+        appendLine("Description=${unit.description}")
+        if (unit.after.isNotEmpty()) {
+            appendLine("After=${unit.after.joinToString(" ")}")
+        }
+        if (unit.requires.isNotEmpty()) {
+            appendLine("Requires=${unit.requires.joinToString(" ")}")
+        }
+        if (unit.wants.isNotEmpty()) {
+            appendLine("Wants=${unit.wants.joinToString(" ")}")
+        }
+        if (unit.conflicts.isNotEmpty()) {
+            appendLine("Conflicts=${unit.conflicts.joinToString(" ")}")
+        }
+        appendLine()
+        
+        // [Service] section (for service units)
+        if (unit.unitType == SystemdUnitType.SERVICE) {
+            appendLine("[Service]")
+            appendLine("Type=${unit.type.name.lowercase()}")
+            unit.execStart?.let { appendLine("ExecStart=$it") }
+            unit.execStop?.let { appendLine("ExecStop=$it") }
+            unit.execReload?.let { appendLine("ExecReload=$it") }
+            unit.workingDirectory?.let { appendLine("WorkingDirectory=$it") }
+            unit.user?.let { appendLine("User=$it") }
+            unit.group?.let { appendLine("Group=$it") }
+            appendLine("Restart=${unit.restart.name.lowercase().replace("_", "-")}")
+            appendLine("RestartSec=${unit.restartSec}")
+            
+            if (unit.environment.isNotEmpty()) {
+                unit.environment.forEach { (key, value) ->
+                    appendLine("Environment=\"$key=$value\"")
+                }
+            }
+            appendLine()
+        }
+        
+        // [Install] section
+        if (unit.wantedBy.isNotEmpty() || unit.requiredBy.isNotEmpty()) {
+            appendLine("[Install]")
+            if (unit.wantedBy.isNotEmpty()) {
+                appendLine("WantedBy=${unit.wantedBy.joinToString(" ")}")
+            }
+            if (unit.requiredBy.isNotEmpty()) {
+                appendLine("RequiredBy=${unit.requiredBy.joinToString(" ")}")
+            }
+        }
+        
+        appendLine("EOF")
+    }
+    
+    // Helper functions for service names
+    private fun getDatabaseServiceName(type: DatabaseType): String = when (type) {
+        DatabaseType.POSTGRESQL -> "postgresql"
+        DatabaseType.MYSQL -> "mysql"
+        DatabaseType.REDIS -> "redis"
+        DatabaseType.MONGODB -> "mongodb"
+        DatabaseType.SQLITE -> "" // SQLite doesn't have a service
+    }
+    
+    private fun getWebServerServiceName(type: WebServerType): String = when (type) {
+        WebServerType.NGINX -> "nginx"
+        WebServerType.APACHE -> "apache2"
+        WebServerType.CADDY -> "caddy"
+        WebServerType.LIGHTTPD -> "lighttpd"
+    }
+    
+    private fun getContainerServiceName(runtime: ContainerRuntime): String = when (runtime) {
+        ContainerRuntime.DOCKER -> "docker"
+        ContainerRuntime.PODMAN -> "podman"
+        ContainerRuntime.SYSTEMD_NSPAWN -> "systemd-nspawn@"
+    }
+    
+    private fun getMessageQueueServiceName(type: MessageQueueType): String = when (type) {
+        MessageQueueType.RABBITMQ -> "rabbitmq-server"
+        MessageQueueType.KAFKA -> "kafka"
+        MessageQueueType.NATS -> "nats-server"
+        MessageQueueType.REDIS_STREAMS -> "redis"
+    }
+    
+    private fun getMonitoringServiceName(type: MonitoringType): String = when (type) {
+        MonitoringType.PROMETHEUS -> "prometheus"
+        MonitoringType.GRAFANA -> "grafana-server"
+        MonitoringType.JAEGER -> "jaeger"
+        MonitoringType.ZIPKIN -> "zipkin"
+    }
+    
+    // Placeholder functions for other service types (can be expanded)
+    private fun StringBuilder.generateMongoDBConfig(db: DatabaseService) {
+        appendLine("# MongoDB configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateSQLiteConfig(db: DatabaseService) {
+        appendLine("# SQLite configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateApacheConfig(webServer: WebServerService) {
+        appendLine("# Apache configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateCaddyConfig(webServer: WebServerService) {
+        appendLine("# Caddy configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateLighttpdConfig(webServer: WebServerService) {
+        appendLine("# Lighttpd configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateDockerConfig(container: ContainerService) {
+        appendLine("# Docker configuration placeholder")
+    }
+    
+    private fun StringBuilder.generatePodmanConfig(container: ContainerService) {
+        appendLine("# Podman configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateSystemdNspawnConfig(container: ContainerService) {
+        appendLine("# systemd-nspawn configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateRabbitMQConfig(mq: MessageQueueService) {
+        appendLine("# RabbitMQ configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateKafkaConfig(mq: MessageQueueService) {
+        appendLine("# Kafka configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateNATSConfig(mq: MessageQueueService) {
+        appendLine("# NATS configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateRedisStreamsConfig(mq: MessageQueueService) {
+        appendLine("# Redis Streams configuration placeholder")
+    }
+    
+    private fun StringBuilder.generatePrometheusConfig(monitoring: MonitoringService) {
+        appendLine("# Prometheus configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateGrafanaConfig(monitoring: MonitoringService) {
+        appendLine("# Grafana configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateJaegerConfig(monitoring: MonitoringService) {
+        appendLine("# Jaeger configuration placeholder")
+    }
+    
+    private fun StringBuilder.generateZipkinConfig(monitoring: MonitoringService) {
+        appendLine("# Zipkin configuration placeholder")
     }
 }
 

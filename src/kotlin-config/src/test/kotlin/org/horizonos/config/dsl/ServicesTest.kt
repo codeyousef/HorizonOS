@@ -1,0 +1,910 @@
+package org.horizonos.config.dsl
+
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+import kotlin.test.assertFalse
+
+class ServicesTest {
+
+    @Test
+    fun `should create database service with PostgreSQL configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            database(DatabaseType.POSTGRESQL) {
+                enabled = true
+                autoStart = true
+                port = 5432
+                dataDirectory = "/var/lib/postgresql/data"
+                
+                postgres {
+                    maxConnections = 200
+                    sharedBuffers = "256MB"
+                    effectiveCacheSize = "8GB"
+                    extension("pg_stat_statements")
+                    extension("pg_trgm")
+                }
+                
+                user("app_user") {
+                    password = "secure_password"
+                    privilege("SELECT")
+                    privilege("INSERT")
+                    database("app_db")
+                }
+                
+                database("app_db") {
+                    charset = "UTF8"
+                    collation = "en_US.UTF-8"
+                    owner = "app_user"
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.databases.size)
+        val db = servicesConfig.databases.first()
+        assertEquals(DatabaseType.POSTGRESQL, db.type)
+        assertTrue(db.enabled)
+        assertTrue(db.autoStart)
+        assertEquals(5432, db.port)
+        assertEquals("/var/lib/postgresql/data", db.dataDirectory)
+        
+        assertNotNull(db.postgresConfig)
+        assertEquals(200, db.postgresConfig!!.maxConnections)
+        assertEquals("256MB", db.postgresConfig!!.sharedBuffers)
+        assertEquals(2, db.postgresConfig!!.extensions.size)
+        assertTrue(db.postgresConfig!!.extensions.contains("pg_stat_statements"))
+        
+        assertEquals(1, db.users.size)
+        assertEquals("app_user", db.users.first().name)
+        assertEquals(2, db.users.first().privileges.size)
+        
+        assertEquals(1, db.databases.size)
+        assertEquals("app_db", db.databases.first().name)
+    }
+
+    @Test
+    fun `should create database service with MySQL configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            database(DatabaseType.MYSQL) {
+                enabled = true
+                port = 3306
+                
+                mysql {
+                    maxConnections = 300
+                    innodbBufferPoolSize = "512M"
+                    innodbFilePerTable = true
+                    slowQueryLog = true
+                    longQueryTime = 5
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.databases.size)
+        val db = servicesConfig.databases.first()
+        assertEquals(DatabaseType.MYSQL, db.type)
+        
+        assertNotNull(db.mysqlConfig)
+        assertEquals(300, db.mysqlConfig!!.maxConnections)
+        assertEquals("512M", db.mysqlConfig!!.innodbBufferPoolSize)
+        assertTrue(db.mysqlConfig!!.innodbFilePerTable)
+        assertTrue(db.mysqlConfig!!.slowQueryLog)
+        assertEquals(5, db.mysqlConfig!!.longQueryTime)
+    }
+
+    @Test
+    fun `should create database service with Redis configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            database(DatabaseType.REDIS) {
+                enabled = true
+                port = 6379
+                
+                redis {
+                    maxMemory = "1gb"
+                    maxMemoryPolicy = "volatile-lru"
+                    persistenceMode = RedisPersistence.BOTH
+                    requirepass = true
+                    password = "redis_password"
+                    
+                    replication {
+                        masterHost = "redis-master"
+                        masterPort = 6379
+                        replicationDisklessSync = true
+                    }
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.databases.size)
+        val db = servicesConfig.databases.first()
+        assertEquals(DatabaseType.REDIS, db.type)
+        
+        assertNotNull(db.redisConfig)
+        assertEquals("1gb", db.redisConfig!!.maxMemory)
+        assertEquals("volatile-lru", db.redisConfig!!.maxMemoryPolicy)
+        assertEquals(RedisPersistence.BOTH, db.redisConfig!!.persistenceMode)
+        assertTrue(db.redisConfig!!.requirepass)
+        assertEquals("redis_password", db.redisConfig!!.password)
+        
+        assertNotNull(db.redisConfig!!.replication)
+        assertEquals("redis-master", db.redisConfig!!.replication!!.masterHost)
+        assertTrue(db.redisConfig!!.replication!!.replicationDisklessSync)
+    }
+
+    @Test
+    fun `should create web server service with Nginx configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            webServer(WebServerType.NGINX) {
+                enabled = true
+                port = 80
+                sslPort = 443
+                serverName = "example.com"
+                enableSSL = true
+                
+                nginx {
+                    workerProcesses = "auto"
+                    workerConnections = 2048
+                    gzipCompression = true
+                    
+                    upstream("backend") {
+                        server("127.0.0.1:8080")
+                        server("127.0.0.1:8081")
+                        loadBalancing = LoadBalancingMethod.LEAST_CONN
+                        healthCheck = true
+                    }
+                    
+                    rateLimit {
+                        zone("api") {
+                            key = "\$binary_remote_addr"
+                            size = "10m"
+                            rate = "10r/s"
+                        }
+                    }
+                }
+                
+                virtualHost("api.example.com") {
+                    port = 80
+                    
+                    location("/api/") {
+                        proxyPass = "http://backend"
+                        header("X-Real-IP", "\$remote_addr")
+                    }
+                    
+                    redirect("/old-api", "/api", permanent = true)
+                }
+                
+                module("ssl")
+                module("gzip")
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.webServers.size)
+        val webServer = servicesConfig.webServers.first()
+        assertEquals(WebServerType.NGINX, webServer.type)
+        assertTrue(webServer.enabled)
+        assertEquals(80, webServer.port)
+        assertEquals(443, webServer.sslPort)
+        assertEquals("example.com", webServer.serverName)
+        assertTrue(webServer.enableSSL)
+        
+        assertNotNull(webServer.nginxConfig)
+        assertEquals("auto", webServer.nginxConfig!!.workerProcesses)
+        assertEquals(2048, webServer.nginxConfig!!.workerConnections)
+        assertTrue(webServer.nginxConfig!!.gzipCompression)
+        
+        assertEquals(1, webServer.nginxConfig!!.upstreams.size)
+        val upstream = webServer.nginxConfig!!.upstreams.first()
+        assertEquals("backend", upstream.name)
+        assertEquals(2, upstream.servers.size)
+        assertEquals(LoadBalancingMethod.LEAST_CONN, upstream.loadBalancing)
+        assertTrue(upstream.healthCheck)
+        
+        assertNotNull(webServer.nginxConfig!!.rateLimiting)
+        assertEquals(1, webServer.nginxConfig!!.rateLimiting!!.zones.size)
+        
+        assertEquals(1, webServer.virtualHosts.size)
+        val vhost = webServer.virtualHosts.first()
+        assertEquals("api.example.com", vhost.serverName)
+        assertEquals(1, vhost.locations.size)
+        assertEquals(1, vhost.redirects.size)
+        
+        assertEquals(2, webServer.modules.size)
+        assertTrue(webServer.modules.contains("ssl"))
+    }
+
+    @Test
+    fun `should create web server service with Apache configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            webServer(WebServerType.APACHE) {
+                enabled = true
+                port = 8080
+                
+                apache {
+                    serverTokens = "Minimal"
+                    keepAlive = true
+                    maxKeepAliveRequests = 200
+                    
+                    prefork {
+                        startServers = 10
+                        minSpareServers = 5
+                        maxSpareServers = 25
+                        maxRequestWorkers = 512
+                    }
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.webServers.size)
+        val webServer = servicesConfig.webServers.first()
+        assertEquals(WebServerType.APACHE, webServer.type)
+        assertEquals(8080, webServer.port)
+        
+        assertNotNull(webServer.apacheConfig)
+        assertEquals("Minimal", webServer.apacheConfig!!.serverTokens)
+        assertTrue(webServer.apacheConfig!!.keepAlive)
+        assertEquals(200, webServer.apacheConfig!!.maxKeepAliveRequests)
+        
+        assertNotNull(webServer.apacheConfig!!.preforkConfig)
+        assertEquals(10, webServer.apacheConfig!!.preforkConfig!!.startServers)
+        assertEquals(512, webServer.apacheConfig!!.preforkConfig!!.maxRequestWorkers)
+    }
+
+    @Test
+    fun `should create container service with Docker configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            container(ContainerRuntime.DOCKER) {
+                enabled = true
+                rootless = false
+                storageDriver = "overlay2"
+                
+                registry("docker.io") {
+                    username = "user"
+                    password = "pass"
+                }
+                
+                network("web") {
+                    driver = "bridge"
+                    subnet = "172.20.0.0/16"
+                    gateway = "172.20.0.1"
+                }
+                
+                volume("app-data") {
+                    driver = "local"
+                    mountPoint = "/var/lib/app"
+                }
+                
+                service("web-app") {
+                    image = "nginx"
+                    tag = "alpine"
+                    port(80, 80)
+                    port(443, 443)
+                    volume("app-data", "/usr/share/nginx/html", readOnly = true)
+                    env("NGINX_PORT", "80")
+                    network("web")
+                    restart = RestartPolicy.UNLESS_STOPPED
+                    
+                    healthCheck {
+                        test = listOf("CMD", "curl", "-f", "http://localhost/health")
+                        interval = "30s"
+                        timeout = "10s"
+                        retries = 3
+                    }
+                    
+                    resources {
+                        memory = "512m"
+                        cpus = "0.5"
+                    }
+                }
+                
+                build {
+                    dockerfile("./Dockerfile") {
+                        target = "production"
+                        context = "."
+                        tag("myapp:latest")
+                        tag("myapp:v1.0.0")
+                    }
+                    
+                    arg("VERSION", "1.0.0")
+                    
+                    cache {
+                        enabled = true
+                        maxSize = "5GB"
+                        maxAge = "72h"
+                    }
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.containers.size)
+        val container = servicesConfig.containers.first()
+        assertEquals(ContainerRuntime.DOCKER, container.runtime)
+        assertTrue(container.enabled)
+        assertFalse(container.rootless)
+        assertEquals("overlay2", container.storageDriver)
+        
+        assertEquals(1, container.registries.size)
+        assertEquals("docker.io", container.registries.first().url)
+        
+        assertEquals(1, container.networks.size)
+        assertEquals("web", container.networks.first().name)
+        assertEquals("172.20.0.0/16", container.networks.first().subnet)
+        
+        assertEquals(1, container.volumes.size)
+        assertEquals("app-data", container.volumes.first().name)
+        
+        assertEquals(1, container.services.size)
+        val service = container.services.first()
+        assertEquals("web-app", service.name)
+        assertEquals("nginx", service.image)
+        assertEquals("alpine", service.tag)
+        assertEquals(2, service.ports.size)
+        assertEquals(1, service.volumes.size)
+        assertEquals(1, service.environment.size)
+        assertEquals(RestartPolicy.UNLESS_STOPPED, service.restart)
+        
+        assertNotNull(service.healthCheck)
+        assertEquals(3, service.healthCheck!!.test.size)
+        assertEquals("30s", service.healthCheck!!.interval)
+        
+        assertNotNull(service.resources)
+        assertEquals("512m", service.resources!!.memory)
+        assertEquals("0.5", service.resources!!.cpus)
+        
+        assertNotNull(container.buildConfig)
+        assertEquals(1, container.buildConfig!!.dockerfiles.size)
+        assertEquals(1, container.buildConfig!!.buildArgs.size)
+        assertNotNull(container.buildConfig!!.cacheConfig)
+    }
+
+    @Test
+    fun `should create message queue service with RabbitMQ configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            messageQueue(MessageQueueType.RABBITMQ) {
+                enabled = true
+                port = 5672
+                managementPort = 15672
+                
+                rabbitmq {
+                    clusterEnabled = true
+                    clusterNode("rabbit@node1")
+                    clusterNode("rabbit@node2")
+                    memoryHighWatermark = 0.6
+                    diskFreeLimit = "5GB"
+                    
+                    plugin("rabbitmq_management")
+                    plugin("rabbitmq_prometheus")
+                    
+                    user("admin") {
+                        password = "admin_pass"
+                        tag("administrator")
+                        permission("/", ".*", ".*", ".*")
+                    }
+                    
+                    user("app") {
+                        password = "app_pass"
+                        permission("/app", ".*", ".*", ".*")
+                    }
+                    
+                    vhost("/app")
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.messageQueues.size)
+        val mq = servicesConfig.messageQueues.first()
+        assertEquals(MessageQueueType.RABBITMQ, mq.type)
+        assertTrue(mq.enabled)
+        assertEquals(5672, mq.port)
+        assertEquals(15672, mq.managementPort)
+        
+        assertNotNull(mq.rabbitmqConfig)
+        assertTrue(mq.rabbitmqConfig!!.clusterEnabled)
+        assertEquals(2, mq.rabbitmqConfig!!.clusterNodes.size)
+        assertEquals(0.6, mq.rabbitmqConfig!!.memoryHighWatermark)
+        assertEquals("5GB", mq.rabbitmqConfig!!.diskFreeLimit)
+        
+        assertEquals(2, mq.rabbitmqConfig!!.plugins.size)
+        assertTrue(mq.rabbitmqConfig!!.plugins.contains("rabbitmq_management"))
+        
+        assertEquals(2, mq.rabbitmqConfig!!.users.size)
+        val adminUser = mq.rabbitmqConfig!!.users.find { it.name == "admin" }
+        assertNotNull(adminUser)
+        assertEquals(1, adminUser!!.tags.size)
+        assertEquals("administrator", adminUser.tags.first())
+        
+        assertEquals(1, mq.rabbitmqConfig!!.vhosts.size)
+        assertEquals("/app", mq.rabbitmqConfig!!.vhosts.first())
+    }
+
+    @Test
+    fun `should create message queue service with Kafka configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            messageQueue(MessageQueueType.KAFKA) {
+                enabled = true
+                port = 9092
+                
+                kafka {
+                    brokerId = 1
+                    logRetentionHours = 336 // 2 weeks
+                    numPartitions = 3
+                    defaultReplicationFactor = 2
+                    zookeeperConnect = "zk1:2181,zk2:2181,zk3:2181"
+                    
+                    listener("PLAINTEXT", "localhost", 9092)
+                    listener("SSL", "kafka.example.com", 9093)
+                    
+                    security {
+                        protocol = "SSL"
+                        keystoreLocation = "/etc/kafka/keystore.jks"
+                        keystorePassword = "keystore_pass"
+                        truststoreLocation = "/etc/kafka/truststore.jks"
+                        truststorePassword = "truststore_pass"
+                    }
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.messageQueues.size)
+        val mq = servicesConfig.messageQueues.first()
+        assertEquals(MessageQueueType.KAFKA, mq.type)
+        
+        assertNotNull(mq.kafkaConfig)
+        assertEquals(1, mq.kafkaConfig!!.brokerId)
+        assertEquals(336, mq.kafkaConfig!!.logRetentionHours)
+        assertEquals(3, mq.kafkaConfig!!.numPartitions)
+        assertEquals(2, mq.kafkaConfig!!.defaultReplicationFactor.toInt())
+        
+        assertEquals(2, mq.kafkaConfig!!.listeners.size)
+        assertTrue(mq.kafkaConfig!!.listeners.contains("PLAINTEXT://localhost:9092"))
+        assertTrue(mq.kafkaConfig!!.listeners.contains("SSL://kafka.example.com:9093"))
+        
+        assertNotNull(mq.kafkaConfig!!.security)
+        assertEquals("SSL", mq.kafkaConfig!!.security!!.protocol)
+        assertEquals("/etc/kafka/keystore.jks", mq.kafkaConfig!!.security!!.keystoreLocation)
+    }
+
+    @Test
+    fun `should create monitoring service with Prometheus configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            monitoring(MonitoringType.PROMETHEUS) {
+                enabled = true
+                port = 9090
+                dataRetention = "30d"
+                
+                prometheus {
+                    scrapeInterval = "10s"
+                    evaluationInterval = "10s"
+                    
+                    scrape("prometheus") {
+                        target("localhost:9090")
+                        scrapeInterval = "5s"
+                    }
+                    
+                    scrape("node-exporter") {
+                        target("localhost:9100")
+                        target("node2:9100")
+                        metricsPath = "/metrics"
+                    }
+                    
+                    rule("/etc/prometheus/rules/*.yml")
+                    
+                    alertmanager {
+                        target("localhost:9093")
+                    }
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.monitoring.size)
+        val monitoring = servicesConfig.monitoring.first()
+        assertEquals(MonitoringType.PROMETHEUS, monitoring.type)
+        assertEquals(9090, monitoring.port)
+        assertEquals("30d", monitoring.dataRetention)
+        
+        assertNotNull(monitoring.prometheusConfig)
+        assertEquals("10s", monitoring.prometheusConfig!!.scrapeInterval)
+        assertEquals(2, monitoring.prometheusConfig!!.scrapeConfigs.size)
+        
+        val prometheusScrape = monitoring.prometheusConfig!!.scrapeConfigs.find { it.jobName == "prometheus" }
+        assertNotNull(prometheusScrape)
+        assertEquals("5s", prometheusScrape!!.scrapeInterval)
+        
+        val nodeExporterScrape = monitoring.prometheusConfig!!.scrapeConfigs.find { it.jobName == "node-exporter" }
+        assertNotNull(nodeExporterScrape)
+        assertEquals(2, nodeExporterScrape!!.staticConfigs.size)
+        
+        assertEquals(1, monitoring.prometheusConfig!!.rules.size)
+        assertNotNull(monitoring.prometheusConfig!!.alertmanagerConfig)
+    }
+
+    @Test
+    fun `should create monitoring service with Grafana configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            monitoring(MonitoringType.GRAFANA) {
+                enabled = true
+                port = 3000
+                
+                grafana {
+                    adminUser = "admin"
+                    adminPassword = "secure_password"
+                    allowSignUp = false
+                    
+                    datasource("Prometheus") {
+                        type = "prometheus"
+                        url = "http://localhost:9090"
+                        access = "proxy"
+                        isDefault = true
+                    }
+                    
+                    datasource("Loki") {
+                        type = "loki"
+                        url = "http://localhost:3100"
+                        access = "proxy"
+                    }
+                    
+                    dashboard("System Overview", "/var/lib/grafana/dashboards/system.json")
+                    dashboard("Application Metrics", "/var/lib/grafana/dashboards/app.json")
+                    
+                    plugin("grafana-piechart-panel")
+                    plugin("grafana-worldmap-panel")
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.monitoring.size)
+        val monitoring = servicesConfig.monitoring.first()
+        assertEquals(MonitoringType.GRAFANA, monitoring.type)
+        
+        assertNotNull(monitoring.grafanaConfig)
+        assertEquals("admin", monitoring.grafanaConfig!!.adminUser)
+        assertEquals("secure_password", monitoring.grafanaConfig!!.adminPassword)
+        assertFalse(monitoring.grafanaConfig!!.allowSignUp)
+        
+        assertEquals(2, monitoring.grafanaConfig!!.datasources.size)
+        val prometheusDatasource = monitoring.grafanaConfig!!.datasources.find { it.name == "Prometheus" }
+        assertNotNull(prometheusDatasource)
+        assertTrue(prometheusDatasource!!.isDefault)
+        assertEquals("prometheus", prometheusDatasource.type)
+        
+        assertEquals(2, monitoring.grafanaConfig!!.dashboards.size)
+        assertEquals(2, monitoring.grafanaConfig!!.plugins.size)
+    }
+
+    @Test
+    fun `should create custom systemd unit`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            systemdUnit("my-custom-service") {
+                unitType = SystemdUnitType.SERVICE
+                description = "My Custom Application Service"
+                after.add("network.target")
+                after.add("postgresql.service")
+                requires.add("postgresql.service")
+                
+                execStart = "/usr/local/bin/my-app"
+                execStop = "/usr/local/bin/my-app stop"
+                workingDirectory = "/opt/my-app"
+                user = "myapp"
+                group = "myapp"
+                
+                env("NODE_ENV", "production")
+                env("PORT", "3000")
+                
+                restart = SystemdRestartPolicy.ALWAYS
+                restartSec = 5
+                type = SystemdServiceType.SIMPLE
+                
+                wantedBy.add("multi-user.target")
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.systemdUnits.size)
+        val unit = servicesConfig.systemdUnits.first()
+        assertEquals("my-custom-service", unit.name)
+        assertEquals(SystemdUnitType.SERVICE, unit.unitType)
+        assertEquals("My Custom Application Service", unit.description)
+        
+        assertEquals(2, unit.after.size)
+        assertTrue(unit.after.contains("network.target"))
+        assertTrue(unit.after.contains("postgresql.service"))
+        
+        assertEquals(1, unit.requires.size)
+        assertEquals("postgresql.service", unit.requires.first())
+        
+        assertEquals("/usr/local/bin/my-app", unit.execStart)
+        assertEquals("/usr/local/bin/my-app stop", unit.execStop)
+        assertEquals("/opt/my-app", unit.workingDirectory)
+        assertEquals("myapp", unit.user)
+        assertEquals("myapp", unit.group)
+        
+        assertEquals(2, unit.environment.size)
+        assertEquals("production", unit.environment["NODE_ENV"])
+        assertEquals("3000", unit.environment["PORT"])
+        
+        assertEquals(SystemdRestartPolicy.ALWAYS, unit.restart)
+        assertEquals(5, unit.restartSec)
+        assertEquals(SystemdServiceType.SIMPLE, unit.type)
+        
+        assertEquals(1, unit.wantedBy.size)
+        assertEquals("multi-user.target", unit.wantedBy.first())
+    }
+
+    @Test
+    fun `should create complex multi-service configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            // Database setup
+            database(DatabaseType.POSTGRESQL) {
+                enabled = true
+                postgres {
+                    maxConnections = 100
+                }
+                user("app") {
+                    database("app_db")
+                }
+                database("app_db") {
+                    owner = "app"
+                }
+            }
+            
+            // Web server setup
+            webServer(WebServerType.NGINX) {
+                enabled = true
+                virtualHost("app.example.com") {
+                    location("/") {
+                        proxyPass = "http://localhost:3000"
+                    }
+                }
+            }
+            
+            // Container orchestration
+            container(ContainerRuntime.DOCKER) {
+                enabled = true
+                service("redis") {
+                    image = "redis"
+                    tag = "alpine"
+                    port(6379, 6379)
+                }
+            }
+            
+            // Message queue
+            messageQueue(MessageQueueType.RABBITMQ) {
+                enabled = true
+                rabbitmq {
+                    user("app") {
+                        password = "password"
+                    }
+                }
+            }
+            
+            // Monitoring
+            monitoring(MonitoringType.PROMETHEUS) {
+                enabled = true
+                prometheus {
+                    scrape("app") {
+                        target("localhost:3000")
+                    }
+                }
+            }
+            
+            // Custom systemd service
+            systemdUnit("app-worker") {
+                description = "Application Background Worker"
+                execStart = "/usr/local/bin/worker"
+                restart = SystemdRestartPolicy.ON_FAILURE
+            }
+        }.toConfig()
+
+        // Verify all service types are configured
+        assertEquals(1, servicesConfig.databases.size)
+        assertEquals(1, servicesConfig.webServers.size)
+        assertEquals(1, servicesConfig.containers.size)
+        assertEquals(1, servicesConfig.messageQueues.size)
+        assertEquals(1, servicesConfig.monitoring.size)
+        assertEquals(1, servicesConfig.systemdUnits.size)
+        
+        // Verify cross-service integration is possible
+        assertEquals(DatabaseType.POSTGRESQL, servicesConfig.databases.first().type)
+        assertEquals(WebServerType.NGINX, servicesConfig.webServers.first().type)
+        assertEquals(ContainerRuntime.DOCKER, servicesConfig.containers.first().runtime)
+        assertEquals(MessageQueueType.RABBITMQ, servicesConfig.messageQueues.first().type)
+        assertEquals(MonitoringType.PROMETHEUS, servicesConfig.monitoring.first().type)
+    }
+
+    @Test
+    fun `should validate default ports for different database types`() {
+        val postgresServices = EnhancedServicesContext().apply {
+            database(DatabaseType.POSTGRESQL) {
+                enabled = true
+            }
+        }.toConfig()
+        assertEquals(5432, postgresServices.databases.first().port)
+
+        val mysqlServices = EnhancedServicesContext().apply {
+            database(DatabaseType.MYSQL) {
+                enabled = true
+            }
+        }.toConfig()
+        assertEquals(3306, mysqlServices.databases.first().port)
+
+        val redisServices = EnhancedServicesContext().apply {
+            database(DatabaseType.REDIS) {
+                enabled = true
+            }
+        }.toConfig()
+        assertEquals(6379, redisServices.databases.first().port)
+    }
+
+    @Test
+    fun `should validate default ports for different monitoring types`() {
+        val prometheusServices = EnhancedServicesContext().apply {
+            monitoring(MonitoringType.PROMETHEUS) {
+                enabled = true
+            }
+        }.toConfig()
+        assertEquals(9090, prometheusServices.monitoring.first().port)
+
+        val grafanaServices = EnhancedServicesContext().apply {
+            monitoring(MonitoringType.GRAFANA) {
+                enabled = true
+            }
+        }.toConfig()
+        assertEquals(3000, grafanaServices.monitoring.first().port)
+    }
+
+    @Test
+    fun `should handle empty services configuration`() {
+        val servicesConfig = EnhancedServicesContext().toConfig()
+        
+        assertTrue(servicesConfig.databases.isEmpty())
+        assertTrue(servicesConfig.webServers.isEmpty())
+        assertTrue(servicesConfig.containers.isEmpty())
+        assertTrue(servicesConfig.messageQueues.isEmpty())
+        assertTrue(servicesConfig.monitoring.isEmpty())
+        assertTrue(servicesConfig.systemdUnits.isEmpty())
+    }
+
+    @Test
+    fun `should create NATS message queue with JetStream`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            messageQueue(MessageQueueType.NATS) {
+                enabled = true
+                port = 4222
+                
+                nats {
+                    clusterEnabled = true
+                    clusterName = "my-nats-cluster"
+                    clusterRoute("nats://nats2:6222")
+                    clusterRoute("nats://nats3:6222")
+                    
+                    jetstream {
+                        maxMemory = "2GB"
+                        maxStorage = "20GB"
+                        compressOk = true
+                    }
+                    
+                    auth {
+                        user("app", "password", listOf("publish", "subscribe"))
+                        token = "secret-token"
+                    }
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.messageQueues.size)
+        val mq = servicesConfig.messageQueues.first()
+        assertEquals(MessageQueueType.NATS, mq.type)
+        
+        assertNotNull(mq.natsConfig)
+        assertTrue(mq.natsConfig!!.clusterEnabled)
+        assertEquals("my-nats-cluster", mq.natsConfig!!.clusterName)
+        assertEquals(2, mq.natsConfig!!.clusterRoutes.size)
+        
+        assertTrue(mq.natsConfig!!.jetStreamEnabled)
+        assertNotNull(mq.natsConfig!!.jetStreamConfig)
+        assertEquals("2GB", mq.natsConfig!!.jetStreamConfig!!.maxMemory)
+        assertEquals("20GB", mq.natsConfig!!.jetStreamConfig!!.maxStorage)
+        assertTrue(mq.natsConfig!!.jetStreamConfig!!.compressOk)
+        
+        assertNotNull(mq.natsConfig!!.auth)
+        assertEquals(1, mq.natsConfig!!.auth!!.users.size)
+        assertEquals("secret-token", mq.natsConfig!!.auth!!.token)
+    }
+
+    @Test
+    fun `should create Caddy web server with admin and logging`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            webServer(WebServerType.CADDY) {
+                enabled = true
+                port = 80
+                
+                caddy {
+                    autoHTTPS = true
+                    httpPort = 80
+                    httpsPort = 443
+                    grace = "10s"
+                    
+                    admin {
+                        listen = "localhost:2019"
+                        disabled = false
+                    }
+                    
+                    logging {
+                        log("access") {
+                            output = "/var/log/caddy/access.log"
+                            format = "json"
+                            level = "INFO"
+                        }
+                        
+                        log("error") {
+                            output = "/var/log/caddy/error.log"
+                            format = "console"
+                            level = "ERROR"
+                        }
+                    }
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.webServers.size)
+        val webServer = servicesConfig.webServers.first()
+        assertEquals(WebServerType.CADDY, webServer.type)
+        
+        assertNotNull(webServer.caddyConfig)
+        assertTrue(webServer.caddyConfig!!.autoHTTPS)
+        assertEquals(80, webServer.caddyConfig!!.httpPort)
+        assertEquals(443, webServer.caddyConfig!!.httpsPort)
+        assertEquals("10s", webServer.caddyConfig!!.grace)
+        
+        assertNotNull(webServer.caddyConfig!!.admin)
+        assertEquals("localhost:2019", webServer.caddyConfig!!.admin!!.listen)
+        assertFalse(webServer.caddyConfig!!.admin!!.disabled)
+        
+        assertNotNull(webServer.caddyConfig!!.logging)
+        assertEquals(2, webServer.caddyConfig!!.logging!!.logs.size)
+        
+        val accessLog = webServer.caddyConfig!!.logging!!.logs.find { it.name == "access" }
+        assertNotNull(accessLog)
+        assertEquals("/var/log/caddy/access.log", accessLog!!.output)
+        assertEquals("json", accessLog.format)
+    }
+
+    @Test
+    fun `should create Podman container service with rootless configuration`() {
+        val servicesConfig = EnhancedServicesContext().apply {
+            container(ContainerRuntime.PODMAN) {
+                enabled = true
+                rootless = true
+                storageDriver = "overlay"
+                
+                registry("quay.io") {
+                    username = "myuser"
+                    password = "mypass"
+                    insecure = false
+                }
+                
+                service("app") {
+                    image = "quay.io/myorg/myapp"
+                    tag = "v2.0.0"
+                    port(8080, 8080)
+                    env("APP_ENV", "production")
+                    restart = RestartPolicy.ON_FAILURE
+                }
+            }
+        }.toConfig()
+
+        assertEquals(1, servicesConfig.containers.size)
+        val container = servicesConfig.containers.first()
+        assertEquals(ContainerRuntime.PODMAN, container.runtime)
+        assertTrue(container.rootless)
+        assertEquals("overlay", container.storageDriver)
+        
+        assertEquals(1, container.registries.size)
+        assertEquals("quay.io", container.registries.first().url)
+        assertFalse(container.registries.first().insecure)
+        
+        assertEquals(1, container.services.size)
+        val service = container.services.first()
+        assertEquals("quay.io/myorg/myapp", service.image)
+        assertEquals("v2.0.0", service.tag)
+        assertEquals(RestartPolicy.ON_FAILURE, service.restart)
+    }
+}
