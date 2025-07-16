@@ -107,6 +107,14 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         config.environment?.let {
             File(outputDir, "json/environment.json").writeText(json.encodeToString(it))
         }
+        
+        config.enhancedDesktop?.let {
+            File(outputDir, "json/enhanced-desktop.json").writeText(json.encodeToString(it))
+        }
+        
+        config.graphDesktop?.let {
+            File(outputDir, "json/graph-desktop.json").writeText(json.encodeToString(it))
+        }
     }
     
     private fun generateYamlOutput(config: CompiledConfig) {
@@ -247,6 +255,8 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             config.enhancedServices?.let { appendLine("./enhanced-services-config.sh") }
             config.development?.let { appendLine("./development-setup.sh") }
             config.environment?.let { appendLine("./environment-setup.sh") }
+            config.enhancedDesktop?.let { appendLine("./enhanced-desktop-setup.sh") }
+            config.graphDesktop?.let { appendLine("./graph-desktop-setup.sh") }
             config.desktop?.let { appendLine("./desktop-setup.sh") }
             config.automation?.let { appendLine("./automation-setup.sh") }
             appendLine()
@@ -290,6 +300,12 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         
         // Environment setup script
         config.environment?.let { generateEnvironmentScript(config) }
+        
+        // Enhanced Desktop setup script
+        config.enhancedDesktop?.let { generateEnhancedDesktopScript(config) }
+        
+        // Graph Desktop setup script
+        config.graphDesktop?.let { generateGraphDesktopScript(config) }
         
         // Desktop setup script
         config.desktop?.let { generateDesktopScript(config) }
@@ -1000,6 +1016,424 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             })
             script.setExecutable(true)
             generatedFiles.add(GeneratedFile("scripts/desktop-setup.sh", FileType.SHELL))
+        }
+    }
+    
+    private fun generateEnhancedDesktopScript(config: CompiledConfig) {
+        config.enhancedDesktop?.let { enhancedDesktop ->
+            val script = File(outputDir, "scripts/enhanced-desktop-setup.sh")
+            script.writeText(buildString {
+                appendLine("#!/bin/bash")
+                appendLine("# Enhanced Desktop Environment Setup")
+                appendLine("# Generated from HorizonOS Kotlin DSL")
+                appendLine()
+                appendLine("echo 'Setting up enhanced desktop environment...'")
+                appendLine()
+                
+                // Window Managers
+                if (enhancedDesktop.windowManagers.isNotEmpty()) {
+                    appendLine("# Window Managers Configuration")
+                    enhancedDesktop.windowManagers.forEach { wm ->
+                        if (wm.enabled) {
+                            appendLine("echo 'Configuring window manager: ${wm.type}'")
+                            appendLine("mkdir -p /etc/horizonos/wm/${wm.type.name.lowercase()}")
+                            appendLine("cp \"${wm.configFile}\" /etc/horizonos/wm/${wm.type.name.lowercase()}/")
+                            if (wm.autoStart) {
+                                appendLine("echo '${wm.type.name.lowercase()}' >> /etc/horizonos/autostart-wm")
+                            }
+                            wm.settings.forEach { (key, value) ->
+                                appendLine("echo '$key=$value' >> /etc/horizonos/wm/${wm.type.name.lowercase()}/settings.conf")
+                            }
+                        }
+                    }
+                    appendLine()
+                }
+                
+                // Compositors
+                if (enhancedDesktop.compositors.isNotEmpty()) {
+                    appendLine("# Compositors Configuration")
+                    enhancedDesktop.compositors.forEach { comp ->
+                        if (comp.enabled) {
+                            appendLine("echo 'Configuring compositor: ${comp.type}'")
+                            appendLine("mkdir -p /etc/horizonos/compositor/${comp.type.name.lowercase()}")
+                            appendLine("# Compositor ${comp.type} configuration")
+                            comp.settings.forEach { (key, value) ->
+                                appendLine("echo '$key=$value' >> /etc/horizonos/compositor/${comp.type.name.lowercase()}/settings.conf")
+                            }
+                        }
+                    }
+                    appendLine()
+                }
+                
+                // Themes
+                if (enhancedDesktop.themes.isNotEmpty()) {
+                    appendLine("# Themes Configuration")
+                    enhancedDesktop.themes.forEach { theme ->
+                        if (theme.enabled) {
+                            appendLine("echo 'Installing theme: ${theme.name}'")
+                            appendLine("mkdir -p /usr/share/themes/${theme.name}")
+                            appendLine("# Theme ${theme.name} installation")
+                            if (theme.enabled) {
+                                appendLine("echo '${theme.name}' > /etc/horizonos/default-theme")
+                            }
+                        }
+                    }
+                    appendLine()
+                }
+                
+                // Panels
+                if (enhancedDesktop.panels.isNotEmpty()) {
+                    appendLine("# Panels Configuration")
+                    enhancedDesktop.panels.forEach { panel ->
+                        if (panel.enabled) {
+                            appendLine("echo 'Configuring panel: ${panel.type}'")
+                            appendLine("mkdir -p /etc/horizonos/panel/${panel.type.name.lowercase()}")
+                            appendLine("# Panel ${panel.type} configuration")
+                            appendLine("echo 'position=${panel.position}' >> /etc/horizonos/panel/${panel.type.name.lowercase()}/settings.conf")
+                            appendLine("echo 'height=${panel.height}' >> /etc/horizonos/panel/${panel.type.name.lowercase()}/settings.conf")
+                            appendLine("echo 'autohide=${panel.autohide}' >> /etc/horizonos/panel/${panel.type.name.lowercase()}/settings.conf")
+                        }
+                    }
+                    appendLine()
+                }
+                
+                // Launchers
+                if (enhancedDesktop.launchers.isNotEmpty()) {
+                    appendLine("# Launchers Configuration")
+                    enhancedDesktop.launchers.forEach { launcher ->
+                        if (launcher.enabled) {
+                            appendLine("echo 'Configuring launcher: ${launcher.type}'")
+                            appendLine("mkdir -p /etc/horizonos/launcher/${launcher.type.name.lowercase()}")
+                            appendLine("# Launcher ${launcher.type} configuration")
+                            launcher.settings.forEach { (key, value) ->
+                                appendLine("echo '$key=$value' >> /etc/horizonos/launcher/${launcher.type.name.lowercase()}/settings.conf")
+                            }
+                        }
+                    }
+                    appendLine()
+                }
+                
+                // Notifications
+                if (enhancedDesktop.notifications.isNotEmpty()) {
+                    appendLine("# Notifications Configuration")
+                    enhancedDesktop.notifications.forEach { notif ->
+                        if (notif.enabled) {
+                            appendLine("echo 'Configuring notification daemon: ${notif.type}'")
+                            appendLine("mkdir -p /etc/horizonos/notifications")
+                            appendLine("echo 'type=${notif.type}' >> /etc/horizonos/notifications/settings.conf")
+                            appendLine("echo 'timeout=${notif.timeout}' >> /etc/horizonos/notifications/settings.conf")
+                            appendLine("echo 'position=${notif.position}' >> /etc/horizonos/notifications/settings.conf")
+                            appendLine("echo 'max_notifications=${notif.maxNotifications}' >> /etc/horizonos/notifications/settings.conf")
+                        }
+                    }
+                    appendLine()
+                }
+                
+                // Wallpapers
+                if (enhancedDesktop.wallpapers.isNotEmpty()) {
+                    appendLine("# Wallpapers Configuration")
+                    enhancedDesktop.wallpapers.forEach { wallpaper ->
+                        if (wallpaper.type != null) {
+                            appendLine("echo 'Setting up wallpaper: ${wallpaper.type}'")
+                            appendLine("mkdir -p /usr/share/backgrounds")
+                            appendLine("cp \"${wallpaper.path}\" /usr/share/backgrounds/")
+                            if (wallpaper.path != null) {
+                                appendLine("echo '${wallpaper.path}' > /etc/horizonos/default-wallpaper")
+                            }
+                        }
+                    }
+                    appendLine()
+                }
+                
+                // Workspaces
+                if (enhancedDesktop.workspaces.isNotEmpty()) {
+                    appendLine("# Workspaces Configuration")
+                    appendLine("mkdir -p /etc/horizonos/workspaces")
+                    enhancedDesktop.workspaces.forEach { workspace ->
+                        appendLine("echo 'Setting up workspace: ${workspace.name ?: workspace.number}'")
+                        appendLine("echo 'name=${workspace.name ?: workspace.number}' >> /etc/horizonos/workspaces/${workspace.name ?: workspace.number}.conf")
+                        appendLine("echo 'layout=${workspace.layout}' >> /etc/horizonos/workspaces/${workspace.name ?: workspace.number}.conf")
+                        appendLine("echo 'persistent=${workspace.persistent}' >> /etc/horizonos/workspaces/${workspace.name ?: workspace.number}.conf")
+                    }
+                    appendLine()
+                }
+                
+                // Install required packages
+                appendLine("# Install enhanced desktop packages")
+                appendLine("pacman -S --needed --noconfirm \\")
+                appendLine("    gtk3 gtk4 qt5-base qt6-base \\")
+                appendLine("    fontconfig freetype2 \\")
+                appendLine("    xorg-server xorg-xrandr xorg-xset \\")
+                appendLine("    mesa vulkan-radeon vulkan-intel \\")
+                appendLine("    pipewire pipewire-alsa pipewire-pulse \\")
+                appendLine("    polkit-gnome")
+                appendLine()
+                
+                appendLine("# Create enhanced desktop service")
+                appendLine("cat > /etc/systemd/system/enhanced-desktop.service <<EOF")
+                appendLine("[Unit]")
+                appendLine("Description=HorizonOS Enhanced Desktop Environment")
+                appendLine("After=graphical-session.target")
+                appendLine()
+                appendLine("[Service]")
+                appendLine("Type=oneshot")
+                appendLine("ExecStart=/usr/bin/horizonos-enhanced-desktop-init")
+                appendLine("RemainAfterExit=yes")
+                appendLine()
+                appendLine("[Install]")
+                appendLine("WantedBy=graphical-session.target")
+                appendLine("EOF")
+                appendLine()
+                
+                appendLine("systemctl enable enhanced-desktop.service")
+                appendLine()
+                appendLine("echo 'Enhanced desktop setup completed.'")
+            })
+            script.setExecutable(true)
+            generatedFiles.add(GeneratedFile("scripts/enhanced-desktop-setup.sh", FileType.SHELL))
+        }
+    }
+    
+    private fun generateGraphDesktopScript(config: CompiledConfig) {
+        config.graphDesktop?.let { graphDesktop ->
+            val script = File(outputDir, "scripts/graph-desktop-setup.sh")
+            script.writeText(buildString {
+                appendLine("#!/bin/bash")
+                appendLine("# Graph Desktop Environment Setup (FLAGSHIP FEATURE)")
+                appendLine("# Generated from HorizonOS Kotlin DSL")
+                appendLine()
+                appendLine("echo 'Setting up HorizonOS Graph Desktop - The Future of Desktop Computing...'")
+                appendLine()
+                
+                if (graphDesktop.enabled) {
+                    // Rendering Engine Setup
+                    appendLine("# Rendering Engine Configuration")
+                    appendLine("echo 'Configuring rendering engine: ${graphDesktop.renderingEngine}'")
+                    appendLine("mkdir -p /etc/horizonos/graph-desktop/rendering")
+                    appendLine("echo 'engine=${graphDesktop.renderingEngine}' > /etc/horizonos/graph-desktop/rendering/engine.conf")
+                    appendLine("echo 'performance_mode=${graphDesktop.performanceMode}' >> /etc/horizonos/graph-desktop/rendering/engine.conf")
+                    appendLine("echo 'enable_physics=${graphDesktop.enablePhysics}' >> /etc/horizonos/graph-desktop/rendering/engine.conf")
+                    appendLine("echo 'max_nodes=${graphDesktop.maxNodes}' >> /etc/horizonos/graph-desktop/rendering/engine.conf")
+                    appendLine("echo 'max_edges=${graphDesktop.maxEdges}' >> /etc/horizonos/graph-desktop/rendering/engine.conf")
+                    appendLine()
+                    
+                    // Input Configuration
+                    appendLine("# Input Configuration")
+                    appendLine("mkdir -p /etc/horizonos/graph-desktop/input")
+                    appendLine("echo 'enable_gestures=${graphDesktop.enableGestures}' > /etc/horizonos/graph-desktop/input/settings.conf")
+                    appendLine("echo 'enable_keyboard_navigation=${graphDesktop.enableKeyboardNavigation}' >> /etc/horizonos/graph-desktop/input/settings.conf")
+                    appendLine("echo 'enable_voice_control=${graphDesktop.enableVoiceControl}' >> /etc/horizonos/graph-desktop/input/settings.conf")
+                    appendLine()
+                    
+                    // Node Types Configuration
+                    if (graphDesktop.nodeTypes.isNotEmpty()) {
+                        appendLine("# Node Types Configuration")
+                        appendLine("mkdir -p /etc/horizonos/graph-desktop/nodes")
+                        graphDesktop.nodeTypes.forEach { nodeType ->
+                            appendLine("echo 'Configuring node type: ${nodeType.name}'")
+                            appendLine("cat > /etc/horizonos/graph-desktop/nodes/${nodeType.name}.conf <<EOF")
+                            appendLine("name=${nodeType.name}")
+                            appendLine("display_name=${nodeType.displayName}")
+                            appendLine("category=${nodeType.category}")
+                            appendLine("shape=${nodeType.shape}")
+                            appendLine("color=${nodeType.color}")
+                            appendLine("size=${nodeType.size}")
+                            appendLine("physics_enabled=${nodeType.physics != null}")
+                            appendLine("EOF")
+                        }
+                        appendLine()
+                    }
+                    
+                    // Edge Types Configuration
+                    if (graphDesktop.edgeTypes.isNotEmpty()) {
+                        appendLine("# Edge Types Configuration")
+                        appendLine("mkdir -p /etc/horizonos/graph-desktop/edges")
+                        graphDesktop.edgeTypes.forEach { edgeType ->
+                            appendLine("echo 'Configuring edge type: ${edgeType.name}'")
+                            appendLine("cat > /etc/horizonos/graph-desktop/edges/${edgeType.name}.conf <<EOF")
+                            appendLine("name=${edgeType.name}")
+                            appendLine("display_name=${edgeType.displayName}")
+                            appendLine("style=${edgeType.style}")
+                            appendLine("color=${edgeType.color}")
+                            appendLine("width=${edgeType.width}")
+                            appendLine("animated=${edgeType.animated}")
+                            appendLine("EOF")
+                        }
+                        appendLine()
+                    }
+                    
+                    // Layout Algorithms Configuration
+                    if (graphDesktop.layouts.isNotEmpty()) {
+                        appendLine("# Layout Algorithms Configuration")
+                        appendLine("mkdir -p /etc/horizonos/graph-desktop/layouts")
+                        graphDesktop.layouts.forEach { layout ->
+                            appendLine("echo 'Configuring layout: ${layout.algorithm}'")
+                            appendLine("cat > /etc/horizonos/graph-desktop/layouts/${layout.algorithm.name.lowercase()}.conf <<EOF")
+                            appendLine("algorithm=${layout.algorithm}")
+                            appendLine("enabled=${layout.enabled}")
+                            appendLine("primary=${layout.primary}")
+                            appendLine("EOF")
+                        }
+                        appendLine()
+                    }
+                    
+                    // AI Integration Configuration
+                    if (graphDesktop.aiIntegration.isNotEmpty()) {
+                        appendLine("# AI Integration Configuration")
+                        appendLine("mkdir -p /etc/horizonos/graph-desktop/ai")
+                        graphDesktop.aiIntegration.forEach { ai ->
+                            if (ai.enabled) {
+                                appendLine("echo 'Configuring AI integration: ${ai.provider}'")
+                                appendLine("cat > /etc/horizonos/graph-desktop/ai/${ai.provider.name.lowercase()}.conf <<EOF")
+                                appendLine("provider=${ai.provider}")
+                                appendLine("model=${ai.model}")
+                                appendLine("features=${ai.features}")
+                                appendLine("suggestions=${ai.suggestions != null}")
+                                appendLine("search=${ai.search != null}")
+                                appendLine("clustering=${ai.clustering != null}")
+                                appendLine("EOF")
+                            }
+                        }
+                        appendLine()
+                    }
+                    
+                    // Workspace Configuration
+                    if (graphDesktop.workspaces.isNotEmpty()) {
+                        appendLine("# Graph Workspaces Configuration")
+                        appendLine("mkdir -p /etc/horizonos/graph-desktop/workspaces")
+                        graphDesktop.workspaces.forEach { workspace ->
+                            appendLine("echo 'Setting up graph workspace: ${workspace.name}'")
+                            appendLine("cat > /etc/horizonos/graph-desktop/workspaces/${workspace.name}.conf <<EOF")
+                            appendLine("name=${workspace.name}")
+                            appendLine("layout=${workspace.defaultLayout}")
+                            appendLine("max_nodes=${workspace.maxNodes}")
+                            appendLine("collaborative=${workspace.collaborative}")
+                            appendLine("persistence=${workspace.persistence}")
+                            appendLine("EOF")
+                        }
+                        appendLine()
+                    }
+                    
+                    // Themes Configuration
+                    if (graphDesktop.themes.isNotEmpty()) {
+                        appendLine("# Graph Themes Configuration")
+                        appendLine("mkdir -p /etc/horizonos/graph-desktop/themes")
+                        graphDesktop.themes.forEach { theme ->
+                            appendLine("echo 'Installing graph theme: ${theme.name}'")
+                            appendLine("cat > /etc/horizonos/graph-desktop/themes/${theme.name}.conf <<EOF")
+                            appendLine("name=${theme.name}")
+                            appendLine("background_color=${theme.backgroundColor}")
+                            appendLine("grid_color=${theme.gridColor}")
+                            appendLine("selection_color=${theme.selectionColor}")
+                            appendLine("dark_mode=${theme.darkMode}")
+                            appendLine("EOF")
+                        }
+                        appendLine()
+                    }
+                    
+                    // Gestures Configuration
+                    if (graphDesktop.gestures.isNotEmpty()) {
+                        appendLine("# Gestures Configuration")
+                        appendLine("mkdir -p /etc/horizonos/graph-desktop/gestures")
+                        graphDesktop.gestures.forEach { gesture ->
+                            if (gesture.enabled) {
+                                appendLine("echo 'Configuring gesture: ${gesture.name}'")
+                                appendLine("cat > /etc/horizonos/graph-desktop/gestures/${gesture.name}.conf <<EOF")
+                                appendLine("name=${gesture.name}")
+                                appendLine("direction=${gesture.direction}")
+                                appendLine("fingers=${gesture.fingers}")
+                                appendLine("action=${gesture.action}")
+                                appendLine("EOF")
+                            }
+                        }
+                        appendLine()
+                    }
+                    
+                    // Install graph desktop packages
+                    appendLine("# Install graph desktop packages")
+                    appendLine("pacman -S --needed --noconfirm \\")
+                    appendLine("    vulkan-headers vulkan-validation-layers \\")
+                    appendLine("    mesa-vdpau mesa-demos \\")
+                    appendLine("    libdrm wayland wayland-protocols \\")
+                    appendLine("    nodejs npm rust cargo \\")
+                    appendLine("    python python-pip \\")
+                    appendLine("    opencv opencl-headers \\")
+                    appendLine("    freetype2 fontconfig \\")
+                    appendLine("    libinput xorg-server-xwayland")
+                    appendLine()
+                    
+                    // Install Node.js dependencies for graph engine
+                    appendLine("# Install graph engine dependencies")
+                    appendLine("npm install -g \\")
+                    appendLine("    @tensorflow/tfjs-node \\")
+                    appendLine("    three \\")
+                    appendLine("    d3-force \\")
+                    appendLine("    vis-network \\")
+                    appendLine("    cytoscape")
+                    appendLine()
+                    
+                    // Create graph desktop service
+                    appendLine("# Create graph desktop service")
+                    appendLine("cat > /etc/systemd/system/graph-desktop.service <<EOF")
+                    appendLine("[Unit]")
+                    appendLine("Description=HorizonOS Graph Desktop Environment")
+                    appendLine("After=graphical-session.target")
+                    appendLine("Requires=ollama.service")
+                    appendLine()
+                    appendLine("[Service]")
+                    appendLine("Type=notify")
+                    appendLine("ExecStart=/usr/bin/horizonos-graph-desktop")
+                    appendLine("Restart=always")
+                    appendLine("RestartSec=5")
+                    appendLine("Environment=RUST_LOG=info")
+                    appendLine("Environment=GRAPH_DESKTOP_CONFIG=/etc/horizonos/graph-desktop")
+                    appendLine()
+                    appendLine("[Install]")
+                    appendLine("WantedBy=graphical-session.target")
+                    appendLine("EOF")
+                    appendLine()
+                    
+                    appendLine("systemctl enable graph-desktop.service")
+                    appendLine()
+                    
+                    // Create graph desktop initialization script
+                    appendLine("# Create graph desktop initialization script")
+                    appendLine("cat > /usr/bin/horizonos-graph-desktop-init <<EOF")
+                    appendLine("#!/bin/bash")
+                    appendLine("# Initialize Graph Desktop Environment")
+                    appendLine("echo 'Initializing HorizonOS Graph Desktop...'")
+                    appendLine()
+                    appendLine("# Check hardware capabilities")
+                    appendLine("if lspci | grep -i nvidia > /dev/null; then")
+                    appendLine("    echo 'NVIDIA GPU detected, enabling CUDA acceleration'")
+                    appendLine("    echo 'gpu_acceleration=cuda' >> /etc/horizonos/graph-desktop/rendering/engine.conf")
+                    appendLine("elif lspci | grep -i amd > /dev/null; then")
+                    appendLine("    echo 'AMD GPU detected, enabling ROCm acceleration'")
+                    appendLine("    echo 'gpu_acceleration=rocm' >> /etc/horizonos/graph-desktop/rendering/engine.conf")
+                    appendLine("else")
+                    appendLine("    echo 'Using CPU rendering'")
+                    appendLine("    echo 'gpu_acceleration=none' >> /etc/horizonos/graph-desktop/rendering/engine.conf")
+                    appendLine("fi")
+                    appendLine()
+                    appendLine("# Initialize graph database")
+                    appendLine("mkdir -p /var/lib/horizonos/graph-desktop/db")
+                    appendLine("chown -R horizon:horizon /var/lib/horizonos/graph-desktop")
+                    appendLine()
+                    appendLine("echo 'Graph Desktop initialization completed.'")
+                    appendLine("EOF")
+                    appendLine()
+                    
+                    appendLine("chmod +x /usr/bin/horizonos-graph-desktop-init")
+                    appendLine()
+                    
+                } else {
+                    appendLine("echo 'Graph Desktop is disabled in configuration.'")
+                }
+                
+                appendLine("echo 'Graph Desktop setup completed.'")
+            })
+            script.setExecutable(true)
+            generatedFiles.add(GeneratedFile("scripts/graph-desktop-setup.sh", FileType.SHELL))
         }
     }
     

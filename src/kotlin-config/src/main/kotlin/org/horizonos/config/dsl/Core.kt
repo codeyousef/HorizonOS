@@ -29,6 +29,8 @@ class SystemConfiguration {
     var enhancedServicesConfig: EnhancedServicesConfig? = null
     var developmentConfig: DevelopmentConfig? = null
     var environmentConfig: EnvironmentConfig? = null
+    var enhancedDesktopConfig: EnhancedDesktopConfig? = null
+    var graphDesktopConfig: GraphDesktopConfig? = null
 
     fun packages(block: PackagesContext.() -> Unit) {
         PackagesContext().apply(block).also {
@@ -97,6 +99,14 @@ class SystemConfiguration {
     fun environment(block: EnvironmentContext.() -> Unit) {
         environmentConfig = EnvironmentContext().apply(block).toConfig()
     }
+    
+    fun enhancedDesktop(block: EnhancedDesktopContext.() -> Unit) {
+        enhancedDesktopConfig = EnhancedDesktopContext().apply(block).toConfig()
+    }
+    
+    fun graphDesktop(block: GraphDesktopContext.() -> Unit) {
+        graphDesktopConfig = GraphDesktopContext().apply(block).toConfig()
+    }
 
     fun toConfig(): CompiledConfig {
         val config = CompiledConfig(
@@ -115,7 +125,9 @@ class SystemConfiguration {
             security = securityConfig,
             enhancedServices = enhancedServicesConfig,
             development = developmentConfig,
-            environment = environmentConfig
+            environment = environmentConfig,
+            enhancedDesktop = enhancedDesktopConfig,
+            graphDesktop = graphDesktopConfig
         )
         
         // Validate configuration before returning
@@ -350,7 +362,9 @@ data class CompiledConfig(
     val security: SecurityConfig? = null,
     val enhancedServices: EnhancedServicesConfig? = null,
     val development: DevelopmentConfig? = null,
-    val environment: EnvironmentConfig? = null
+    val environment: EnvironmentConfig? = null,
+    val enhancedDesktop: EnhancedDesktopConfig? = null,
+    val graphDesktop: GraphDesktopConfig? = null
 )
 
 @Serializable
