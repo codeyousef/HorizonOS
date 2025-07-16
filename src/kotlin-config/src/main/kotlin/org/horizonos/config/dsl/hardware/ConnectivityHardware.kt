@@ -18,7 +18,7 @@ data class StorageHardwareConfig(
 data class DriveConfig(
     val device: String,
     val type: DriveType,
-    val interface: StorageInterface,
+    val `interface`: StorageInterface,
     val scheduler: IOScheduler = IOScheduler.MQ_DEADLINE,
     val powerManagement: DrivePowerConfig = DrivePowerConfig(),
     val smart: SMARTConfig = SMARTConfig()
@@ -77,7 +77,7 @@ data class NetworkHardwareConfig(
 
 @Serializable
 data class EthernetConfig(
-    val interface: String,
+    val `interface`: String,
     val driver: String? = null,
     val speed: NetworkSpeed = NetworkSpeed.AUTO,
     val duplex: DuplexMode = DuplexMode.AUTO,
@@ -87,7 +87,7 @@ data class EthernetConfig(
 
 @Serializable
 data class WirelessConfig(
-    val interface: String,
+    val `interface`: String,
     val driver: String? = null,
     val powerSaving: Boolean = true,
     val scanRandomization: Boolean = true,

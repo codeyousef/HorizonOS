@@ -5,6 +5,7 @@ import kotlinx.serialization.json.Json
 import org.horizonos.config.dsl.*
 import org.horizonos.config.dsl.hardware.*
 import org.horizonos.config.dsl.security.*
+import org.horizonos.config.dsl.services.*
 import org.horizonos.config.compiler.generators.*
 import java.io.File
 import java.nio.file.Path
@@ -2561,8 +2562,8 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     security.selinux.modules.forEach { module ->
                         if (module.enabled) {
                             appendLine("# Load SELinux module: ${module.name}")
-                            module.source?.let { source ->
-                                appendLine("semodule -i $source")
+                            module.path?.let { path ->
+                                appendLine("semodule -i $path")
                             } ?: run {
                                 appendLine("semodule -e ${module.name}")
                             }
@@ -2584,21 +2585,16 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     appendLine()
                     
                     // Profile management
-                    security.apparmor.enforce.forEach { profile ->
-                        appendLine("aa-enforce $profile")
+                    security.apparmor.profiles.forEach { profile ->
+                        when (profile.mode) {
+                            AppArmorMode.ENFORCE -> appendLine("aa-enforce ${profile.path}")
+                            AppArmorMode.COMPLAIN -> appendLine("aa-complain ${profile.path}")
+                            AppArmorMode.DISABLE -> appendLine("aa-disable ${profile.path}")
+                            AppArmorMode.AUDIT -> appendLine("aa-audit ${profile.path}")
+                        }
                     }
                     
-                    security.apparmor.complain.forEach { profile ->
-                        appendLine("aa-complain $profile")
-                    }
-                    
-                    security.apparmor.disable.forEach { profile ->
-                        appendLine("aa-disable $profile")
-                    }
-                    
-                    if (security.apparmor.enforce.isNotEmpty() || 
-                        security.apparmor.complain.isNotEmpty() || 
-                        security.apparmor.disable.isNotEmpty()) {
+                    if (security.apparmor.profiles.isNotEmpty()) {
                         appendLine()
                     }
                 }
@@ -2610,25 +2606,18 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     appendLine()
                     appendLine("cat > /etc/gnupg/gpg.conf <<EOF")
                     appendLine("# HorizonOS GPG Configuration")
-                    appendLine("keyserver ${security.gpg.keyserver}")
-                    security.gpg.keyserverOptions.forEach { option ->
-                        appendLine("keyserver-options $option")
-                    }
-                    security.gpg.defaultKey?.let { key ->
-                        appendLine("default-key $key")
-                    }
-                    security.gpg.defaultRecipient?.let { recipient ->
-                        appendLine("default-recipient $recipient")
+                    security.gpg.keyservers.forEach { keyserver ->
+                        appendLine("keyserver $keyserver")
                     }
                     appendLine("trust-model ${security.gpg.trustModel.name.lowercase()}")
-                    if (security.gpg.cipherPrefs.isNotEmpty()) {
-                        appendLine("personal-cipher-preferences ${security.gpg.cipherPrefs.joinToString(" ")}")
+                    appendLine("default-cipher-algo ${security.gpg.defaultCipher}")
+                    appendLine("default-digest-algo ${security.gpg.defaultDigest}")
+                    appendLine("compress-level ${security.gpg.defaultCompress}")
+                    if (security.gpg.autoKeyRetrieve) {
+                        appendLine("auto-key-retrieve")
                     }
-                    if (security.gpg.digestPrefs.isNotEmpty()) {
-                        appendLine("personal-digest-preferences ${security.gpg.digestPrefs.joinToString(" ")}")
-                    }
-                    if (security.gpg.compressPrefs.isNotEmpty()) {
-                        appendLine("personal-compress-preferences ${security.gpg.compressPrefs.joinToString(" ")}")
+                    if (security.gpg.autoKeyLocate.isNotEmpty()) {
+                        appendLine("auto-key-locate ${security.gpg.autoKeyLocate.joinToString(",")}")
                     }
                     appendLine("EOF")
                     appendLine()
@@ -2636,10 +2625,14 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     // Import GPG keys
                     security.gpg.keys.forEach { key ->
                         appendLine("# Import GPG key: ${key.keyId}")
-                        key.keyFile?.let { keyFile ->
-                            appendLine("gpg --import $keyFile")
+                        key.publicKey?.let { publicKey ->
+                            appendLine("echo '$publicKey' | gpg --import")
                         }
-                        appendLine("gpg --edit-key ${key.keyId} trust quit")
+                        key.secretKey?.let { secretKey ->
+                            appendLine("echo '$secretKey' | gpg --import")
+                        }
+                        appendLine("# Set trust level to ${key.trustLevel.name}")
+                        appendLine("echo -e \"5\\ny\\n\" | gpg --command-fd 0 --edit-key ${key.keyId} trust quit")
                     }
                     
                     if (security.gpg.keys.isNotEmpty()) {
@@ -2672,11 +2665,9 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     appendLine("use_libwrap = yes")
                     security.audit.tcpListenPort?.let { port ->
                         appendLine("tcp_listen_port = $port")
-                        appendLine("tcp_listen_queue = ${security.audit.tcpListenQueue}")
                         appendLine("tcp_max_per_addr = ${security.audit.tcpMaxPerAddr}")
-                        appendLine("tcp_client_max_idle = ${security.audit.tcpClientMaxIdle}")
+                        appendLine("tcp_client_max_idle = ${security.audit.tcpClientMaxIdle.inWholeSeconds}")
                     }
-                    appendLine("distribute_network = ${if (security.audit.distributeNetwork) "yes" else "no"}")
                     appendLine("name_format = ${security.audit.nameFormat}")
                     security.audit.name?.let { name ->
                         appendLine("name = $name")
@@ -2690,7 +2681,9 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                         appendLine("# HorizonOS Audit Rules")
                         security.audit.rules.forEach { rule ->
                             if (rule.enabled) {
-                                appendLine("# ${rule.name}")
+                                rule.comment?.let { comment ->
+                                    appendLine("# $comment")
+                                }
                                 appendLine(rule.rule)
                             }
                         }
@@ -2712,18 +2705,21 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     if (security.tpm.ownership.takeOwnership) {
                         appendLine("# Take TPM ownership")
                         when (security.tpm.version) {
-                            TPMVersion.TPM2 -> {
+                            "2.0" -> {
                                 appendLine("tpm2_startup -c")
                                 appendLine("tpm2_clear")
                                 security.tpm.ownership.ownerPassword?.let { password ->
                                     appendLine("echo '$password' | tpm2_changeauth -c owner")
                                 }
                             }
-                            TPMVersion.TPM1 -> {
+                            "1.2" -> {
                                 appendLine("# TPM 1.2 ownership")
                                 security.tpm.ownership.ownerPassword?.let { password ->
                                     appendLine("echo '$password' | tpm_takeownership")
                                 }
+                            }
+                            else -> {
+                                appendLine("# Unknown TPM version: ${security.tpm.version}")
                             }
                         }
                         appendLine()
@@ -2731,9 +2727,8 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     
                     if (security.tpm.ima.enabled) {
                         appendLine("# Configure IMA/EVM")
-                        appendLine("echo 'ima_policy=${security.tpm.ima.policy}' >> /etc/default/grub")
                         appendLine("echo 'ima_template=${security.tpm.ima.template}' >> /etc/default/grub")
-                        appendLine("echo 'ima_hash=${security.tpm.ima.hash}' >> /etc/default/grub")
+                        appendLine("echo 'ima_hash=${security.tpm.ima.hashAlgorithm}' >> /etc/default/grub")
                         appendLine("grub-mkconfig -o /boot/grub/grub.cfg")
                         appendLine()
                     }
@@ -2743,30 +2738,32 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                 if (security.certificates.enabled) {
                     appendLine("# Certificate Management")
                     
-                    if (security.certificates.ca.enabled) {
-                        appendLine("# Setup Certificate Authority")
-                        appendLine("mkdir -p ${security.certificates.ca.path}")
-                        appendLine("mkdir -p ${security.certificates.ca.keyPath}")
-                        appendLine("chmod 700 ${security.certificates.ca.keyPath}")
-                        appendLine()
+                    // Configure CA certificates
+                    security.certificates.caCerts.forEach { ca ->
+                        appendLine("# Configure CA: ${ca.name}")
+                        appendLine("mkdir -p /etc/ssl/certs/ca")
+                        if (ca.certificate.isNotBlank()) {
+                            appendLine("echo '${ca.certificate}' > /etc/ssl/certs/ca/${ca.name}.crt")
+                            appendLine("update-ca-certificates")
+                        }
                     }
                     
-                    // Configure certificates
-                    security.certificates.certificates.forEach { cert ->
+                    // Configure trusted certificates
+                    security.certificates.trustedCerts.forEach { cert ->
                         appendLine("# Configure certificate: ${cert.name}")
-                        appendLine("mkdir -p \$(dirname ${cert.certFile})")
-                        appendLine("mkdir -p \$(dirname ${cert.keyFile})")
-                        
-                        if (cert.autoRenew) {
-                            appendLine("# Setup auto-renewal for ${cert.name}")
-                            appendLine("systemctl enable cert-renew@${cert.name}.timer")
+                        appendLine("mkdir -p \$(dirname ${cert.path})")
+                        appendLine("# Certificate: ${cert.subject}")
+                        cert.issuer?.let { issuer ->
+                            appendLine("# Issuer: $issuer")
                         }
                         appendLine()
                     }
                     
-                    // Update certificate store
-                    appendLine("${security.certificates.store.updateCommand}")
-                    appendLine("${security.certificates.store.rehashCommand} ${security.certificates.store.path}")
+                    // Update certificate stores
+                    security.certificates.stores.forEach { store ->
+                        appendLine("# Update certificate store: ${store.name}")
+                        appendLine("update-ca-certificates")
+                    }
                     appendLine()
                 }
                 
@@ -2777,18 +2774,18 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     security.compliance.frameworks.forEach { framework ->
                         if (framework.enabled) {
                             appendLine("# Configure ${framework.name} ${framework.version}")
-                            framework.profiles.forEach { profile ->
-                                appendLine("# Apply profile: $profile")
-                            }
+                            appendLine("# Apply profile: ${framework.profile}")
                         }
                     }
                     
                     if (security.compliance.scanning.enabled) {
                         appendLine("# Setup compliance scanning")
                         appendLine("systemctl enable compliance-scan.timer")
-                        if (security.compliance.scanning.remediate) {
-                            appendLine("systemctl enable compliance-remediate.service")
-                        }
+                    }
+                    
+                    if (security.compliance.remediation.enabled && security.compliance.remediation.autoRemediate) {
+                        appendLine("# Enable auto-remediation")
+                        appendLine("systemctl enable compliance-remediate.service")
                     }
                     appendLine()
                 }
@@ -2869,7 +2866,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                         when (container.runtime) {
                             ContainerRuntime.DOCKER -> generateDockerConfig(container)
                             ContainerRuntime.PODMAN -> generatePodmanConfig(container)
-                            ContainerRuntime.SYSTEMD_NSPAWN -> generateSystemdNspawnConfig(container)
+                            ContainerRuntime.CONTAINERD -> generateContainerdConfig(container)
                         }
                         
                         if (container.enabled) {
@@ -2986,7 +2983,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         if (db.databases.isNotEmpty()) {
             appendLine("# Create databases")
             db.databases.forEach { database ->
-                appendLine("sudo -u postgres createdb ${database.name} --encoding=${database.charset} --locale=${database.collation}")
+                appendLine("sudo -u postgres createdb ${database.name} --encoding=${database.encoding}${database.collation?.let { " --locale=$it" } ?: ""}")
                 database.owner?.let { owner ->
                     appendLine("sudo -u postgres psql -c \"ALTER DATABASE ${database.name} OWNER TO $owner;\"")
                 }
@@ -3018,16 +3015,12 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             appendLine("max_connections = ${mysql.maxConnections}")
             appendLine("innodb_buffer_pool_size = ${mysql.innodbBufferPoolSize}")
             appendLine("innodb_log_file_size = ${mysql.innodbLogFileSize}")
-            appendLine("innodb_file_per_table = ${if (mysql.innodbFilePerTable) 1 else 0}")
+            appendLine("innodb_flush_log_at_trx_commit = ${mysql.innodbFlushLogAtTrxCommit}")
+            appendLine("innodb_flush_method = ${mysql.innodbFlushMethod}")
             appendLine("query_cache_type = ${if (mysql.queryCache) 1 else 0}")
             appendLine("query_cache_size = ${mysql.queryCacheSize}")
             appendLine("tmp_table_size = ${mysql.tmpTableSize}")
             appendLine("max_heap_table_size = ${mysql.maxHeapTableSize}")
-            appendLine("slow_query_log = ${if (mysql.slowQueryLog) 1 else 0}")
-            appendLine("long_query_time = ${mysql.longQueryTime}")
-            appendLine("binlog_format = ${mysql.binlogFormat}")
-            appendLine("character-set-server = ${mysql.serverCharset}")
-            appendLine("collation-server = ${mysql.serverCollation}")
             appendLine("EOF")
         }
     }
@@ -3044,41 +3037,31 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             appendLine("bind 127.0.0.1")
             appendLine("maxmemory ${redis.maxMemory}")
             appendLine("maxmemory-policy ${redis.maxMemoryPolicy}")
-            appendLine("databases ${redis.databases}")
-            appendLine("timeout ${redis.timeout}")
-            appendLine("tcp-keepalive ${redis.tcpKeepalive}")
             
             when (redis.persistenceMode) {
-                RedisPersistence.RDB -> {
-                    redis.rdbSavePolicy.forEach { policy ->
-                        appendLine("save $policy")
-                    }
+                RedisPersistenceMode.RDB -> {
+                    appendLine("save ${redis.savePolicy}")
+                    appendLine("appendonly no")
                 }
-                RedisPersistence.AOF -> {
+                RedisPersistenceMode.AOF -> {
                     appendLine("appendonly yes")
-                    appendLine("auto-aof-rewrite-percentage 100")
-                    appendLine("auto-aof-rewrite-min-size 64mb")
+                    appendLine("appendfsync ${redis.appendFsync}")
                 }
-                RedisPersistence.BOTH -> {
-                    redis.rdbSavePolicy.forEach { policy ->
-                        appendLine("save $policy")
-                    }
+                RedisPersistenceMode.BOTH -> {
+                    appendLine("save ${redis.savePolicy}")
                     appendLine("appendonly yes")
+                    appendLine("appendfsync ${redis.appendFsync}")
                 }
-                RedisPersistence.NONE -> {
+                RedisPersistenceMode.NONE -> {
                     appendLine("save \"\"")
                     appendLine("appendonly no")
                 }
             }
             
-            if (redis.requirepass && redis.password != null) {
-                appendLine("requirepass ${redis.password}")
-            }
-            
-            redis.replication?.let { repl ->
-                appendLine("slaveof ${repl.masterHost} ${repl.masterPort}")
-                appendLine("slave-read-only yes")
-                appendLine("repl-diskless-sync ${if (repl.replicationDisklessSync) "yes" else "no"}")
+            if (redis.clustering) {
+                appendLine("cluster-enabled yes")
+                appendLine("cluster-config-file nodes.conf")
+                appendLine("cluster-node-timeout 5000")
             }
             
             appendLine("EOF")
@@ -3119,7 +3102,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                 when (upstream.loadBalancing) {
                     LoadBalancingMethod.LEAST_CONN -> appendLine("        least_conn;")
                     LoadBalancingMethod.IP_HASH -> appendLine("        ip_hash;")
-                    LoadBalancingMethod.WEIGHTED -> appendLine("        # Weighted round robin (default)")
+                    LoadBalancingMethod.LEAST_TIME -> appendLine("        least_time header;")
                     LoadBalancingMethod.ROUND_ROBIN -> {} // Default, no directive needed
                 }
                 upstream.servers.forEach { server ->
@@ -3246,7 +3229,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
     private fun getContainerServiceName(runtime: ContainerRuntime): String = when (runtime) {
         ContainerRuntime.DOCKER -> "docker"
         ContainerRuntime.PODMAN -> "podman"
-        ContainerRuntime.SYSTEMD_NSPAWN -> "systemd-nspawn@"
+        ContainerRuntime.CONTAINERD -> "containerd"
     }
     
     private fun getMessageQueueServiceName(type: MessageQueueType): String = when (type) {
@@ -3292,8 +3275,8 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         appendLine("# Podman configuration placeholder")
     }
     
-    private fun StringBuilder.generateSystemdNspawnConfig(container: ContainerService) {
-        appendLine("# systemd-nspawn configuration placeholder")
+    private fun StringBuilder.generateContainerdConfig(container: ContainerService) {
+        appendLine("# Containerd configuration placeholder")
     }
     
     private fun StringBuilder.generateRabbitMQConfig(mq: MessageQueueService) {

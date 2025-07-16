@@ -224,6 +224,6 @@ object BootValidator {
     
     private fun isValidSecureBootKeyPath(path: String): Boolean {
         return path.startsWith("/") && (path.endsWith(".key") || path.endsWith(".crt") || 
-               path.endsWith(".pem")) && !path.contains("..")
+               path.endsWith(".pem") || path.endsWith(".auth")) && !path.contains("..")
     }
 }

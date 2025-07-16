@@ -1,0 +1,11 @@
+{
+    "ref": "horizonos/stable/x86_64",
+    "metadata": {
+        "version": "1.0.0",
+        "variant": "desktop"
+    },
+    "packages": [
+    ],
+    "repos": [
+    ]
+}

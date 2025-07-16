@@ -128,13 +128,11 @@ class SystemScriptGenerator(
             
             config.users.forEach { user ->
                 appendLine("# Create user: ${user.name}")
-                append("useradd")
-                user.uid?.let { append(" --uid $it") }
-                append(" --shell ${user.shell}")
-                append(" --home-dir ${user.homeDir}")
-                append(" --create-home")
+                append("useradd -m")
+                user.uid?.let { append(" -u $it") }
+                append(" -s ${user.shell}")
                 if (user.groups.isNotEmpty()) {
-                    append(" --groups ${user.groups.joinToString(",")}")
+                    append(" -G ${user.groups.joinToString(",")}")
                 }
                 appendLine(" ${user.name}")
                 appendLine()
@@ -161,6 +159,9 @@ class SystemScriptGenerator(
                         appendLine("# Add package repository: ${repo.name}")
                         appendLine("echo '[${repo.name}]' >> /etc/pacman.conf")
                         appendLine("echo 'Server = ${repo.url}' >> /etc/pacman.conf")
+                        if (!repo.gpgCheck) {
+                            appendLine("echo 'SigLevel = Never' >> /etc/pacman.conf")
+                        }
                         if (!repo.enabled) {
                             appendLine("# Repository ${repo.name} is disabled")
                         }
@@ -192,14 +193,14 @@ class SystemScriptGenerator(
                 appendLine("echo 'Configuring boot system...'")
                 appendLine()
                 
-                appendLine("# Bootloader: ${boot.bootloader}")
-                when (boot.bootloader) {
+                appendLine("# Bootloader: ${boot.bootloader.type}")
+                when (boot.bootloader.type) {
                     BootloaderType.SYSTEMD_BOOT -> {
                         appendLine("bootctl install")
                         appendLine("mkdir -p /boot/loader/entries")
                         appendLine("cat > /boot/loader/loader.conf <<EOF")
-                        appendLine("timeout ${boot.timeout}")
-                        appendLine("default horizonos")
+                        appendLine("timeout ${boot.bootloader.timeout}")
+                        appendLine("default ${boot.bootloader.defaultEntry}")
                         appendLine("EOF")
                     }
                     BootloaderType.GRUB -> {
@@ -207,14 +208,14 @@ class SystemScriptGenerator(
                         appendLine("grub-mkconfig -o /boot/grub/grub.cfg")
                     }
                     else -> {
-                        appendLine("# Bootloader ${boot.bootloader} configuration")
+                        appendLine("# Bootloader ${boot.bootloader.type} configuration")
                     }
                 }
                 
-                if (boot.kernelParameters.isNotEmpty()) {
+                if (boot.kernel.parameters.isNotEmpty()) {
                     appendLine()
                     appendLine("# Kernel parameters")
-                    boot.kernelParameters.forEach { param ->
+                    boot.kernel.parameters.forEach { param ->
                         appendLine("echo '${param.name}=${param.value}' >> /etc/kernel/cmdline")
                     }
                 }

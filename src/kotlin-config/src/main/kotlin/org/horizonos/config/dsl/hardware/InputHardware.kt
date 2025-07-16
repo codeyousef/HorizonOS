@@ -1,6 +1,7 @@
 package org.horizonos.config.dsl.hardware
 
 import kotlinx.serialization.Serializable
+import org.horizonos.config.dsl.hardware.ScreenRotation // Import from DisplayHardware
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -168,10 +169,4 @@ enum class GestureDirection {
     PINCH_OUT     // Pinch outward
 }
 
-@Serializable
-enum class ScreenRotation {
-    NORMAL,       // 0 degrees
-    LEFT,         // 90 degrees counter-clockwise
-    INVERTED,     // 180 degrees
-    RIGHT         // 90 degrees clockwise
-}
+// ScreenRotation is now imported from DisplayHardware

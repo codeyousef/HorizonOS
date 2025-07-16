@@ -57,17 +57,7 @@ class ConfigParser {
     }
     
     private suspend fun evaluateScriptContent(content: String): CompiledConfig {
-        // Wrap the script content to capture the result
-        val wrappedScript = """
-            import org.horizonos.config.dsl.*
-            
-            val __result = run {
-                $content
-            }
-            __result
-        """.trimIndent()
-        
-        // Create compilation configuration
+        // Create compilation configuration first
         val compilationConfiguration = createJvmCompilationConfigurationFromTemplate<Any> {
             jvm {
                 // Add current classpath to make DSL classes available
@@ -77,6 +67,9 @@ class ConfigParser {
             // Add default imports
             defaultImports(
                 "org.horizonos.config.dsl.*",
+                "org.horizonos.config.dsl.security.*",
+                "org.horizonos.config.dsl.services.*", 
+                "org.horizonos.config.dsl.hardware.*",
                 "kotlin.time.Duration",
                 "kotlin.time.Duration.Companion.*"
             )
@@ -88,7 +81,7 @@ class ConfigParser {
         }
         
         val result = scriptingHost.eval(
-            wrappedScript.toScriptSource(),
+            content.toScriptSource(),
             compilationConfiguration,
             evaluationConfiguration
         )

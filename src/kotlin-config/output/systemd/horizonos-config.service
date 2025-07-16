@@ -1,0 +1,13 @@
+[Unit]
+Description=HorizonOS Configuration Service
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/horizonos-apply /etc/horizonos/config.json
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

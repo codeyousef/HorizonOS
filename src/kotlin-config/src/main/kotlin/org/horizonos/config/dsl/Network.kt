@@ -1,6 +1,14 @@
 package org.horizonos.config.dsl
 
 import kotlinx.serialization.Serializable
+import org.horizonos.config.dsl.security.FirewallConfig
+import org.horizonos.config.dsl.security.FirewallBackend
+import org.horizonos.config.dsl.security.FirewallRule
+import org.horizonos.config.dsl.security.FirewallZone
+import org.horizonos.config.dsl.security.FirewallPolicy
+import org.horizonos.config.dsl.security.FirewallAction
+import org.horizonos.config.dsl.security.ConnectionState
+import org.horizonos.config.dsl.security.NetworkProtocol
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -130,43 +138,7 @@ data class VPNAutoStart(
     val onInterface: String? = null
 )
 
-@Serializable
-data class FirewallConfig(
-    val enabled: Boolean = true,
-    val defaultPolicy: FirewallPolicy = FirewallPolicy.REJECT,
-    val rules: List<FirewallRule> = emptyList(),
-    val zones: List<FirewallZone> = emptyList(),
-    val backend: FirewallBackend = FirewallBackend.NFTABLES,
-    val logLevel: FirewallLogLevel = FirewallLogLevel.WARN,
-    val logDropped: Boolean = false
-)
-
-@Serializable
-data class FirewallRule(
-    val name: String,
-    val action: FirewallAction,
-    val direction: FirewallDirection = FirewallDirection.IN,
-    val protocol: NetworkProtocol? = null,
-    val port: String? = null,
-    val sourceAddress: String? = null,
-    val destinationAddress: String? = null,
-    val interfaceName: String? = null,
-    val service: String? = null,
-    val priority: Int = 50,
-    val enabled: Boolean = true,
-    val log: Boolean = false
-)
-
-@Serializable
-data class FirewallZone(
-    val name: String,
-    val interfaces: List<String> = emptyList(),
-    val sources: List<String> = emptyList(),
-    val defaultPolicy: FirewallPolicy = FirewallPolicy.REJECT,
-    val services: List<String> = emptyList(),
-    val ports: List<String> = emptyList(),
-    val masquerade: Boolean = false
-)
+// Firewall classes are now imported from org.horizonos.config.dsl.security
 
 @Serializable
 data class DNSConfig(
@@ -303,44 +275,10 @@ enum class VPNType {
 }
 
 @Serializable
-enum class FirewallPolicy {
-    ACCEPT,
-    REJECT,
-    DROP
-}
-
-@Serializable
-enum class FirewallAction {
-    ALLOW,
-    DENY,
-    REJECT,
-    LOG
-}
-
-@Serializable
 enum class FirewallDirection {
     IN,
     OUT,
     FORWARD
-}
-
-@Serializable
-enum class NetworkProtocol {
-    TCP,
-    UDP,
-    ICMP,
-    ICMPv6,
-    ESP,
-    AH,
-    ANY
-}
-
-@Serializable
-enum class FirewallBackend {
-    IPTABLES,
-    NFTABLES,
-    UFW,
-    FIREWALLD
 }
 
 @Serializable
@@ -351,6 +289,8 @@ enum class FirewallLogLevel {
     INFO,
     DEBUG
 }
+
+// NetworkProtocol is also imported from security package
 
 @Serializable
 enum class DNSResolver {
@@ -719,13 +659,13 @@ class FirewallContext {
     var logDropped: Boolean = false
     
     fun allow(block: FirewallRuleBuilder.() -> Unit) {
-        val builder = FirewallRuleBuilder(FirewallAction.ALLOW)
+        val builder = FirewallRuleBuilder(FirewallAction.ACCEPT)
         builder.block()
         rules.addAll(builder.rules)
     }
     
     fun deny(block: FirewallRuleBuilder.() -> Unit) {
-        val builder = FirewallRuleBuilder(FirewallAction.DENY)
+        val builder = FirewallRuleBuilder(FirewallAction.DROP)
         builder.block()
         rules.addAll(builder.rules)
     }
@@ -748,12 +688,10 @@ class FirewallContext {
     
     fun toFirewall() = FirewallConfig(
         enabled = enabled,
-        defaultPolicy = defaultPolicy,
-        rules = rules,
-        zones = zones,
         backend = backend,
-        logLevel = logLevel,
-        logDropped = logDropped
+        defaultPolicy = mapOf("INPUT" to defaultPolicy, "FORWARD" to FirewallPolicy.DROP, "OUTPUT" to FirewallPolicy.ACCEPT),
+        rules = rules,
+        zones = zones
     )
 }
 
@@ -764,46 +702,64 @@ class FirewallRuleBuilder(private val action: FirewallAction) {
     fun ssh(from: String = "any", name: String = "allow-ssh") {
         rules.add(FirewallRule(
             name = name,
+            chain = "INPUT",
             action = action,
-            service = "ssh",
-            sourceAddress = if (from == "any") null else from
+            protocol = "tcp",
+            dport = "22",
+            source = if (from == "any") null else from
         ))
     }
     
     fun http(from: String = "any", name: String = "allow-http") {
         rules.add(FirewallRule(
             name = name,
+            chain = "INPUT",
             action = action,
-            service = "http",
-            sourceAddress = if (from == "any") null else from
+            protocol = "tcp",
+            dport = "80",
+            source = if (from == "any") null else from
         ))
     }
     
     fun https(from: String = "any", name: String = "allow-https") {
         rules.add(FirewallRule(
             name = name,
+            chain = "INPUT",
             action = action,
-            service = "https",
-            sourceAddress = if (from == "any") null else from
+            protocol = "tcp",
+            dport = "443",
+            source = if (from == "any") null else from
         ))
     }
     
     fun port(port: Int, protocol: NetworkProtocol = NetworkProtocol.TCP, from: String = "any", name: String? = null) {
         rules.add(FirewallRule(
             name = name ?: "${action.name.lowercase()}-port-$port",
+            chain = "INPUT",
             action = action,
-            protocol = protocol,
-            port = port.toString(),
-            sourceAddress = if (from == "any") null else from
+            protocol = protocol.name.lowercase(),
+            dport = port.toString(),
+            source = if (from == "any") null else from
         ))
     }
     
     fun service(service: String, from: String = "any", name: String? = null) {
+        val servicePort = when(service) {
+            "ssh" -> "22"
+            "http" -> "80"
+            "https" -> "443"
+            "smtp" -> "25"
+            "ftp" -> "21"
+            "dns" -> "53"
+            else -> service // assume it's a port number
+        }
         rules.add(FirewallRule(
             name = name ?: "${action.name.lowercase()}-$service",
+            chain = "INPUT",
             action = action,
-            service = service,
-            sourceAddress = if (from == "any") null else from
+            protocol = "tcp",
+            dport = servicePort,
+            source = if (from == "any") null else from
         ))
     }
 }
@@ -811,7 +767,7 @@ class FirewallRuleBuilder(private val action: FirewallAction) {
 @HorizonOSDsl
 class FirewallRuleContext {
     var name: String = ""
-    var action: FirewallAction = FirewallAction.ALLOW
+    var action: FirewallAction = FirewallAction.ACCEPT
     var direction: FirewallDirection = FirewallDirection.IN
     var protocol: NetworkProtocol? = null
     var port: String? = null
@@ -825,17 +781,19 @@ class FirewallRuleContext {
     
     fun toRule() = FirewallRule(
         name = name,
+        chain = when(direction) {
+            FirewallDirection.IN -> "INPUT"
+            FirewallDirection.OUT -> "OUTPUT"
+            FirewallDirection.FORWARD -> "FORWARD"
+        },
+        protocol = protocol?.name?.lowercase(),
+        source = sourceAddress,
+        destination = destinationAddress,
+        dport = port,
         action = action,
-        direction = direction,
-        protocol = protocol,
-        port = port,
-        sourceAddress = sourceAddress,
-        destinationAddress = destinationAddress,
-        interfaceName = interfaceName,
-        service = service,
+        comment = if (log) "LOG: $name" else null,
         priority = priority,
-        enabled = enabled,
-        log = log
+        enabled = enabled
     )
 }
 
@@ -869,7 +827,7 @@ class FirewallZoneContext {
         name = name,
         interfaces = interfaces,
         sources = sources,
-        defaultPolicy = defaultPolicy,
+        target = defaultPolicy,
         services = services,
         ports = ports,
         masquerade = masquerade

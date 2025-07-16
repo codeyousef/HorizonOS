@@ -27,6 +27,48 @@ data class HardwareConfig(
     val sensors: SensorConfig = SensorConfig()
 )
 
+// ===== DSL Builder =====
+
+@HorizonOSDsl
+class HardwareContext {
+    private var gpu = GPUConfig()
+    private var input = InputConfig()
+    private var display = DisplayConfig()
+    private var power = PowerConfig()
+    private var thermal = ThermalConfig()
+    private var audio = AudioConfig()
+    private var storage = StorageHardwareConfig()
+    private var networking = NetworkHardwareConfig()
+    private var usb = USBConfig()
+    private var bluetooth = BluetoothConfig()
+    private var sensors = SensorConfig()
+    
+    fun gpu(block: GPUContext.() -> Unit) {
+        gpu = GPUContext().apply(block).toConfig()
+    }
+    
+    fun toConfig() = HardwareConfig(
+        gpu = gpu,
+        input = input,
+        display = display,
+        power = power,
+        thermal = thermal,
+        audio = audio,
+        storage = storage,
+        networking = networking,
+        usb = usb,
+        bluetooth = bluetooth,
+        sensors = sensors
+    )
+}
+
+@HorizonOSDsl
+class GPUContext {
+    var primary: GPUDriver = GPUDriver.AUTO_DETECT
+    
+    fun toConfig() = GPUConfig(primary = primary)
+}
+
 // Legacy Bluetooth configuration (kept for compatibility)
 @Serializable
 data class BluetoothConfig(

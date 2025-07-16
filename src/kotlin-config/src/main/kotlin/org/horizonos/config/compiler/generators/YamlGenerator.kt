@@ -112,9 +112,8 @@ class YamlGenerator(
         
         config.boot?.let {
             appendLine("boot:")
-            appendLine("  bootloader: ${it.bootloader}")
-            appendLine("  timeout: ${it.timeout}")
-            appendLine("  quiet: ${it.quiet}")
+            appendLine("  bootloader: ${it.bootloader.type}")
+            appendLine("  kernel: ${it.kernel.version}")
         }
         
         config.hardware?.let {

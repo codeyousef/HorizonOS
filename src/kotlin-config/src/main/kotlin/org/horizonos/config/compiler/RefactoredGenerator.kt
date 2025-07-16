@@ -133,6 +133,6 @@ class RefactoredEnhancedConfigGenerator(private val outputDir: File) {
                 appendLine("- `${file.path}` (${file.type})")
             }
         })
-        generatedFiles.add(GeneratedFile("docs/README.md", FileType.MARKDOWN))
+        generatedFiles.add(GeneratedFile("docs/README.md", FileType.DOCUMENTATION))
     }
 }

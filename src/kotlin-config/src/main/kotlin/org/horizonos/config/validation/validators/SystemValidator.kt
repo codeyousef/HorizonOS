@@ -125,6 +125,15 @@ object SystemValidator {
             if (!isValidUrl(repo.url)) {
                 errors.add(ValidationError.InvalidUrl(repo.url))
             }
+            
+            // Validate OSTree branches if this is an OSTree repository
+            if (repo is OstreeRepository) {
+                repo.branches.forEach { branch ->
+                    if (!isValidBranch(branch)) {
+                        errors.add(ValidationError.InvalidBranch(branch))
+                    }
+                }
+            }
         }
         
         // Check for duplicate repositories
@@ -192,7 +201,7 @@ object SystemValidator {
     }
     
     private fun isValidServiceName(serviceName: String): Boolean {
-        return serviceName.matches(Regex("^[a-z0-9][a-z0-9.-]*$"))
+        return serviceName.matches(Regex("^[a-zA-Z0-9][a-zA-Z0-9.-]*$"))
     }
     
     private fun isValidUsername(username: String): Boolean {
@@ -200,13 +209,13 @@ object SystemValidator {
     }
     
     private fun isValidUID(uid: Int): Boolean {
-        return uid in 0..65535
+        return uid in 1000..65535
     }
     
     private fun isValidShell(shell: String): Boolean {
         val validShells = setOf(
             "/bin/bash", "/bin/sh", "/bin/zsh", "/bin/fish", 
-            "/usr/bin/zsh", "/usr/bin/fish", "/sbin/nologin"
+            "/usr/bin/bash", "/usr/bin/zsh", "/usr/bin/fish", "/sbin/nologin"
         )
         return validShells.contains(shell)
     }

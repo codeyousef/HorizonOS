@@ -369,7 +369,7 @@ class SemanticRuleContext {
 @HorizonOSDsl
 class GraphAIContext {
     var enabled: Boolean = true
-    var provider: AIProvider = AIProvider.LOCAL_LLM
+    var provider: GraphAIProvider = GraphAIProvider.LOCAL_LLM
     var model: String = "llama2"
     var features = mutableListOf<AIFeature>()
     var suggestions: AISuggestionConfig? = null
@@ -626,7 +626,7 @@ enum class SemanticAction {
 }
 
 @Serializable
-enum class AIProvider {
+enum class GraphAIProvider {
     LOCAL_LLM, OPENAI, ANTHROPIC, CUSTOM
 }
 
@@ -799,7 +799,7 @@ data class SemanticRule(
 @Serializable
 data class GraphAIConfig(
     val enabled: Boolean,
-    val provider: AIProvider,
+    val provider: GraphAIProvider,
     val model: String,
     val features: List<AIFeature>,
     val suggestions: AISuggestionConfig?,

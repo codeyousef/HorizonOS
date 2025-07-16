@@ -1,6 +1,8 @@
 package org.horizonos.config.dsl
 
 import kotlinx.serialization.Serializable
+import org.horizonos.config.dsl.services.PortMapping
+import org.horizonos.config.dsl.services.VolumeMount
 
 // ===== Development Environment Configuration DSL =====
 
@@ -601,7 +603,7 @@ class ContainerDevContext(private val name: String) {
     }
 
     fun volume(source: String, target: String, readOnly: Boolean = false) {
-        volumes.add(VolumeMount(source, target, readOnly))
+        volumes.add(VolumeMount(source, target, if (readOnly) "ro" else "rw"))
     }
 
     fun env(key: String, value: String) {

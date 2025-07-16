@@ -25,7 +25,7 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = EnhancedConfigGenerator(tempDir)
+        val generator = RefactoredEnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         val jsonFile = File(tempDir, "json/config.json")
@@ -54,7 +54,7 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = EnhancedConfigGenerator(tempDir)
+        val generator = RefactoredEnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         val scriptFile = File(tempDir, "scripts/package-manager.sh")
@@ -83,7 +83,7 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = EnhancedConfigGenerator(tempDir)
+        val generator = RefactoredEnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         val scriptFile = File(tempDir, "scripts/service-manager.sh")
@@ -114,7 +114,7 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = EnhancedConfigGenerator(tempDir)
+        val generator = RefactoredEnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         val scriptFile = File(tempDir, "scripts/user-manager.sh")
@@ -145,7 +145,7 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = EnhancedConfigGenerator(tempDir)
+        val generator = RefactoredEnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         // The new generator includes repository configuration in the repository-config.sh script
@@ -171,7 +171,7 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = EnhancedConfigGenerator(tempDir)
+        val generator = RefactoredEnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         val scriptFile = File(tempDir, "scripts/deploy.sh")
@@ -196,7 +196,7 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = EnhancedConfigGenerator(tempDir)
+        val generator = RefactoredEnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         File(tempDir, "scripts").exists() shouldBe true
@@ -213,7 +213,7 @@ class CompilerTest : StringSpec({
         }
         
         val tempDir = Files.createTempDirectory("horizonos-test").toFile()
-        val generator = EnhancedConfigGenerator(tempDir)
+        val generator = RefactoredEnhancedConfigGenerator(tempDir)
         generator.generate(config)
         
         // Should still generate basic files

@@ -1,5 +1,6 @@
 package org.horizonos.config.dsl
 
+import org.horizonos.config.dsl.services.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
@@ -11,7 +12,7 @@ class ServicesTest {
 
     @Test
     fun `should create database service with PostgreSQL configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             database(DatabaseType.POSTGRESQL) {
                 enabled = true
                 autoStart = true
@@ -65,7 +66,7 @@ class ServicesTest {
 
     @Test
     fun `should create database service with MySQL configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             database(DatabaseType.MYSQL) {
                 enabled = true
                 port = 3306
@@ -94,7 +95,7 @@ class ServicesTest {
 
     @Test
     fun `should create database service with Redis configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             database(DatabaseType.REDIS) {
                 enabled = true
                 port = 6379
@@ -133,7 +134,7 @@ class ServicesTest {
 
     @Test
     fun `should create web server service with Nginx configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             webServer(WebServerType.NGINX) {
                 enabled = true
                 port = 80
@@ -214,7 +215,7 @@ class ServicesTest {
 
     @Test
     fun `should create web server service with Apache configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             webServer(WebServerType.APACHE) {
                 enabled = true
                 port = 8080
@@ -251,7 +252,7 @@ class ServicesTest {
 
     @Test
     fun `should create container service with Docker configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             container(ContainerRuntime.DOCKER) {
                 enabled = true
                 rootless = false
@@ -358,7 +359,7 @@ class ServicesTest {
 
     @Test
     fun `should create message queue service with RabbitMQ configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             messageQueue(MessageQueueType.RABBITMQ) {
                 enabled = true
                 port = 5672
@@ -418,7 +419,7 @@ class ServicesTest {
 
     @Test
     fun `should create message queue service with Kafka configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             messageQueue(MessageQueueType.KAFKA) {
                 enabled = true
                 port = 9092
@@ -465,7 +466,7 @@ class ServicesTest {
 
     @Test
     fun `should create monitoring service with Prometheus configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             monitoring(MonitoringType.PROMETHEUS) {
                 enabled = true
                 port = 9090
@@ -519,7 +520,7 @@ class ServicesTest {
 
     @Test
     fun `should create monitoring service with Grafana configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             monitoring(MonitoringType.GRAFANA) {
                 enabled = true
                 port = 3000
@@ -572,7 +573,7 @@ class ServicesTest {
 
     @Test
     fun `should create custom systemd unit`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             systemdUnit("my-custom-service") {
                 unitType = SystemdUnitType.SERVICE
                 description = "My Custom Application Service"
@@ -630,7 +631,7 @@ class ServicesTest {
 
     @Test
     fun `should create complex multi-service configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             // Database setup
             database(DatabaseType.POSTGRESQL) {
                 enabled = true
@@ -764,7 +765,7 @@ class ServicesTest {
 
     @Test
     fun `should create NATS message queue with JetStream`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             messageQueue(MessageQueueType.NATS) {
                 enabled = true
                 port = 4222
@@ -811,7 +812,7 @@ class ServicesTest {
 
     @Test
     fun `should create Caddy web server with admin and logging`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             webServer(WebServerType.CADDY) {
                 enabled = true
                 port = 80
@@ -869,7 +870,7 @@ class ServicesTest {
 
     @Test
     fun `should create Podman container service with rootless configuration`() {
-        val servicesConfig = EnhancedServicesContext().apply {
+        val servicesConfig = ServicesContext().apply {
             container(ContainerRuntime.PODMAN) {
                 enabled = true
                 rootless = true

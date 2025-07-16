@@ -1,14 +1,22 @@
 #!/bin/bash
-# HorizonOS OSTree Deployment Script
+# HorizonOS Deployment Script
+# Generated from Kotlin DSL configuration
 
-set -e
+set -euo pipefail
 
-# System configuration
-echo 'compiled-system' > /etc/hostname
-ln -sf /usr/share/zoneinfo/UTC /etc/localtime
-echo 'LANG=en_US.UTF-8' > /etc/locale.conf
+# Color output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
 
-# Run other configuration scripts
-./install-packages.sh
-./configure-services.sh
-./create-users.sh
+echo -e "${GREEN}Starting HorizonOS deployment...${NC}"
+
+# Run all configuration scripts
+./system-config.sh
+./package-manager.sh
+./service-manager.sh
+./user-manager.sh
+./repository-config.sh
+
+echo -e "${GREEN}Deployment completed successfully!${NC}"

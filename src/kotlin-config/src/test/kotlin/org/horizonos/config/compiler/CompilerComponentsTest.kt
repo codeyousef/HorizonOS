@@ -170,7 +170,7 @@ class CompilerComponentsTest : StringSpec({
     
     "should generate multiple output formats" {
         val tempDir = createTempDirectory("horizonos-test").toFile()
-        val generator = EnhancedConfigGenerator(tempDir)
+        val generator = RefactoredEnhancedConfigGenerator(tempDir)
         
         val config = CompiledConfig(
             system = SystemConfig("test-host", "UTC", "en_US.UTF-8"),

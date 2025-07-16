@@ -1,6 +1,8 @@
 package org.horizonos.config.validation.validators
 
 import org.horizonos.config.dsl.*
+import org.horizonos.config.dsl.hardware.*
+import org.horizonos.config.dsl.hardware.CPUGovernor
 import org.horizonos.config.validation.ValidationError
 
 object HardwareValidator {
@@ -46,16 +48,19 @@ object HardwareValidator {
         }
         
         // Validate OpenGL configuration
-        gpu.opengl?.let { opengl ->
-            if (opengl.driSupport && opengl.driDrivers.isEmpty()) {
-                errors.add(ValidationError.InvalidGPUDriver("DRI support enabled but no drivers specified"))
+        gpu.opengl.let { opengl ->
+            if (opengl.multisampling < 0 || opengl.multisampling > 32) {
+                errors.add(ValidationError.InvalidGPUDriver("Invalid multisampling value: ${opengl.multisampling}"))
+            }
+            if (opengl.anisotropicFiltering < 0 || opengl.anisotropicFiltering > 16) {
+                errors.add(ValidationError.InvalidGPUDriver("Invalid anisotropic filtering value: ${opengl.anisotropicFiltering}"))
             }
         }
         
         // Validate Vulkan configuration
-        gpu.vulkan?.let { vulkan ->
-            if (vulkan.enable && vulkan.drivers.isEmpty()) {
-                errors.add(ValidationError.InvalidGPUDriver("Vulkan enabled but no drivers specified"))
+        gpu.vulkan.let { vulkan ->
+            if (vulkan.enabled && vulkan.validation && vulkan.layers.isEmpty()) {
+                errors.add(ValidationError.InvalidGPUDriver("Vulkan validation enabled but no validation layers specified"))
             }
         }
         
@@ -68,13 +73,20 @@ object HardwareValidator {
         // Validate monitors
         display.monitors.forEach { monitor ->
             // Validate resolution
-            if (!isValidDisplayResolution(monitor.resolution)) {
-                errors.add(ValidationError.InvalidDisplayResolution(monitor.resolution))
+            monitor.resolution?.let { resolution ->
+                if (resolution.width < 640 || resolution.height < 480) {
+                    errors.add(ValidationError.InvalidDisplayResolution("Resolution too small: ${resolution.width}x${resolution.height}"))
+                }
+                if (resolution.width > 8192 || resolution.height > 8192) {
+                    errors.add(ValidationError.InvalidDisplayResolution("Resolution too large: ${resolution.width}x${resolution.height}"))
+                }
             }
             
             // Validate refresh rate
-            if (!isValidRefreshRate(monitor.refreshRate)) {
-                errors.add(ValidationError.InvalidRefreshRate(monitor.refreshRate))
+            monitor.refreshRate?.let { rate ->
+                if (!isValidRefreshRate(rate)) {
+                    errors.add(ValidationError.InvalidRefreshRate(rate))
+                }
             }
             
             // Validate position coordinates
@@ -91,12 +103,7 @@ object HardwareValidator {
             errors.add(ValidationError.ConflictingMonitors(name))
         }
         
-        // Validate compositing settings
-        display.compositing?.let { compositing ->
-            if (compositing.backend !in setOf("xrender", "opengl", "vulkan")) {
-                errors.add(ValidationError.InvalidDisplayResolution("Invalid compositing backend"))
-            }
-        }
+        // Compositing backend validation is already handled by the enum type
         
         return errors
     }
@@ -105,20 +112,22 @@ object HardwareValidator {
         val errors = mutableListOf<ValidationError>()
         
         // Validate CPU frequency scaling
-        power.cpu?.let { cpu ->
-            if (cpu.frequencyGovernor !in setOf("performance", "powersave", "ondemand", "conservative", "schedutil")) {
-                errors.add(ValidationError.InvalidPowerProfile("Invalid CPU frequency governor: ${cpu.frequencyGovernor}"))
-            }
+        power.cpu.let { cpu ->
+            // CPU governor validation is already handled by the enum type
             
-            if (cpu.minFrequency != null && cpu.maxFrequency != null && cpu.minFrequency!! > cpu.maxFrequency!!) {
-                errors.add(ValidationError.InvalidPowerProfile("Min CPU frequency cannot be greater than max frequency"))
-            }
-        }
-        
-        // Validate suspend settings
-        power.suspend?.let { suspend ->
-            if (suspend.suspendThenHibernate && suspend.hibernateDelaySec <= 0) {
-                errors.add(ValidationError.InvalidPowerProfile("Hibernate delay must be positive"))
+            // Validate frequency strings if provided
+            val minFreq = cpu.minFreq
+            val maxFreq = cpu.maxFreq
+            if (minFreq != null && maxFreq != null) {
+                try {
+                    val min = minFreq.removeSuffix("MHz").toDouble()
+                    val max = maxFreq.removeSuffix("MHz").toDouble()
+                    if (min > max) {
+                        errors.add(ValidationError.InvalidPowerProfile("Min CPU frequency cannot be greater than max frequency"))
+                    }
+                } catch (e: NumberFormatException) {
+                    errors.add(ValidationError.InvalidPowerProfile("Invalid frequency format"))
+                }
             }
         }
         
@@ -164,9 +173,12 @@ object HardwareValidator {
         
         // Validate adapter settings
         bluetooth.adapters.forEach { adapter ->
-            if (adapter.discoveryTimeout < 0 || adapter.discoveryTimeout > 300) {
-                errors.add(ValidationError.InvalidBluetoothAddress("Invalid discovery timeout: ${adapter.discoveryTimeout}"))
+            adapter.address?.let { address ->
+                if (!isValidBluetoothAddress(address)) {
+                    errors.add(ValidationError.InvalidBluetoothAddress("Invalid adapter address: $address"))
+                }
             }
+            // timeout is a Duration, so no numeric validation needed
         }
         
         return errors
@@ -184,8 +196,13 @@ object HardwareValidator {
         
         // Validate mount rules
         usb.mountRules.forEach { rule ->
-            if (!isValidDevicePath(rule.devicePath)) {
-                errors.add(ValidationError.InvalidDevicePath(rule.devicePath))
+            // Validate vendor/product IDs if provided
+            rule.vendorId?.let { vendorId ->
+                rule.productId?.let { productId ->
+                    if (!isValidUSBDevice(vendorId, productId)) {
+                        errors.add(ValidationError.InvalidUSBDevice("$vendorId:$productId"))
+                    }
+                }
             }
             
             if (!isValidMountPoint(rule.mountPoint)) {

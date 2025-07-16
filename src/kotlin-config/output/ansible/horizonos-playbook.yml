@@ -1,0 +1,17 @@
+---
+# HorizonOS Ansible Playbook
+# Generated from Kotlin DSL
+
+- name: Deploy HorizonOS Configuration
+  hosts: all
+  become: yes
+  tasks:
+
+    - name: Set hostname
+      hostname:
+        name: horizonos-minimal
+
+    - name: Set timezone
+      timezone:
+        name: UTC
+

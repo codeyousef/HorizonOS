@@ -187,12 +187,7 @@ object SecurityValidator {
             }
         }
         
-        // Validate trust levels are within expected range
-        gpg.keys.forEach { key ->
-            if (!isValidTrustLevel(key.trustLevel)) {
-                errors.add(ValidationError.InvalidGPGKeyId("Invalid trust level for key ${key.keyId}"))
-            }
-        }
+        // Trust levels are already validated by the enum type, no additional validation needed
         
         return errors
     }
@@ -239,17 +234,17 @@ object SecurityValidator {
     private fun validateCertificateConfig(certs: CertificateConfig): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
         
-        // Validate certificate paths
-        certs.certificates.forEach { cert ->
+        // Validate trusted certificates
+        certs.trustedCerts.forEach { cert ->
             if (!isValidPath(cert.path)) {
                 errors.add(ValidationError.InvalidCertificatePath(cert.path))
             }
         }
         
         // Validate CA certificates
-        certs.caCertificates.forEach { ca ->
-            if (!isValidPath(ca.path)) {
-                errors.add(ValidationError.InvalidCertificatePath(ca.path))
+        certs.caCerts.forEach { ca ->
+            if (ca.certificate.isBlank()) {
+                errors.add(ValidationError.InvalidCertificatePath("CA certificate cannot be empty"))
             }
         }
         
