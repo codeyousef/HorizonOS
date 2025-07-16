@@ -1,6 +1,7 @@
 package org.horizonos.config.dsl
 
 import kotlinx.serialization.Serializable
+import org.horizonos.config.validation.ConfigurationValidator
 
 // ===== Core DSL Classes =====
 
@@ -18,6 +19,7 @@ class SystemConfiguration {
     private val users = mutableListOf<User>()
     private val repositories = mutableListOf<Repository>()
     private var desktopConfig: DesktopConfig? = null
+    private var automationConfig: AutomationConfig? = null
 
     fun packages(block: PackagesContext.() -> Unit) {
         PackagesContext().apply(block).also {
@@ -46,16 +48,27 @@ class SystemConfiguration {
     fun desktop(block: DesktopContext.() -> Unit) {
         desktopConfig = DesktopContext().apply(block).toConfig()
     }
+    
+    fun automation(block: AutomationContext.() -> Unit) {
+        automationConfig = AutomationContext().apply(block).toConfig()
+    }
 
     fun toConfig(): CompiledConfig {
-        return CompiledConfig(
+        val config = CompiledConfig(
             system = SystemConfig(hostname, timezone, locale),
             packages = packages,
             services = services,
             users = users,
             repositories = repositories,
-            desktop = desktopConfig
+            desktop = desktopConfig,
+            automation = automationConfig
         )
+        
+        // Validate configuration before returning
+        val validationResult = ConfigurationValidator.validate(config)
+        validationResult.throwIfInvalid()
+        
+        return config
     }
 }
 
@@ -273,7 +286,8 @@ data class CompiledConfig(
     val services: List<Service>,
     val users: List<User>,
     val repositories: List<Repository>,
-    val desktop: DesktopConfig? = null
+    val desktop: DesktopConfig? = null,
+    val automation: AutomationConfig? = null
 )
 
 @Serializable
