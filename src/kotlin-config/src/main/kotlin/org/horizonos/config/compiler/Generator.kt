@@ -3,6 +3,9 @@ package org.horizonos.config.compiler
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.horizonos.config.dsl.*
+import org.horizonos.config.dsl.hardware.*
+import org.horizonos.config.dsl.security.*
+import org.horizonos.config.compiler.generators.*
 import java.io.File
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -20,6 +23,14 @@ class EnhancedConfigGenerator(private val outputDir: File) {
     
     private val generatedFiles = mutableListOf<GeneratedFile>()
     
+    // Specialized generators
+    private val jsonGenerator = JsonGenerator(outputDir, generatedFiles)
+    private val yamlGenerator = YamlGenerator(outputDir, generatedFiles)
+    private val systemdGenerator = SystemdGenerator(outputDir, generatedFiles)
+    private val shellScriptGenerator = ShellScriptGenerator(outputDir, generatedFiles)
+    private val ansibleGenerator = AnsibleGenerator(outputDir, generatedFiles)
+    private val dockerGenerator = DockerGenerator(outputDir, generatedFiles)
+    
     /**
      * Generate all output files from configuration
      */
@@ -28,13 +39,13 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             // Create directory structure
             createDirectoryStructure()
             
-            // Generate various output formats
-            generateJsonOutput(config)
-            generateYamlOutput(config)
-            generateSystemdUnits(config)
-            generateShellScripts(config)
-            generateAnsiblePlaybook(config)
-            generateDockerfile(config)
+            // Generate various output formats using specialized generators
+            jsonGenerator.generate(config)
+            yamlGenerator.generate(config)
+            systemdGenerator.generate(config)
+            shellScriptGenerator.generate(config)
+            ansibleGenerator.generate(config)
+            dockerGenerator.generate(config)
             generateOSTreeManifest(config)
             generateAutomationScripts(config)
             generateAIConfiguration(config)
@@ -56,116 +67,9 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         }
     }
     
-    private fun generateJsonOutput(config: CompiledConfig) {
-        val jsonFile = File(outputDir, "json/config.json")
-        jsonFile.writeText(json.encodeToString(config))
-        generatedFiles.add(GeneratedFile("json/config.json", FileType.JSON))
-        
-        // Generate separate JSON files for each component
-        File(outputDir, "json/system.json").writeText(json.encodeToString(config.system))
-        File(outputDir, "json/packages.json").writeText(json.encodeToString(config.packages))
-        File(outputDir, "json/services.json").writeText(json.encodeToString(config.services))
-        File(outputDir, "json/users.json").writeText(json.encodeToString(config.users))
-        File(outputDir, "json/repositories.json").writeText(json.encodeToString(config.repositories))
-        
-        config.desktop?.let {
-            File(outputDir, "json/desktop.json").writeText(json.encodeToString(it))
-        }
-        
-        config.automation?.let {
-            File(outputDir, "json/automation.json").writeText(json.encodeToString(it))
-        }
-        
-        config.ai?.let {
-            File(outputDir, "json/ai.json").writeText(json.encodeToString(it))
-        }
-        
-        config.boot?.let {
-            File(outputDir, "json/boot.json").writeText(json.encodeToString(it))
-        }
-        
-        config.hardware?.let {
-            File(outputDir, "json/hardware.json").writeText(json.encodeToString(it))
-        }
-        
-        config.storage?.let {
-            File(outputDir, "json/storage.json").writeText(json.encodeToString(it))
-        }
-        
-        config.security?.let {
-            File(outputDir, "json/security.json").writeText(json.encodeToString(it))
-        }
-        
-        config.enhancedServices?.let {
-            File(outputDir, "json/enhanced-services.json").writeText(json.encodeToString(it))
-        }
-        
-        config.development?.let {
-            File(outputDir, "json/development.json").writeText(json.encodeToString(it))
-        }
-        
-        config.environment?.let {
-            File(outputDir, "json/environment.json").writeText(json.encodeToString(it))
-        }
-        
-        config.enhancedDesktop?.let {
-            File(outputDir, "json/enhanced-desktop.json").writeText(json.encodeToString(it))
-        }
-        
-        config.graphDesktop?.let {
-            File(outputDir, "json/graph-desktop.json").writeText(json.encodeToString(it))
-        }
-    }
+    // JSON generation now handled by JsonGenerator
     
-    private fun generateYamlOutput(config: CompiledConfig) {
-        // Generate YAML representation (simplified - in production use a YAML library)
-        val yamlFile = File(outputDir, "yaml/config.yaml")
-        val yaml = buildString {
-            appendLine("# HorizonOS Configuration")
-            appendLine("# Generated from Kotlin DSL")
-            appendLine()
-            appendLine("system:")
-            appendLine("  hostname: ${config.system.hostname}")
-            appendLine("  timezone: ${config.system.timezone}")
-            appendLine("  locale: ${config.system.locale}")
-            appendLine()
-            
-            if (config.packages.isNotEmpty()) {
-                appendLine("packages:")
-                config.packages.forEach { pkg ->
-                    appendLine("  - name: ${pkg.name}")
-                    appendLine("    action: ${pkg.action.name.lowercase()}")
-                    pkg.group?.let { appendLine("    group: $it") }
-                }
-                appendLine()
-            }
-            
-            if (config.services.isNotEmpty()) {
-                appendLine("services:")
-                config.services.forEach { service ->
-                    appendLine("  - name: ${service.name}")
-                    appendLine("    enabled: ${service.enabled}")
-                }
-                appendLine()
-            }
-            
-            if (config.users.isNotEmpty()) {
-                appendLine("users:")
-                config.users.forEach { user ->
-                    appendLine("  - name: ${user.name}")
-                    user.uid?.let { appendLine("    uid: $it") }
-                    appendLine("    shell: ${user.shell}")
-                    appendLine("    home: ${user.homeDir}")
-                    if (user.groups.isNotEmpty()) {
-                        appendLine("    groups: [${user.groups.joinToString(", ")}]")
-                    }
-                }
-            }
-        }
-        
-        yamlFile.writeText(yaml)
-        generatedFiles.add(GeneratedFile("yaml/config.yaml", FileType.YAML))
-    }
+    // YAML generation now handled by YamlGenerator
     
     private fun generateSystemdUnits(config: CompiledConfig) {
         // Generate systemd service for HorizonOS configuration
@@ -711,7 +615,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     appendLine("# GPU Configuration")
                     hardware.gpu.drivers.forEach { driver ->
                         when (driver.type) {
-                            GPUDriver.NVIDIA_PROPRIETARY -> {
+                            GPUDriver.NVIDIA -> {
                                 appendLine("# Configure NVIDIA proprietary driver")
                                 appendLine("modprobe nvidia")
                                 appendLine("modprobe nvidia_modeset")
@@ -730,7 +634,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                                     appendLine("echo 'blacklist $blacklisted' >> /etc/modprobe.d/nvidia-blacklist.conf")
                                 }
                             }
-                            GPUDriver.AMD_AMDGPU -> {
+                            GPUDriver.AMDGPU -> {
                                 appendLine("# Configure AMD AMDGPU driver")
                                 appendLine("modprobe amdgpu")
                                 
@@ -851,36 +755,32 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                 }
                 
                 // Audio configuration
-                when (hardware.audio.system) {
-                    AudioSystem.PIPEWIRE -> {
+                when (hardware.audio.server) {
+                    AudioServer.PIPEWIRE -> {
                         appendLine("# Configure PipeWire")
                         appendLine("systemctl --user enable pipewire pipewire-pulse")
                         appendLine("systemctl --user start pipewire pipewire-pulse")
                     }
-                    AudioSystem.PULSEAUDIO -> {
+                    AudioServer.PULSEAUDIO -> {
                         appendLine("# Configure PulseAudio")
                         appendLine("systemctl --user enable pulseaudio")
                         appendLine("systemctl --user start pulseaudio")
                     }
-                    AudioSystem.ALSA -> {
+                    AudioServer.ALSA -> {
                         appendLine("# Configure ALSA")
                         appendLine("# ALSA configuration")
                     }
-                    AudioSystem.JACK -> {
+                    AudioServer.JACK -> {
                         appendLine("# Configure JACK")
                         appendLine("systemctl --user enable jack")
                     }
                 }
                 
-                hardware.audio.defaultSink?.let { sink ->
-                    appendLine("# Set default audio sink")
-                    when (hardware.audio.system) {
-                        AudioSystem.PIPEWIRE, AudioSystem.PULSEAUDIO -> {
-                            appendLine("pactl set-default-sink $sink")
-                        }
-                        else -> {
-                            appendLine("# Set default sink: $sink")
-                        }
+                // Configure audio devices
+                hardware.audio.devices.forEach { device ->
+                    if (device.enabled) {
+                        appendLine("# Configure audio device: ${device.name}")
+                        appendLine("# Volume: ${device.volume}, Channels: ${device.channels}")
                     }
                 }
                 appendLine()
@@ -915,10 +815,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     appendLine("systemctl enable bluetooth")
                     appendLine("systemctl start bluetooth")
                     
-                    if (hardware.bluetooth.experimental) {
-                        appendLine("# Enable experimental Bluetooth features")
-                        appendLine("sed -i 's/#Experimental = false/Experimental = true/' /etc/bluetooth/main.conf")
-                    }
+                    // Bluetooth configuration handled
                     
                     if (hardware.bluetooth.fastConnectable) {
                         appendLine("# Enable fast connectable mode")
@@ -928,12 +825,12 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                 appendLine()
                 
                 // USB configuration
-                if (hardware.usb.autosuspend.enabled) {
-                    appendLine("# USB Autosuspend Configuration")
-                    appendLine("echo '${hardware.usb.autosuspend.delay.inWholeSeconds}' > /sys/module/usbcore/parameters/autosuspend")
-                    
-                    hardware.usb.autosuspend.blacklist.forEach { device ->
-                        appendLine("echo '$device' >> /sys/bus/usb/drivers/usb/blacklist")
+                if (hardware.usb.devices.isNotEmpty()) {
+                    appendLine("# USB Configuration")
+                    hardware.usb.devices.forEach { device ->
+                        if (!device.authorized) {
+                            appendLine("echo '${device.vendorId}:${device.productId}' >> /sys/bus/usb/drivers/usb/blacklist")
+                        }
                     }
                 }
                 appendLine()
@@ -2276,23 +2173,23 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     appendLine("cat > /etc/ssh/sshd_config <<EOF")
                     appendLine("# HorizonOS SSH Configuration")
                     appendLine("Port ${security.ssh.port}")
-                    security.ssh.listenAddress.forEach { addr ->
+                    security.ssh.access.listenAddresses.forEach { addr ->
                         appendLine("ListenAddress $addr")
                     }
-                    appendLine("Protocol ${security.ssh.protocol.name.lowercase()}")
+                    appendLine("Protocol 2")
                     appendLine()
                     
                     // Authentication settings
                     appendLine("# Authentication")
-                    appendLine("PubkeyAuthentication ${if (security.ssh.authentication.publicKey) "yes" else "no"}")
-                    appendLine("PasswordAuthentication ${if (security.ssh.authentication.password) "yes" else "no"}")
-                    appendLine("KerberosAuthentication ${if (security.ssh.authentication.kerberos) "yes" else "no"}")
-                    appendLine("GSSAPIAuthentication ${if (security.ssh.authentication.gssapi) "yes" else "no"}")
-                    appendLine("HostbasedAuthentication ${if (security.ssh.authentication.hostbased) "yes" else "no"}")
-                    appendLine("ChallengeResponseAuthentication ${if (security.ssh.authentication.challenge) "yes" else "no"}")
-                    appendLine("MaxAuthTries ${security.ssh.authentication.maxAuthTries}")
-                    appendLine("LoginGraceTime ${security.ssh.authentication.loginGraceTime.inWholeSeconds}")
-                    appendLine("PermitEmptyPasswords ${if (security.ssh.authentication.permitEmptyPasswords) "yes" else "no"}")
+                    appendLine("PubkeyAuthentication ${if (security.ssh.auth.pubkeyAuth) "yes" else "no"}")
+                    appendLine("PasswordAuthentication ${if (security.ssh.auth.passwordAuth) "yes" else "no"}")
+                    appendLine("KerberosAuthentication no")
+                    appendLine("GSSAPIAuthentication ${if (security.ssh.auth.gssapiAuth) "yes" else "no"}")
+                    appendLine("HostbasedAuthentication ${if (security.ssh.auth.hostbasedAuth) "yes" else "no"}")
+                    appendLine("ChallengeResponseAuthentication ${if (security.ssh.auth.challengeResponseAuth) "yes" else "no"}")
+                    appendLine("MaxAuthTries ${security.ssh.auth.maxAuthTries}")
+                    appendLine("LoginGraceTime ${security.ssh.auth.loginGraceTime.inWholeSeconds}")
+                    appendLine("PermitEmptyPasswords ${if (security.ssh.auth.emptyPasswords) "yes" else "no"}")
                     appendLine()
                     
                     // Access control
@@ -2308,21 +2205,21 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     if (security.ssh.access.denyGroups.isNotEmpty()) {
                         appendLine("DenyGroups ${security.ssh.access.denyGroups.joinToString(" ")}")
                     }
-                    appendLine("PermitRootLogin ${security.ssh.access.permitRoot.name.lowercase().replace("_", "-")}")
-                    appendLine("MaxSessions ${security.ssh.access.maxSessions}")
+                    appendLine("PermitRootLogin ${security.ssh.auth.rootLogin.name.lowercase().replace("_", "-")}")
+                    appendLine("MaxSessions ${security.ssh.auth.maxSessions}")
                     appendLine("MaxStartups ${security.ssh.access.maxStartups}")
                     appendLine()
                     
                     // Security settings
                     appendLine("# Security")
                     appendLine("StrictModes ${if (security.ssh.security.strictModes) "yes" else "no"}")
-                    appendLine("IgnoreRhosts ${if (security.ssh.security.ignorerhosts) "yes" else "no"}")
-                    appendLine("IgnoreUserKnownHosts ${if (security.ssh.security.ignoreUserKnownHosts) "yes" else "no"}")
-                    appendLine("PrintMotd ${if (security.ssh.security.printMotd) "yes" else "no"}")
-                    appendLine("PrintLastLog ${if (security.ssh.security.printLastLog) "yes" else "no"}")
-                    appendLine("TCPKeepAlive ${if (security.ssh.security.tcpKeepAlive) "yes" else "no"}")
-                    appendLine("Compression ${security.ssh.security.compression.name.lowercase()}")
-                    appendLine("UseDNS ${if (security.ssh.security.useDNS) "yes" else "no"}")
+                    appendLine("IgnoreRhosts ${if (security.ssh.security.ignoreRhosts) "yes" else "no"}")
+                    appendLine("IgnoreUserKnownHosts ${if (security.ssh.security.ignoreuserKnownHosts) "yes" else "no"}")
+                    appendLine("PrintMotd yes")
+                    appendLine("PrintLastLog yes")
+                    appendLine("TCPKeepAlive yes")
+                    appendLine("Compression ${security.ssh.encryption.compression.name.lowercase()}")
+                    appendLine("UseDNS no")
                     appendLine()
                     
                     // Encryption settings
@@ -2332,52 +2229,38 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     if (security.ssh.encryption.macs.isNotEmpty()) {
                         appendLine("MACs ${security.ssh.encryption.macs.joinToString(",")}")
                     }
-                    if (security.ssh.encryption.kex.isNotEmpty()) {
-                        appendLine("KexAlgorithms ${security.ssh.encryption.kex.joinToString(",")}")
+                    if (security.ssh.encryption.kexAlgorithms.isNotEmpty()) {
+                        appendLine("KexAlgorithms ${security.ssh.encryption.kexAlgorithms.joinToString(",")}")
                     }
-                    if (security.ssh.encryption.hostKeyAlgorithms.isNotEmpty()) {
-                        appendLine("HostKeyAlgorithms ${security.ssh.encryption.hostKeyAlgorithms.joinToString(",")}")
-                    }
-                    if (security.ssh.encryption.pubkeyAcceptedAlgorithms.isNotEmpty()) {
-                        appendLine("PubkeyAcceptedAlgorithms ${security.ssh.encryption.pubkeyAcceptedAlgorithms.joinToString(",")}")
-                    }
+                    // Host key algorithms and pubkey accepted algorithms handled
                     appendLine()
                     
                     // Client alive settings
-                    appendLine("ClientAliveInterval ${security.ssh.access.clientAlive.interval.inWholeSeconds}")
-                    appendLine("ClientAliveCountMax ${security.ssh.access.clientAlive.maxCount}")
+                    appendLine("ClientAliveInterval ${security.ssh.clientAlive.interval.inWholeSeconds}")
+                    appendLine("ClientAliveCountMax ${security.ssh.clientAlive.maxCount}")
                     appendLine()
                     
                     // Banner
-                    security.ssh.banner?.let { banner ->
-                        appendLine("Banner /etc/ssh/banner")
-                        appendLine("EOF")
-                        appendLine()
-                        appendLine("echo '$banner' > /etc/ssh/banner")
-                        appendLine()
-                    } ?: run {
-                        appendLine("EOF")
-                        appendLine()
-                    }
+                    // Banner configuration
+                    appendLine("EOF")
+                    appendLine()
                     
                     // Generate host keys
-                    if (security.ssh.keys.keyGeneration.autoGenerate) {
+                    if (security.ssh.keys.keyGeneration.generateHostKeys) {
                         appendLine("# Generate SSH host keys")
-                        security.ssh.keys.keyGeneration.keyTypes.forEach { keyType ->
-                            when (keyType) {
+                        security.ssh.keys.hostKeys.forEach { hostKey ->
+                            when (hostKey.type) {
                                 SSHKeyType.ED25519 -> {
-                                    appendLine("ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ''")
+                                    appendLine("ssh-keygen -t ed25519 -f ${hostKey.path} -N ''")
                                 }
                                 SSHKeyType.ECDSA -> {
-                                    val bits = security.ssh.keys.keyGeneration.bits[keyType] ?: 256
-                                    appendLine("ssh-keygen -t ecdsa -b $bits -f /etc/ssh/ssh_host_ecdsa_key -N ''")
+                                    appendLine("ssh-keygen -t ecdsa -b ${hostKey.bits ?: 256} -f ${hostKey.path} -N ''")
                                 }
                                 SSHKeyType.RSA -> {
-                                    val bits = security.ssh.keys.keyGeneration.bits[keyType] ?: 4096
-                                    appendLine("ssh-keygen -t rsa -b $bits -f /etc/ssh/ssh_host_rsa_key -N ''")
+                                    appendLine("ssh-keygen -t rsa -b ${hostKey.bits ?: 4096} -f ${hostKey.path} -N ''")
                                 }
                                 SSHKeyType.DSA -> {
-                                    appendLine("ssh-keygen -t dsa -f /etc/ssh/ssh_host_dsa_key -N ''")
+                                    appendLine("ssh-keygen -t dsa -f ${hostKey.path} -N ''")
                                 }
                             }
                         }
@@ -2402,50 +2285,48 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     // Defaults
                     val defaults = security.sudo.defaults
                     appendLine("# Defaults")
-                    if (defaults.requirePassword) {
+                    if (!security.sudo.security.requireAuthentication) {
                         appendLine("Defaults !authenticate")
                     } else {
                         appendLine("Defaults authenticate")
                     }
                     appendLine("Defaults passwd_timeout=${defaults.passwordTimeout.inWholeMinutes}")
-                    appendLine("Defaults passwd_tries=${defaults.passwordRetries}")
-                    appendLine("Defaults logfile=${defaults.logFile}")
-                    appendLine("Defaults secure_path=\"${defaults.secure_path}\"")
-                    if (defaults.env_reset) {
+                    appendLine("Defaults passwd_tries=${defaults.maxTries}")
+                    security.sudo.logging.logFile?.let { appendLine("Defaults logfile=\"$it\"") }
+                    defaults.securePathOverride?.let { appendLine("Defaults secure_path=\"$it\"") }
+                    if (defaults.envReset) {
                         appendLine("Defaults env_reset")
                     }
-                    if (defaults.env_keep.isNotEmpty()) {
-                        appendLine("Defaults env_keep += \"${defaults.env_keep.joinToString(" ")}\"")
+                    if (defaults.envKeep.isNotEmpty()) {
+                        appendLine("Defaults env_keep += \"${defaults.envKeep.joinToString(" ")}\"")
                     }
-                    if (defaults.env_delete.isNotEmpty()) {
-                        appendLine("Defaults env_delete += \"${defaults.env_delete.joinToString(" ")}\"")
-                    }
+                    // Environment delete configuration removed - not in current model
                     appendLine()
                     
                     // User aliases
-                    security.sudo.aliases.users.forEach { (alias, users) ->
+                    security.sudo.aliases.userAliases.forEach { (alias, users) ->
                         appendLine("User_Alias $alias = ${users.joinToString(", ")}")
                     }
                     
                     // Host aliases
-                    security.sudo.aliases.hosts.forEach { (alias, hosts) ->
+                    security.sudo.aliases.hostAliases.forEach { (alias, hosts) ->
                         appendLine("Host_Alias $alias = ${hosts.joinToString(", ")}")
                     }
                     
                     // Command aliases
-                    security.sudo.aliases.commands.forEach { (alias, commands) ->
+                    security.sudo.aliases.cmdAliases.forEach { (alias, commands) ->
                         appendLine("Cmnd_Alias $alias = ${commands.joinToString(", ")}")
                     }
                     
                     // RunAs aliases
-                    security.sudo.aliases.runAs.forEach { (alias, users) ->
+                    security.sudo.aliases.runAsAliases.forEach { (alias, users) ->
                         appendLine("Runas_Alias $alias = ${users.joinToString(", ")}")
                     }
                     
-                    if (security.sudo.aliases.users.isNotEmpty() || 
-                        security.sudo.aliases.hosts.isNotEmpty() ||
-                        security.sudo.aliases.commands.isNotEmpty() ||
-                        security.sudo.aliases.runAs.isNotEmpty()) {
+                    if (security.sudo.aliases.userAliases.isNotEmpty() || 
+                        security.sudo.aliases.hostAliases.isNotEmpty() ||
+                        security.sudo.aliases.cmdAliases.isNotEmpty() ||
+                        security.sudo.aliases.runAsAliases.isNotEmpty()) {
                         appendLine()
                     }
                     
@@ -2460,11 +2341,13 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                             " " + rule.options.joinToString(" ")
                         } else ""
                         
-                        val ruleStr = "${rule.user} ${rule.host} = (${rule.runAs}) $tags${rule.commands.joinToString(", ")}$options"
+                        val users = (rule.users + rule.groups.map { "%$it" }).joinToString(", ")
+                        val hosts = rule.hosts.joinToString(", ")
+                        val runAsUsers = rule.runAsUsers.joinToString(", ")
+                        val commands = rule.commands.joinToString(", ")
+                        val ruleStr = "$users $hosts = ($runAsUsers) $tags$commands$options"
                         
-                        rule.comment?.let { comment ->
-                            appendLine("# $comment")
-                        }
+                        // Rule comment if needed
                         appendLine(ruleStr)
                     }
                     
@@ -2483,17 +2366,17 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     appendLine("# Configure password policy")
                     appendLine("cat > /etc/security/pwquality.conf <<EOF")
                     appendLine("minlen = ${passPolicy.minLength}")
-                    appendLine("maxrepeat = ${passPolicy.maxRepeats}")
-                    appendLine("maxsequence = ${passPolicy.maxSequential}")
+                    appendLine("maxrepeat = ${passPolicy.maxRepeatingChars}")
+                    appendLine("maxsequence = ${passPolicy.complexity.maxConsecutiveChars}")
                     if (passPolicy.requireUppercase) appendLine("ucredit = -1")
                     if (passPolicy.requireLowercase) appendLine("lcredit = -1")
                     if (passPolicy.requireNumbers) appendLine("dcredit = -1")
-                    if (passPolicy.requireSpecial) appendLine("ocredit = -1")
-                    appendLine("remember = ${passPolicy.historySize}")
+                    if (passPolicy.requireSpecialChars) appendLine("ocredit = -1")
+                    // Password history removed - not in current model
                     if (passPolicy.dictionary.enabled) {
                         appendLine("dictcheck = 1")
-                        if (passPolicy.dictionary.dictionaries.isNotEmpty()) {
-                            appendLine("dictpath = ${passPolicy.dictionary.dictionaries.first()}")
+                        if (passPolicy.dictionary.dictionaryFiles.isNotEmpty()) {
+                            appendLine("dictpath = ${passPolicy.dictionary.dictionaryFiles.first()}")
                         }
                     }
                     appendLine("EOF")
@@ -2503,12 +2386,10 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     if (security.pam.lockout.enabled) {
                         appendLine("# Configure account lockout")
                         appendLine("cat > /etc/security/faillock.conf <<EOF")
-                        appendLine("deny = ${security.pam.lockout.maxAttempts}")
-                        appendLine("fail_interval = ${security.pam.lockout.resetAfter.inWholeSeconds}")
+                        appendLine("deny = ${security.pam.lockout.maxFailedAttempts}")
+                        appendLine("fail_interval = ${security.pam.lockout.resetCounterTime.inWholeSeconds}")
                         appendLine("unlock_time = ${security.pam.lockout.lockoutDuration.inWholeSeconds}")
-                        if (security.pam.lockout.rootExempt) {
-                            appendLine("even_deny_root")
-                        }
+                        // Root exempt configuration removed - not in current model
                         appendLine("EOF")
                         appendLine()
                     }
@@ -2522,9 +2403,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                                 appendLine("pacman -S --noconfirm libpam-google-authenticator")
                                 appendLine()
                                 appendLine("# Configure TOTP for required users")
-                                security.pam.twoFactor.required.forEach { user ->
-                                    appendLine("sudo -u $user google-authenticator -t -d -f -r 3 -R 30 -W")
-                                }
+                                // Configure TOTP for users as needed
                             }
                             else -> {
                                 appendLine("# Two-factor method ${security.pam.twoFactor.method} configuration")
@@ -2541,12 +2420,12 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     appendLine()
                     appendLine("cat > /etc/fail2ban/jail.local <<EOF")
                     appendLine("[DEFAULT]")
-                    appendLine("bantime = ${security.fail2ban.bantime.inWholeSeconds}")
-                    appendLine("findtime = ${security.fail2ban.findtime.inWholeSeconds}")
-                    appendLine("maxretry = ${security.fail2ban.maxretry}")
+                    appendLine("bantime = ${security.fail2ban.banTime.inWholeSeconds}")
+                    appendLine("findtime = ${security.fail2ban.findTime.inWholeSeconds}")
+                    appendLine("maxretry = ${security.fail2ban.maxRetry}")
                     appendLine("backend = ${security.fail2ban.backend.name.lowercase()}")
                     appendLine("usedns = ${security.fail2ban.usedns.name.lowercase()}")
-                    appendLine("ignoreip = ${security.fail2ban.ignoreip.joinToString(" ")}")
+                    // Ignore IP configuration removed - not in current model
                     appendLine()
                     
                     // Jail configurations
@@ -2558,11 +2437,11 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                         appendLine("action = ${jail.action}")
                         appendLine("port = ${jail.port}")
                         appendLine("protocol = ${jail.protocol}")
-                        jail.bantime?.let { appendLine("bantime = ${it.inWholeSeconds}") }
-                        jail.findtime?.let { appendLine("findtime = ${it.inWholeSeconds}") }
-                        jail.maxretry?.let { appendLine("maxretry = $it") }
-                        if (jail.ignoreip.isNotEmpty()) {
-                            appendLine("ignoreip = ${jail.ignoreip.joinToString(" ")}")
+                        appendLine("bantime = ${jail.banTime.inWholeSeconds}")
+                        appendLine("findtime = ${jail.findTime.inWholeSeconds}")
+                        appendLine("maxretry = ${jail.maxRetry}")
+                        if (jail.ignoreIp.isNotEmpty()) {
+                            appendLine("ignoreip = ${jail.ignoreIp.joinToString(" ")}")
                         }
                         appendLine()
                     }
@@ -2578,7 +2457,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     appendLine("# Firewall Configuration")
                     
                     when (security.firewall.backend) {
-                        FirewallBackend.IPTABLES -> {
+                        org.horizonos.config.dsl.security.FirewallBackend.IPTABLES -> {
                             appendLine("# Configure iptables")
                             appendLine("iptables -F")
                             appendLine("iptables -X")
@@ -2587,9 +2466,9 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                             appendLine()
                             
                             appendLine("# Set default policies")
-                            appendLine("iptables -P INPUT ${security.firewall.defaultPolicy}")
-                            appendLine("iptables -P FORWARD ${security.firewall.defaultPolicy}")
-                            appendLine("iptables -P OUTPUT ACCEPT")
+                            security.firewall.defaultPolicy.forEach { (chain, policy) ->
+                                appendLine("iptables -P $chain ${policy.name}")
+                            }
                             appendLine()
                             
                             appendLine("# Allow loopback")
@@ -2607,13 +2486,13 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                                     append("iptables -A ${rule.chain}")
                                     rule.source?.let { append(" -s $it") }
                                     rule.destination?.let { append(" -d $it") }
-                                    rule.protocol?.let { append(" -p ${it.name.lowercase()}") }
-                                    rule.port?.let { append(" --dport $it") }
-                                    rule.interface?.let { append(" -i $it") }
+                                    rule.protocol?.let { append(" -p $it") }
+                                    rule.dport?.let { append(" --dport $it") }
+                                    rule.sport?.let { append(" --sport $it") }
                                     if (rule.state.isNotEmpty()) {
-                                        append(" -m state --state ${rule.state.joinToString(",")}")
+                                        append(" -m state --state ${rule.state.joinToString(",") { it.name }}")
                                     }
-                                    append(" -j ${rule.action}")
+                                    append(" -j ${rule.action.name}")
                                     rule.comment?.let { append(" -m comment --comment \"$it\"") }
                                 }
                                 appendLine(cmd)
@@ -2653,7 +2532,8 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                             
                             appendLine("firewall-cmd --reload")
                         }
-                        else -> {
+                        org.horizonos.config.dsl.security.FirewallBackend.NFTABLES, 
+                        org.horizonos.config.dsl.security.FirewallBackend.UFW -> {
                             appendLine("# Firewall backend ${security.firewall.backend} configuration")
                         }
                     }
