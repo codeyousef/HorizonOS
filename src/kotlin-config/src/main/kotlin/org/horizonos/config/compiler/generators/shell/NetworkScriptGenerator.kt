@@ -27,11 +27,11 @@ class NetworkScriptGenerator(
                 // Network manager setup
                 appendLine("# Network Manager: ${network.networkManager}")
                 when (network.networkManager) {
-                    org.horizonos.config.dsl.NetworkManagerType.NETWORKMANAGER -> {
+                    org.horizonos.config.dsl.network.NetworkManagerType.NETWORKMANAGER -> {
                         appendLine("systemctl enable NetworkManager")
                         appendLine("systemctl start NetworkManager")
                     }
-                    org.horizonos.config.dsl.NetworkManagerType.SYSTEMD_NETWORKD -> {
+                    org.horizonos.config.dsl.network.NetworkManagerType.SYSTEMD_NETWORKD -> {
                         appendLine("systemctl enable systemd-networkd")
                         appendLine("systemctl start systemd-networkd")
                     }

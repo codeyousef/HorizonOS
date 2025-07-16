@@ -16,7 +16,7 @@ class BasicTest : StringSpec({
             network {
                 hostname("test-network")
                 networkInterface("eth0") {
-                    type = InterfaceType.ETHERNET
+                    type = org.horizonos.config.dsl.network.InterfaceType.ETHERNET
                 }
             }
             
