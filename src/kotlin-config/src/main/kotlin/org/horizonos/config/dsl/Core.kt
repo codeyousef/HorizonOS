@@ -24,6 +24,7 @@ class SystemConfiguration {
     var networkConfig: NetworkConfig? = null
     var bootConfig: BootConfig? = null
     var hardwareConfig: HardwareConfig? = null
+    var storageConfig: StorageConfig? = null
 
     fun packages(block: PackagesContext.() -> Unit) {
         PackagesContext().apply(block).also {
@@ -72,6 +73,10 @@ class SystemConfiguration {
     fun hardware(block: HardwareContext.() -> Unit) {
         hardwareConfig = HardwareContext().apply(block).toConfig()
     }
+    
+    fun storage(block: StorageContext.() -> Unit) {
+        storageConfig = StorageContext().apply(block).toConfig()
+    }
 
     fun toConfig(): CompiledConfig {
         val config = CompiledConfig(
@@ -85,7 +90,8 @@ class SystemConfiguration {
             ai = aiConfig,
             network = networkConfig,
             boot = bootConfig,
-            hardware = hardwareConfig
+            hardware = hardwareConfig,
+            storage = storageConfig
         )
         
         // Validate configuration before returning
@@ -315,7 +321,8 @@ data class CompiledConfig(
     val ai: AIConfig? = null,
     val network: NetworkConfig? = null,
     val boot: BootConfig? = null,
-    val hardware: HardwareConfig? = null
+    val hardware: HardwareConfig? = null,
+    val storage: StorageConfig? = null
 )
 
 @Serializable

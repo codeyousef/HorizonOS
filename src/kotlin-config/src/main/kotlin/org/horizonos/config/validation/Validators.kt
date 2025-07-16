@@ -37,6 +37,16 @@ sealed class ValidationError(open val message: String) {
     data class InvalidThermalZone(val zone: String) : ValidationError("Invalid thermal zone: $zone")
     data class InvalidBluetoothAddress(val address: String) : ValidationError("Invalid Bluetooth address: $address")
     data class InvalidUSBDevice(val device: String) : ValidationError("Invalid USB device identifier: $device")
+    data class InvalidDevicePath(val path: String) : ValidationError("Invalid device path: $path")
+    data class InvalidMountPoint(val path: String) : ValidationError("Invalid mount point: $path")
+    data class InvalidRAIDLevel(val level: String) : ValidationError("Invalid RAID level: $level")
+    data class InvalidEncryptionCipher(val cipher: String) : ValidationError("Invalid encryption cipher: $cipher")
+    data class InvalidKeySize(val size: Int) : ValidationError("Invalid key size: $size")
+    data class InvalidSwapSize(val size: String) : ValidationError("Invalid swap size: $size")
+    data class InvalidFilesystemType(val type: String) : ValidationError("Invalid filesystem type: $type")
+    data class ConflictingMountPoints(val mountPoint: String) : ValidationError("Duplicate mount point: $mountPoint")
+    data class InvalidBtrfsProfile(val profile: String) : ValidationError("Invalid Btrfs profile: $profile")
+    data class InvalidCompressionAlgorithm(val algorithm: String) : ValidationError("Invalid compression algorithm: $algorithm")
 }
 
 class ValidationResult(val errors: List<ValidationError>) {
@@ -87,6 +97,11 @@ object ConfigurationValidator {
         // Validate hardware configuration
         config.hardware?.let { hardware ->
             errors.addAll(validateHardwareConfig(hardware))
+        }
+        
+        // Validate storage configuration
+        config.storage?.let { storage ->
+            errors.addAll(validateStorageConfig(storage))
         }
         
         return ValidationResult(errors)
@@ -690,6 +705,318 @@ object ConfigurationValidator {
         }
         
         return errors
+    }
+    
+    private fun validateStorageConfig(storage: StorageConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        // Validate filesystems
+        errors.addAll(validateFilesystems(storage.filesystems))
+        
+        // Validate RAID configuration
+        errors.addAll(validateRAIDConfig(storage.raid))
+        
+        // Validate encryption configuration
+        errors.addAll(validateEncryptionConfig(storage.encryption))
+        
+        // Validate Btrfs configuration
+        errors.addAll(validateBtrfsConfig(storage.btrfs))
+        
+        // Validate swap configuration
+        errors.addAll(validateSwapConfig(storage.swap))
+        
+        // Validate auto-mount configuration
+        errors.addAll(validateAutoMountConfig(storage.autoMount))
+        
+        return errors
+    }
+    
+    private fun validateFilesystems(filesystems: List<FilesystemConfig>): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        filesystems.forEach { fs ->
+            // Validate device path
+            if (!isValidDevicePath(fs.device)) {
+                errors.add(ValidationError.InvalidDevicePath(fs.device))
+            }
+            
+            // Validate mount point
+            if (!isValidMountPoint(fs.mountPoint)) {
+                errors.add(ValidationError.InvalidMountPoint(fs.mountPoint))
+            }
+            
+            // Validate backup frequency
+            if (fs.backupFrequency < 0 || fs.backupFrequency > 2) {
+                errors.add(ValidationError.InvalidBootEntryPath("Invalid backup frequency: ${fs.backupFrequency}"))
+            }
+            
+            // Validate fsck order
+            if (fs.fsckOrder < 0 || fs.fsckOrder > 2) {
+                errors.add(ValidationError.InvalidBootEntryPath("Invalid fsck order: ${fs.fsckOrder}"))
+            }
+        }
+        
+        // Check for duplicate mount points
+        val duplicateMountPoints = filesystems.groupBy { it.mountPoint }
+            .filter { it.value.size > 1 }
+            .keys
+        duplicateMountPoints.forEach { mountPoint ->
+            errors.add(ValidationError.ConflictingMountPoints(mountPoint))
+        }
+        
+        return errors
+    }
+    
+    private fun validateRAIDConfig(raid: RAIDStorageConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        if (raid.enabled) {
+            raid.arrays.forEach { array ->
+                // Validate device paths
+                array.devices.forEach { device ->
+                    if (!isValidDevicePath(device)) {
+                        errors.add(ValidationError.InvalidDevicePath(device))
+                    }
+                }
+                
+                // Validate spare devices
+                array.spares.forEach { spare ->
+                    if (!isValidDevicePath(spare)) {
+                        errors.add(ValidationError.InvalidDevicePath(spare))
+                    }
+                }
+                
+                // Validate RAID level requirements
+                when (array.level) {
+                    RAIDLevel.RAID1 -> {
+                        if (array.devices.size < 2) {
+                            errors.add(ValidationError.InvalidRAIDLevel("RAID1 requires at least 2 devices"))
+                        }
+                    }
+                    RAIDLevel.RAID5 -> {
+                        if (array.devices.size < 3) {
+                            errors.add(ValidationError.InvalidRAIDLevel("RAID5 requires at least 3 devices"))
+                        }
+                    }
+                    RAIDLevel.RAID6 -> {
+                        if (array.devices.size < 4) {
+                            errors.add(ValidationError.InvalidRAIDLevel("RAID6 requires at least 4 devices"))
+                        }
+                    }
+                    RAIDLevel.RAID10 -> {
+                        if (array.devices.size < 4 || array.devices.size % 2 != 0) {
+                            errors.add(ValidationError.InvalidRAIDLevel("RAID10 requires at least 4 devices and even number of devices"))
+                        }
+                    }
+                    else -> {}
+                }
+                
+                // Validate chunk size
+                array.chunkSize?.let { chunkSize ->
+                    if (!isValidChunkSize(chunkSize)) {
+                        errors.add(ValidationError.InvalidRAIDLevel("Invalid chunk size: $chunkSize"))
+                    }
+                }
+            }
+            
+            // Validate email address for notifications
+            raid.monitoring.emailAddress?.let { email ->
+                if (!isValidEmailAddress(email)) {
+                    errors.add(ValidationError.InvalidUrl("Invalid email address: $email"))
+                }
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validateEncryptionConfig(encryption: EncryptionConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        if (encryption.enabled) {
+            encryption.volumes.forEach { volume ->
+                // Validate device path
+                if (!isValidDevicePath(volume.device)) {
+                    errors.add(ValidationError.InvalidDevicePath(volume.device))
+                }
+                
+                // Validate key size
+                if (!isValidKeySize(volume.keySize)) {
+                    errors.add(ValidationError.InvalidKeySize(volume.keySize))
+                }
+                
+                // Validate keyfile paths
+                volume.keyFile?.let { keyFile ->
+                    if (!isValidBootEntryPath(keyFile)) {
+                        errors.add(ValidationError.InvalidBootEntryPath(keyFile))
+                    }
+                }
+                
+                // Validate key slots
+                volume.keySlots.forEach { keySlot ->
+                    if (keySlot.slot < 0 || keySlot.slot > 31) {
+                        errors.add(ValidationError.InvalidKeySize(keySlot.slot))
+                    }
+                }
+            }
+            
+            // Validate keyfiles
+            encryption.keyfiles.forEach { keyfile ->
+                if (!isValidBootEntryPath(keyfile.path)) {
+                    errors.add(ValidationError.InvalidBootEntryPath(keyfile.path))
+                }
+                
+                if (keyfile.size < 1 || keyfile.size > 8192) {
+                    errors.add(ValidationError.InvalidKeySize(keyfile.size))
+                }
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validateBtrfsConfig(btrfs: BtrfsConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        if (btrfs.enabled) {
+            btrfs.filesystems.forEach { fs ->
+                // Validate device paths
+                fs.devices.forEach { device ->
+                    if (!isValidDevicePath(device)) {
+                        errors.add(ValidationError.InvalidDevicePath(device))
+                    }
+                }
+                
+                // Validate subvolumes
+                fs.subvolumes.forEach { subvol ->
+                    if (!isValidSubvolumePath(subvol.path)) {
+                        errors.add(ValidationError.InvalidBootEntryPath(subvol.path))
+                    }
+                    
+                    subvol.mountPoint?.let { mountPoint ->
+                        if (!isValidMountPoint(mountPoint)) {
+                            errors.add(ValidationError.InvalidMountPoint(mountPoint))
+                        }
+                    }
+                }
+                
+                // Check for duplicate subvolume names
+                val duplicateNames = fs.subvolumes.groupBy { it.name }
+                    .filter { it.value.size > 1 }
+                    .keys
+                duplicateNames.forEach { name ->
+                    errors.add(ValidationError.ConflictingMountPoints("Duplicate subvolume name: $name"))
+                }
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validateSwapConfig(swap: SwapConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        if (swap.enabled) {
+            // Validate swap size
+            if (!isValidSwapSize(swap.size)) {
+                errors.add(ValidationError.InvalidSwapSize(swap.size))
+            }
+            
+            // Validate swap files
+            swap.files.forEach { swapFile ->
+                if (!isValidBootEntryPath(swapFile.path)) {
+                    errors.add(ValidationError.InvalidBootEntryPath(swapFile.path))
+                }
+                
+                if (!isValidSwapSize(swapFile.size)) {
+                    errors.add(ValidationError.InvalidSwapSize(swapFile.size))
+                }
+                
+                if (swapFile.priority < -1 || swapFile.priority > 32767) {
+                    errors.add(ValidationError.InvalidSwapSize("Invalid swap priority: ${swapFile.priority}"))
+                }
+            }
+            
+            // Validate swap partitions
+            swap.partitions.forEach { partition ->
+                if (!isValidDevicePath(partition.device)) {
+                    errors.add(ValidationError.InvalidDevicePath(partition.device))
+                }
+            }
+            
+            // Validate swappiness
+            if (swap.swappiness < 0 || swap.swappiness > 100) {
+                errors.add(ValidationError.InvalidSwapSize("Invalid swappiness: ${swap.swappiness}"))
+            }
+            
+            // Validate VFS cache pressure
+            if (swap.vfsCache < 0 || swap.vfsCache > 1000) {
+                errors.add(ValidationError.InvalidSwapSize("Invalid VFS cache pressure: ${swap.vfsCache}"))
+            }
+        }
+        
+        return errors
+    }
+    
+    private fun validateAutoMountConfig(autoMount: AutoMountConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        if (autoMount.enabled) {
+            // Validate mount point
+            if (!isValidMountPoint(autoMount.removableMedia.mountPoint)) {
+                errors.add(ValidationError.InvalidMountPoint(autoMount.removableMedia.mountPoint))
+            }
+            
+            // Validate network shares configuration
+            autoMount.networkShares.samba.credentials?.let { credentials ->
+                if (!isValidBootEntryPath(credentials)) {
+                    errors.add(ValidationError.InvalidBootEntryPath(credentials))
+                }
+            }
+            
+            autoMount.networkShares.ssh.identityFile?.let { identityFile ->
+                if (!isValidBootEntryPath(identityFile)) {
+                    errors.add(ValidationError.InvalidBootEntryPath(identityFile))
+                }
+            }
+        }
+        
+        return errors
+    }
+    
+    // Storage validation helper functions
+    private fun isValidDevicePath(path: String): Boolean {
+        return path.isNotBlank() && (
+            path.startsWith("/dev/") ||
+            path.startsWith("UUID=") ||
+            path.startsWith("LABEL=") ||
+            path.startsWith("PARTUUID=") ||
+            path.startsWith("PARTLABEL=")
+        )
+    }
+    
+    private fun isValidMountPoint(path: String): Boolean {
+        return path.isNotBlank() && path.startsWith("/") && path != "/"
+    }
+    
+    private fun isValidChunkSize(chunkSize: String): Boolean {
+        return chunkSize.matches(Regex("^\\d+[kKmMgG]?$"))
+    }
+    
+    private fun isValidEmailAddress(email: String): Boolean {
+        return email.matches(Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"))
+    }
+    
+    private fun isValidKeySize(keySize: Int): Boolean {
+        return keySize in listOf(128, 256, 512, 1024, 2048, 4096)
+    }
+    
+    private fun isValidSubvolumePath(path: String): Boolean {
+        return path.isNotBlank() && !path.contains("..") && !path.startsWith("/")
+    }
+    
+    private fun isValidSwapSize(size: String): Boolean {
+        return size == "auto" || size.matches(Regex("^\\d+[kKmMgGtT]?$")) || size.matches(Regex("^\\d+%$"))
     }
     
     // Validation helper functions
