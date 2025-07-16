@@ -20,6 +20,7 @@ class SystemConfiguration {
     private val repositories = mutableListOf<Repository>()
     private var desktopConfig: DesktopConfig? = null
     private var automationConfig: AutomationConfig? = null
+    var aiConfig: AIConfig? = null
 
     fun packages(block: PackagesContext.() -> Unit) {
         PackagesContext().apply(block).also {
@@ -52,6 +53,10 @@ class SystemConfiguration {
     fun automation(block: AutomationContext.() -> Unit) {
         automationConfig = AutomationContext().apply(block).toConfig()
     }
+    
+    fun ai(block: AIContext.() -> Unit) {
+        aiConfig = AIContext().apply(block).toConfig()
+    }
 
     fun toConfig(): CompiledConfig {
         val config = CompiledConfig(
@@ -61,7 +66,8 @@ class SystemConfiguration {
             users = users,
             repositories = repositories,
             desktop = desktopConfig,
-            automation = automationConfig
+            automation = automationConfig,
+            ai = aiConfig
         )
         
         // Validate configuration before returning
@@ -287,7 +293,8 @@ data class CompiledConfig(
     val users: List<User>,
     val repositories: List<Repository>,
     val desktop: DesktopConfig? = null,
-    val automation: AutomationConfig? = null
+    val automation: AutomationConfig? = null,
+    val ai: AIConfig? = null
 )
 
 @Serializable

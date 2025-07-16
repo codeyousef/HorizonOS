@@ -37,6 +37,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             generateDockerfile(config)
             generateOSTreeManifest(config)
             generateAutomationScripts(config)
+            generateAIConfiguration(config)
             generateDocumentation(config)
             
             return GenerationResult.Success(generatedFiles.toList())
@@ -73,6 +74,10 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         
         config.automation?.let {
             File(outputDir, "json/automation.json").writeText(json.encodeToString(it))
+        }
+        
+        config.ai?.let {
+            File(outputDir, "json/ai.json").writeText(json.encodeToString(it))
         }
     }
     
@@ -685,6 +690,143 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         }
     }
     
+    private fun generateAIConfiguration(config: CompiledConfig) {
+        config.ai?.let { aiConfig ->
+            if (!aiConfig.enabled) return@let
+            
+            // Generate Ollama configuration
+            val ollamaConfig = File(outputDir, "ai/ollama-config.json")
+            ollamaConfig.parentFile.mkdirs()
+            
+            val ollamaProviders = aiConfig.providers.filter { it.type == ProviderType.OLLAMA }
+            if (ollamaProviders.isNotEmpty()) {
+                val ollamaSettings = mapOf(
+                    "models" to aiConfig.models.filter { model ->
+                        ollamaProviders.any { it.name == model.provider }
+                    }.map { model ->
+                        mapOf(
+                            "name" to model.name,
+                            "size" to model.size.name.lowercase(),
+                            "quantization" to model.quantization.name.lowercase(),
+                            "preload" to model.preload,
+                            "parameters" to model.parameters
+                        )
+                    },
+                    "hardware" to mapOf(
+                        "gpu_acceleration" to aiConfig.hardware.gpuAcceleration,
+                        "cpu_threads" to aiConfig.hardware.cpuThreads,
+                        "memory_limit" to aiConfig.hardware.memoryLimit
+                    ),
+                    "privacy" to mapOf(
+                        "local_only" to aiConfig.privacy.localOnly,
+                        "telemetry_enabled" to aiConfig.privacy.telemetryEnabled,
+                        "data_retention" to aiConfig.privacy.dataRetention.name.lowercase()
+                    )
+                )
+                ollamaConfig.writeText(json.encodeToString(ollamaSettings))
+                generatedFiles.add(GeneratedFile("ai/ollama-config.json", FileType.JSON))
+            }
+            
+            // Generate AI services configuration
+            if (aiConfig.services.isNotEmpty()) {
+                val servicesConfig = File(outputDir, "ai/services.json")
+                servicesConfig.writeText(json.encodeToString(aiConfig.services))
+                generatedFiles.add(GeneratedFile("ai/services.json", FileType.JSON))
+            }
+            
+            // Generate AI setup script
+            val setupScript = File(outputDir, "scripts/ai-setup.sh")
+            setupScript.writeText(buildString {
+                appendLine("#!/bin/bash")
+                appendLine("# AI/LLM Setup Script")
+                appendLine("# Generated from HorizonOS Kotlin DSL")
+                appendLine()
+                appendLine("set -euo pipefail")
+                appendLine()
+                appendLine("echo 'Setting up AI/LLM services...'")
+                appendLine()
+                
+                // Install Ollama if needed
+                if (ollamaProviders.isNotEmpty()) {
+                    appendLine("# Install Ollama")
+                    appendLine("if ! command -v ollama &> /dev/null; then")
+                    appendLine("    curl -fsSL https://ollama.ai/install.sh | sh")
+                    appendLine("fi")
+                    appendLine()
+                    
+                    appendLine("# Start Ollama service")
+                    appendLine("systemctl --user enable ollama")
+                    appendLine("systemctl --user start ollama")
+                    appendLine()
+                    
+                    // Pull models
+                    aiConfig.models.filter { model ->
+                        ollamaProviders.any { it.name == model.provider }
+                    }.forEach { model ->
+                        appendLine("# Pull model: ${model.name}")
+                        appendLine("ollama pull ${model.name}")
+                    }
+                    appendLine()
+                }
+                
+                // Configure hardware optimization
+                when (aiConfig.hardware.optimization) {
+                    HardwareOptimization.GPU_NVIDIA -> {
+                        appendLine("# NVIDIA GPU optimization")
+                        appendLine("export CUDA_VISIBLE_DEVICES=0")
+                        appendLine("export OLLAMA_GPU=1")
+                    }
+                    HardwareOptimization.GPU_AMD -> {
+                        appendLine("# AMD GPU optimization") 
+                        appendLine("export HSA_OVERRIDE_GFX_VERSION=10.3.0")
+                        appendLine("export OLLAMA_GPU=1")
+                    }
+                    HardwareOptimization.CPU_ONLY -> {
+                        appendLine("# CPU-only execution")
+                        appendLine("export OLLAMA_GPU=0")
+                        appendLine("export OMP_NUM_THREADS=${aiConfig.hardware.cpuThreads}")
+                    }
+                    else -> {
+                        appendLine("# Auto hardware detection")
+                    }
+                }
+                appendLine()
+                
+                // Create AI configuration directory
+                appendLine("# Create AI configuration directory")
+                appendLine("mkdir -p /etc/horizonos/ai")
+                appendLine("cp ../ai/*.json /etc/horizonos/ai/ 2>/dev/null || true")
+                appendLine()
+                
+                appendLine("echo 'AI/LLM setup completed.'")
+            })
+            setupScript.setExecutable(true)
+            generatedFiles.add(GeneratedFile("scripts/ai-setup.sh", FileType.SHELL))
+            
+            // Generate systemd service for AI services
+            val aiService = File(outputDir, "systemd/horizonos-ai.service")
+            aiService.writeText("""
+                [Unit]
+                Description=HorizonOS AI Services
+                After=network.target ollama.service
+                Wants=ollama.service
+                
+                [Service]
+                Type=simple
+                ExecStart=/usr/bin/horizonos-ai-manager
+                Restart=always
+                RestartSec=30
+                User=ai
+                Group=ai
+                Environment=HORIZONOS_AI_CONFIG=/etc/horizonos/ai
+                
+                [Install]
+                WantedBy=multi-user.target
+            """.trimIndent())
+            generatedFiles.add(GeneratedFile("systemd/horizonos-ai.service", FileType.SYSTEMD))
+        }
+    }
+    
     private fun generateDocumentation(config: CompiledConfig) {
         val readme = File(outputDir, "docs/README.md")
         readme.writeText(buildString {
@@ -771,6 +913,75 @@ class EnhancedConfigGenerator(private val outputDir: File) {
                     automation.teachingModes.forEach { teaching ->
                         appendLine("- **${teaching.name}**${if (!teaching.enabled) " (disabled)" else ""}")
                         teaching.description.takeIf { it.isNotEmpty() }?.let { appendLine("  - $it") }
+                    }
+                }
+            }
+            
+            config.ai?.let { ai ->
+                if (ai.enabled) {
+                    appendLine()
+                    appendLine("## AI/LLM Integration")
+                    appendLine()
+                    appendLine("- **Status**: Enabled")
+                    
+                    if (ai.models.isNotEmpty()) {
+                        appendLine("### Models (${ai.models.size})")
+                        ai.models.forEach { model ->
+                            appendLine("- **${model.name}**${if (!model.enabled) " (disabled)" else ""}")
+                            appendLine("  - Provider: ${model.provider}")
+                            appendLine("  - Size: ${model.size}")
+                            appendLine("  - Quantization: ${model.quantization}")
+                            if (model.capabilities.isNotEmpty()) {
+                                appendLine("  - Capabilities: ${model.capabilities.joinToString(", ")}")
+                            }
+                            if (model.preload) {
+                                appendLine("  - Preloaded at startup")
+                            }
+                        }
+                        appendLine()
+                    }
+                    
+                    if (ai.providers.isNotEmpty()) {
+                        appendLine("### Providers (${ai.providers.size})")
+                        ai.providers.forEach { provider ->
+                            appendLine("- **${provider.name}** (${provider.type})")
+                            appendLine("  - Endpoint: ${provider.endpoint}:${provider.port}")
+                            if (provider.models.isNotEmpty()) {
+                                appendLine("  - Available Models: ${provider.models.joinToString(", ")}")
+                            }
+                        }
+                        appendLine()
+                    }
+                    
+                    if (ai.services.isNotEmpty()) {
+                        appendLine("### Services (${ai.services.size})")
+                        ai.services.forEach { service ->
+                            appendLine("- **${service.name}**")
+                            if (service.description.isNotEmpty()) {
+                                appendLine("  - ${service.description}")
+                            }
+                            appendLine("  - Model: ${service.model}")
+                            appendLine("  - Temperature: ${service.temperature}")
+                            appendLine("  - Max Tokens: ${service.maxTokens}")
+                        }
+                        appendLine()
+                    }
+                    
+                    appendLine("### Hardware Configuration")
+                    appendLine("- **GPU Acceleration**: ${if (ai.hardware.gpuAcceleration) "Enabled" else "Disabled"}")
+                    appendLine("- **CPU Threads**: ${if (ai.hardware.cpuThreads == 0) "Auto-detect" else ai.hardware.cpuThreads}")
+                    appendLine("- **Memory Limit**: ${ai.hardware.memoryLimit}")
+                    appendLine("- **Optimization**: ${ai.hardware.optimization}")
+                    appendLine("- **Backends**: ${ai.hardware.backends.joinToString(", ")}")
+                    appendLine()
+                    
+                    appendLine("### Privacy Settings")
+                    appendLine("- **Local Only**: ${if (ai.privacy.localOnly) "Yes" else "No"}")
+                    appendLine("- **Telemetry**: ${if (ai.privacy.telemetryEnabled) "Enabled" else "Disabled"}")
+                    appendLine("- **Data Retention**: ${ai.privacy.dataRetention}")
+                    appendLine("- **Storage Encryption**: ${if (ai.privacy.encryptStorage) "Enabled" else "Disabled"}")
+                    if (ai.privacy.allowedNetworkAccess.isNotEmpty()) {
+                        appendLine("- **Allowed Network Access**: ${ai.privacy.allowedNetworkAccess.joinToString(", ")}")
                     }
                 }
             }
