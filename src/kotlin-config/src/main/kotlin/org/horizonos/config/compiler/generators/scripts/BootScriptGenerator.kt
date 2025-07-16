@@ -1,6 +1,12 @@
 package org.horizonos.config.compiler.generators.scripts
 
 import org.horizonos.config.dsl.*
+import org.horizonos.config.dsl.boot.bootloader.*
+import org.horizonos.config.dsl.boot.kernel.*
+import org.horizonos.config.dsl.boot.initramfs.*
+import org.horizonos.config.dsl.boot.plymouth.*
+import org.horizonos.config.dsl.boot.secureboot.*
+import org.horizonos.config.dsl.boot.recovery.*
 import org.horizonos.config.compiler.GeneratedFile
 import org.horizonos.config.compiler.FileType
 import java.io.File

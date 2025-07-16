@@ -1,6 +1,12 @@
 package org.horizonos.config.validation.validators
 
 import org.horizonos.config.dsl.*
+import org.horizonos.config.dsl.boot.bootloader.*
+import org.horizonos.config.dsl.boot.kernel.*
+import org.horizonos.config.dsl.boot.initramfs.*
+import org.horizonos.config.dsl.boot.plymouth.*
+import org.horizonos.config.dsl.boot.secureboot.*
+import org.horizonos.config.dsl.boot.recovery.*
 import org.horizonos.config.validation.ValidationError
 
 object BootValidator {
@@ -97,10 +103,11 @@ object BootValidator {
         
         // Validate kernel variants
         kernel.variants.forEach { variant ->
-            variant.parameters.forEach { param ->
-                if (!isValidKernelParameter(param.name)) {
-                    errors.add(ValidationError.InvalidKernelParameter(param.name))
-                }
+            if (!isValidKernelVersion(variant.version)) {
+                errors.add(ValidationError.InvalidKernelVersion(variant.version))
+            }
+            if (!isValidKernelPath(variant.path)) {
+                errors.add(ValidationError.InvalidKernelPath(variant.path))
             }
         }
         
@@ -182,7 +189,7 @@ object BootValidator {
                 }
             }
             
-            keys.forbidden?.let { path ->
+            keys.forbidden.forEach { path ->
                 if (!isValidSecureBootKeyPath(path)) {
                     errors.add(ValidationError.InvalidSecureBootKey(path))
                 }
@@ -225,5 +232,14 @@ object BootValidator {
     private fun isValidSecureBootKeyPath(path: String): Boolean {
         return path.startsWith("/") && (path.endsWith(".key") || path.endsWith(".crt") || 
                path.endsWith(".pem") || path.endsWith(".auth")) && !path.contains("..")
+    }
+    
+    private fun isValidKernelVersion(version: String): Boolean {
+        return version.matches(Regex("^[0-9]+\\.[0-9]+\\.[0-9]+.*$"))
+    }
+    
+    private fun isValidKernelPath(path: String): Boolean {
+        return path.startsWith("/") && !path.contains("..") && 
+               (path.contains("vmlinuz") || path.contains("bzImage"))
     }
 }

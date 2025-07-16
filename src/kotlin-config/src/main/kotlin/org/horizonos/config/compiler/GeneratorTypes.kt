@@ -16,6 +16,7 @@ enum class FileType(val displayName: String) {
     SYSTEMD("Systemd Units"),
     ANSIBLE("Ansible Playbooks"),
     DOCKER("Docker Files"),
+    CONFIG("Configuration Files"),
     DOCUMENTATION("Documentation")
 }
 

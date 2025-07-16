@@ -2,6 +2,7 @@ package org.horizonos.config.dsl
 
 import kotlinx.serialization.Serializable
 import org.horizonos.config.validation.ConfigurationValidator
+import org.horizonos.config.dsl.graphdesktop.GraphDesktopConfig
 
 // ===== Core DSL Classes =====
 

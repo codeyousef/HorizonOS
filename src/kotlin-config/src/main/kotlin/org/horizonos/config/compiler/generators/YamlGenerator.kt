@@ -162,11 +162,11 @@ class YamlGenerator(
             appendLine("  themes: ${it.themes.size}")
         }
         
-        config.graphDesktop?.let {
+        config.graphDesktop?.let { graphDesktop ->
             appendLine("graph_desktop:")
-            appendLine("  enabled: ${it.enabled}")
-            appendLine("  rendering_engine: ${it.renderingEngine}")
-            appendLine("  node_types: ${it.nodeTypes.size}")
+            appendLine("  enabled: ${graphDesktop.enabled}")
+            appendLine("  rendering_engine: ${graphDesktop.renderingEngine}")
+            appendLine("  node_types: ${graphDesktop.nodeTypes.size}")
         }
     }
 }

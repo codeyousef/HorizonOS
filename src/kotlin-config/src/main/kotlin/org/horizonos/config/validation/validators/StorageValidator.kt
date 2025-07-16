@@ -1,6 +1,11 @@
 package org.horizonos.config.validation.validators
 
 import org.horizonos.config.dsl.*
+import org.horizonos.config.dsl.storage.filesystem.*
+import org.horizonos.config.dsl.storage.raid.*
+import org.horizonos.config.dsl.storage.encryption.*
+import org.horizonos.config.dsl.storage.btrfs.*
+import org.horizonos.config.dsl.storage.swap.*
 import org.horizonos.config.validation.ValidationError
 
 object StorageValidator {
@@ -19,8 +24,10 @@ object StorageValidator {
         }
         
         // Validate Btrfs configurations
-        storage.btrfs.filesystems.forEach { fs ->
-            errors.addAll(validateBtrfsFilesystem(fs))
+        if (storage.btrfs.enabled) {
+            storage.btrfs.subvolumes.forEach { subvolume ->
+                errors.addAll(validateBtrfsSubvolume(subvolume))
+            }
         }
         
         // Validate encryption configurations
@@ -92,6 +99,8 @@ object StorageValidator {
             RAIDLevel.RAID6 -> 4
             RAIDLevel.RAID10 -> 4
             RAIDLevel.LINEAR -> 1
+            RAIDLevel.MULTIPATH -> 2
+            RAIDLevel.CONTAINER -> 1
         }
         
         if (array.devices.size < minDevices) {
@@ -101,67 +110,68 @@ object StorageValidator {
         return errors
     }
     
-    private fun validateBtrfsFilesystem(fs: BtrfsFilesystem): List<ValidationError> {
+    private fun validateBtrfsSubvolume(subvolume: org.horizonos.config.dsl.storage.btrfs.BtrfsSubvolume): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
         
-        // Validate devices
-        fs.devices.forEach { device ->
-            if (!isValidDevicePath(device)) {
-                errors.add(ValidationError.InvalidDevicePath(device))
-            }
+        // Validate subvolume path
+        if (!isValidMountPoint(subvolume.path)) {
+            errors.add(ValidationError.InvalidMountPoint(subvolume.path))
         }
         
-        // Data and metadata profiles are enums, so they're always valid
-        
-        return errors
-    }
-    
-    private fun validateEncryptionConfig(encryption: EncryptionConfig): List<ValidationError> {
-        val errors = mutableListOf<ValidationError>()
-        
-        // Validate encrypted volumes
-        encryption.volumes.forEach { volume ->
-            if (!isValidEncryptionCipher(volume.cipher.name)) {
-                errors.add(ValidationError.InvalidEncryptionCipher(volume.cipher.name))
-            }
-            
-            if (!isValidKeySize(volume.keySize)) {
-                errors.add(ValidationError.InvalidKeySize(volume.keySize))
-            }
-            
-            if (!isValidDevicePath(volume.device)) {
-                errors.add(ValidationError.InvalidDevicePath(volume.device))
-            }
-        }
-        
-        // Validate keyfiles
-        encryption.keyfiles.forEach { keyfile ->
-            if (!isValidPath(keyfile.path)) {
-                errors.add(ValidationError.InvalidPath(keyfile.path))
-            }
+        // Validate subvolume name
+        if (subvolume.name.isEmpty()) {
+            errors.add(ValidationError.InvalidSubvolumeName("Subvolume name cannot be empty"))
         }
         
         return errors
     }
     
-    private fun validateSwapConfig(swap: SwapConfig): List<ValidationError> {
+    private fun validateEncryptionConfig(encryption: org.horizonos.config.dsl.storage.encryption.EncryptionConfig): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
         
-        // Validate swap devices
-        swap.partitions.forEach { device ->
-            if (!isValidDevicePath(device.device)) {
-                errors.add(ValidationError.InvalidDevicePath(device.device))
+        if (encryption.enabled) {
+            // Validate encrypted devices
+            encryption.devices.forEach { device ->
+                if (!isValidDevicePath(device.device)) {
+                    errors.add(ValidationError.InvalidDevicePath(device.device))
+                }
+                
+                if (!isValidKeySize(device.keySize)) {
+                    errors.add(ValidationError.InvalidKeySize(device.keySize))
+                }
+            }
+            
+            // Validate key files
+            encryption.keyManagement.keyFiles.forEach { keyFile ->
+                if (!isValidPath(keyFile.path)) {
+                    errors.add(ValidationError.InvalidPath(keyFile.path))
+                }
             }
         }
         
-        // Validate swap files
-        swap.files.forEach { file ->
-            if (!isValidPath(file.path)) {
-                errors.add(ValidationError.InvalidPath(file.path))
+        return errors
+    }
+    
+    private fun validateSwapConfig(swap: org.horizonos.config.dsl.storage.swap.SwapConfig): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        
+        if (swap.enabled) {
+            // Validate swap devices
+            swap.devices.forEach { device ->
+                if (!isValidDevicePath(device.device)) {
+                    errors.add(ValidationError.InvalidDevicePath(device.device))
+                }
             }
             
-            if (!isValidSwapSize(file.size)) {
-                errors.add(ValidationError.InvalidSwapSize(file.size))
+            // Validate swap files
+            swap.files.forEach { file ->
+                if (!isValidPath(file.path)) {
+                    errors.add(ValidationError.InvalidPath(file.path))
+                }
+                
+                if (!isValidSwapSize(file.size)) {
+                    errors.add(ValidationError.InvalidSwapSize(file.size))
+                }
             }
         }
         
@@ -169,9 +179,8 @@ object StorageValidator {
         if (swap.zswap.enabled) {
             // ZSwap compressor is an enum, so it's always valid
             
-            if (swap.zswap.zpool !in setOf("zbud", "z3fold", "zsmalloc")) {
-                errors.add(ValidationError.InvalidSwapSize("Invalid zpool allocator: ${swap.zswap.zpool}"))
-            }
+            // ZSwap zpool is an enum, so it's always valid
+            // No validation needed for zpool since it's constrained by the enum
             
             if (swap.zswap.maxPoolPercent < 1 || swap.zswap.maxPoolPercent > 50) {
                 errors.add(ValidationError.InvalidSwapSize("Invalid max pool percentage: ${swap.zswap.maxPoolPercent}"))

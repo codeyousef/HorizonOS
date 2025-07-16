@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.booleans.shouldBeTrue
+import org.horizonos.config.dsl.network.InterfaceType
 
 class BasicTest : StringSpec({
     
@@ -16,7 +17,7 @@ class BasicTest : StringSpec({
             network {
                 hostname("test-network")
                 networkInterface("eth0") {
-                    type = org.horizonos.config.dsl.network.InterfaceType.ETHERNET
+                    type = InterfaceType.ETHERNET
                 }
             }
             

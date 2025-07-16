@@ -91,8 +91,8 @@ class JsonGenerator(
             File(outputDir, "json/enhanced-desktop.json").writeText(json.encodeToString(it))
         }
         
-        config.graphDesktop?.let {
-            File(outputDir, "json/graph-desktop.json").writeText(json.encodeToString(it))
+        config.graphDesktop?.let { graphDesktop ->
+            File(outputDir, "json/graph-desktop.json").writeText(json.encodeToString(graphDesktop))
         }
     }
 }

@@ -1,6 +1,13 @@
 package org.horizonos.config.compiler.generators.scripts
 
 import org.horizonos.config.dsl.*
+import org.horizonos.config.dsl.storage.filesystem.*
+import org.horizonos.config.dsl.storage.filesystem.FilesystemType
+import org.horizonos.config.dsl.storage.raid.*
+import org.horizonos.config.dsl.storage.encryption.*
+import org.horizonos.config.dsl.storage.btrfs.*
+import org.horizonos.config.dsl.storage.swap.*
+import org.horizonos.config.dsl.storage.maintenance.*
 import org.horizonos.config.compiler.GeneratedFile
 import org.horizonos.config.compiler.FileType
 import java.io.File
@@ -148,7 +155,7 @@ class StorageScriptGenerator(
                 appendLine("systemctl enable mdmonitor.service")
                 appendLine("systemctl start mdmonitor.service")
                 
-                storage.raid.monitoring.emailAddress?.let { email ->
+                storage.raid.monitoring.emailAlerts.recipients.forEach { email ->
                     appendLine("# Configure email notifications")
                     appendLine("echo 'MAILADDR $email' >> /etc/mdadm.conf")
                 }
@@ -158,39 +165,42 @@ class StorageScriptGenerator(
     }
     
     private fun StringBuilder.generateEncryptionConfig(storage: StorageConfig) {
-        if (storage.encryption.enabled && storage.encryption.volumes.isNotEmpty()) {
+        if (storage.encryption.enabled && storage.encryption.devices.isNotEmpty()) {
             appendLine("# LUKS Encryption Configuration")
-            storage.encryption.volumes.forEach { volume ->
-                appendLine("# Setup encrypted volume: ${volume.name}")
+            storage.encryption.devices.forEach { device ->
+                appendLine("# Setup encrypted device: ${device.name}")
                 
                 val luksCmd = buildString {
                     append("cryptsetup luksFormat")
-                    append(" --type luks2")
-                    append(" --cipher ${volume.cipher.name.replace("_", "-").lowercase()}")
-                    append(" --key-size ${volume.keySize}")
-                    append(" --hash ${volume.hashAlgorithm.name.lowercase()}")
-                    append(" --pbkdf ${volume.pbkdf.algorithm.name.lowercase()}")
-                    volume.pbkdf.iterations?.let { append(" --pbkdf-force-iterations $it") }
-                    volume.pbkdf.memory?.let { append(" --pbkdf-memory $it") }
-                    volume.pbkdf.parallelism?.let { append(" --pbkdf-parallel $it") }
-                    append(" ${volume.device}")
+                    append(" --type luks${device.header.version.name.removePrefix("LUKS")}")
+                    append(" --cipher ${device.cipher.name.replace("_", "-").lowercase()}")
+                    append(" --key-size ${device.keySize}")
+                    append(" --hash ${device.hashAlgorithm.name.lowercase()}")
+                    append(" --pbkdf ${device.header.pbkdf.name.lowercase()}")
+                    append(" --iter-time ${device.iterTime}")
+                    device.header.memory?.let { append(" --pbkdf-memory $it") }
+                    device.header.parallelism?.let { append(" --pbkdf-parallel $it") }
+                    append(" ${device.device}")
                 }
                 appendLine(luksCmd)
                 
-                // Open encrypted volume
-                appendLine("cryptsetup luksOpen ${volume.device} ${volume.name}")
+                // Open encrypted device
+                appendLine("cryptsetup luksOpen ${device.device} ${device.name}")
                 
                 // Add to crypttab if needed
-                appendLine("echo '${volume.name} ${volume.device} none luks' >> /etc/crypttab")
+                appendLine("echo '${device.name} ${device.device} none luks' >> /etc/crypttab")
                 appendLine()
             }
             
             // TPM configuration
-            if (storage.encryption.tpm.enabled) {
+            if (storage.encryption.keyManagement.tpmIntegration.enabled) {
                 appendLine("# Configure TPM-based encryption")
-                appendLine("# TPM ${storage.encryption.tpm.version} configuration")
-                storage.encryption.tpm.keyHandle?.let { handle ->
-                    appendLine("# TPM key handle: $handle")
+                appendLine("# TPM ${storage.encryption.keyManagement.tpmIntegration.tpmVersion} configuration")
+                storage.encryption.keyManagement.tpmIntegration.nvramIndex?.let { index ->
+                    appendLine("# TPM NVRAM index: $index")
+                }
+                storage.encryption.keyManagement.tpmIntegration.pcrs.forEach { pcr ->
+                    appendLine("# Using PCR: $pcr")
                 }
                 appendLine()
             }
@@ -198,54 +208,56 @@ class StorageScriptGenerator(
     }
     
     private fun StringBuilder.generateBtrfsConfig(storage: StorageConfig) {
-        if (storage.btrfs.enabled && storage.btrfs.filesystems.isNotEmpty()) {
+        if (storage.btrfs.enabled && storage.btrfs.subvolumes.isNotEmpty()) {
             appendLine("# Btrfs Configuration")
-            storage.btrfs.filesystems.forEach { btrfs ->
-                appendLine("# Create Btrfs filesystem: ${btrfs.label}")
+            
+            // Create subvolumes
+            storage.btrfs.subvolumes.forEach { subvolume ->
+                appendLine("# Create Btrfs subvolume: ${subvolume.name}")
+                appendLine("btrfs subvolume create ${subvolume.path}")
                 
-                val btrfsCmd = buildString {
-                    append("mkfs.btrfs")
-                    append(" --label ${btrfs.label}")
-                    append(" --data ${btrfs.dataProfile.name.lowercase()}")
-                    append(" --metadata ${btrfs.metadataProfile.name.lowercase()}")
-                    append(" ${btrfs.devices.joinToString(" ")}")
+                // Set default subvolume if needed
+                if (subvolume.defaultSubvolume) {
+                    appendLine("# Set as default subvolume")
+                    appendLine("btrfs subvolume set-default ${subvolume.path}")
                 }
-                appendLine(btrfsCmd)
                 
-                // Create subvolumes
-                if (btrfs.subvolumes.isNotEmpty()) {
-                    appendLine("# Create subvolumes")
-                    val mountPoint = "/mnt/${btrfs.label}"
-                    appendLine("mkdir -p $mountPoint")
-                    appendLine("mount ${btrfs.devices.first()} $mountPoint")
-                    
-                    btrfs.subvolumes.forEach { subvol ->
-                        appendLine("btrfs subvolume create $mountPoint/${subvol.name}")
-                        
-                        if (subvol.defaultSubvolume) {
-                            appendLine("btrfs subvolume set-default $mountPoint/${subvol.name}")
-                        }
-                        
-                        subvol.quota?.let { quota ->
-                            if (quota.enabled) {
-                                appendLine("btrfs quota enable $mountPoint")
-                                quota.sizeLimit?.let { limit ->
-                                    appendLine("btrfs qgroup limit $limit $mountPoint/${subvol.name}")
-                                }
-                            }
-                        }
+                // Set compression if specified
+                subvolume.compression?.let { compression ->
+                    appendLine("# Set compression: ${compression.name.lowercase()}")
+                    appendLine("btrfs property set ${subvolume.path} compression ${compression.name.lowercase()}")
+                }
+                
+                // Disable copy-on-write if needed
+                if (!subvolume.copyOnWrite) {
+                    appendLine("# Disable copy-on-write")
+                    appendLine("chattr +C ${subvolume.path}")
+                }
+                
+                // Set quota if specified
+                subvolume.quota?.let { quota ->
+                    appendLine("# Set quota")
+                    appendLine("btrfs quota enable ${subvolume.path}")
+                    quota.sizeLimit?.let { limit ->
+                        appendLine("btrfs qgroup limit $limit ${subvolume.path}")
                     }
-                    
-                    appendLine("umount $mountPoint")
                 }
                 appendLine()
             }
             
-            // Btrfs maintenance
-            if (storage.btrfs.scrubbing.enabled) {
+            // Btrfs scrub configuration
+            if (storage.btrfs.scrub.enabled) {
                 appendLine("# Configure Btrfs scrubbing")
+                appendLine("# Schedule: ${storage.btrfs.scrub.schedule}")
                 appendLine("systemctl enable btrfs-scrub@-.timer")
                 appendLine("systemctl start btrfs-scrub@-.timer")
+                appendLine()
+            }
+            
+            // Btrfs balance configuration
+            if (storage.btrfs.balance.enabled) {
+                appendLine("# Configure Btrfs balance")
+                appendLine("# Schedule: ${storage.btrfs.balance.schedule}")
                 appendLine()
             }
         }
@@ -255,41 +267,55 @@ class StorageScriptGenerator(
         if (storage.swap.enabled) {
             appendLine("# Swap Configuration")
             
-            when (storage.swap.type) {
-                SwapType.ZRAM -> {
-                    appendLine("# Configure ZRAM swap")
+            // Configure swap devices
+            storage.swap.devices.forEach { device ->
+                appendLine("# Enable swap device: ${device.device}")
+                appendLine("mkswap ${device.device}")
+                val priority = if (device.priority >= 0) "-p ${device.priority}" else ""
+                appendLine("swapon ${device.device} $priority")
+                appendLine("echo '${device.device} none swap sw,pri=${device.priority} 0 0' >> /etc/fstab")
+                appendLine()
+            }
+            
+            // Configure swap files
+            storage.swap.files.forEach { swapFile ->
+                appendLine("# Create swap file: ${swapFile.path}")
+                when (swapFile.allocateMode) {
+                    AllocateMode.FALLOCATE -> appendLine("fallocate -l ${swapFile.size} ${swapFile.path}")
+                    AllocateMode.DD -> appendLine("dd if=/dev/zero of=${swapFile.path} bs=1M count=\$(numfmt --from=iec ${swapFile.size} | awk '{print \$1/1048576}') status=progress")
+                    AllocateMode.TRUNCATE -> appendLine("truncate -s ${swapFile.size} ${swapFile.path}")
+                }
+                appendLine("chmod ${swapFile.permissions} ${swapFile.path}")
+                appendLine("mkswap ${swapFile.path}")
+                val priority = if (swapFile.priority >= 0) "-p ${swapFile.priority}" else ""
+                appendLine("swapon ${swapFile.path} $priority")
+                appendLine("echo '${swapFile.path} none swap sw,pri=${swapFile.priority} 0 0' >> /etc/fstab")
+                appendLine()
+            }
+            
+            // Configure ZRAM
+            if (storage.swap.zram.enabled) {
+                appendLine("# Configure ZRAM swap")
+                storage.swap.zram.devices.forEach { zramDevice ->
+                    appendLine("# Configure ${zramDevice.name}")
                     appendLine("modprobe zram")
-                    appendLine("echo '${storage.swap.zram.algorithm.name.lowercase()}' > /sys/block/zram0/comp_algorithm")
-                    appendLine("echo '${storage.swap.zram.size}' > /sys/block/zram0/disksize")
-                    appendLine("mkswap /dev/zram0")
-                    appendLine("swapon /dev/zram0 -p ${storage.swap.zram.priority}")
-                }
-                SwapType.FILE -> {
-                    storage.swap.files.forEach { swapFile ->
-                        appendLine("# Create swap file: ${swapFile.path}")
-                        appendLine("fallocate -l ${swapFile.size} ${swapFile.path}")
-                        appendLine("chmod ${swapFile.permissions} ${swapFile.path}")
-                        appendLine("mkswap ${swapFile.path}")
-                        appendLine("swapon ${swapFile.path} -p ${swapFile.priority}")
-                        appendLine("echo '${swapFile.path} none swap sw,pri=${swapFile.priority} 0 0' >> /etc/fstab")
-                    }
-                }
-                SwapType.PARTITION -> {
-                    storage.swap.partitions.forEach { partition ->
-                        appendLine("# Enable swap partition: ${partition.device}")
-                        appendLine("mkswap ${partition.device}")
-                        appendLine("swapon ${partition.device} -p ${partition.priority}")
-                        appendLine("echo '${partition.device} none swap sw,pri=${partition.priority} 0 0' >> /etc/fstab")
-                    }
-                }
-                else -> {
-                    appendLine("# Swap type ${storage.swap.type} configuration")
+                    appendLine("echo '${storage.swap.zram.algorithm.name.lowercase()}' > /sys/block/${zramDevice.name}/comp_algorithm")
+                    appendLine("echo '${zramDevice.size}' > /sys/block/${zramDevice.name}/disksize")
+                    appendLine("mkswap /dev/${zramDevice.name}")
+                    appendLine("swapon /dev/${zramDevice.name} -p ${zramDevice.priority}")
+                    appendLine()
                 }
             }
             
-            // Configure swappiness
+            // Configure swappiness and other vm settings
+            appendLine("# Configure VM settings")
             appendLine("echo 'vm.swappiness=${storage.swap.swappiness}' >> /etc/sysctl.conf")
-            appendLine("echo 'vm.vfs_cache_pressure=${storage.swap.vfsCache}' >> /etc/sysctl.conf")
+            appendLine("echo 'vm.vfs_cache_pressure=${storage.swap.vfsCachePressure}' >> /etc/sysctl.conf")
+            storage.swap.minFreeKbytes?.let {
+                appendLine("echo 'vm.min_free_kbytes=$it' >> /etc/sysctl.conf")
+            }
+            appendLine("echo 'vm.watermark_scale_factor=${storage.swap.watermarkScaleFactor}' >> /etc/sysctl.conf")
+            appendLine("sysctl -p")
             appendLine()
         }
     }
@@ -298,22 +324,27 @@ class StorageScriptGenerator(
         if (storage.maintenance.enabled) {
             appendLine("# Storage Maintenance Configuration")
             
-            if (storage.maintenance.fsck.enabled) {
-                appendLine("# Configure filesystem check")
-                appendLine("systemctl enable fsck@.service")
-            }
-            
             if (storage.maintenance.trim.enabled) {
                 appendLine("# Configure SSD TRIM")
                 appendLine("systemctl enable fstrim.timer")
                 appendLine("systemctl start fstrim.timer")
+                appendLine("# Schedule: ${storage.maintenance.trim.schedule}")
             }
             
-            if (storage.maintenance.healthChecks.enabled) {
-                appendLine("# Configure storage health checks")
-                if (storage.maintenance.healthChecks.smart.enabled) {
-                    appendLine("systemctl enable smartd.service")
-                    appendLine("systemctl start smartd.service")
+            if (storage.maintenance.verification.filesystem.enabled) {
+                appendLine("# Configure filesystem verification")
+                appendLine("# Schedule: ${storage.maintenance.verification.filesystem.schedule}")
+            }
+            
+            // Configure optimization tasks
+            if (storage.maintenance.optimization.enabled) {
+                appendLine("# Configure storage optimization")
+                if (storage.maintenance.optimization.database.enabled) {
+                    appendLine("# Database optimization enabled")
+                }
+                if (storage.maintenance.optimization.index.enabled) {
+                    appendLine("# Index optimization enabled")
+                    appendLine("systemctl enable updatedb.timer")
                 }
             }
             appendLine()
@@ -323,17 +354,16 @@ class StorageScriptGenerator(
     private fun StringBuilder.generateAutoMountConfig(storage: StorageConfig) {
         if (storage.autoMount.enabled) {
             appendLine("# Auto-mount Configuration")
+            appendLine("# Timeout: ${storage.autoMount.timeout} seconds")
             
-            if (storage.autoMount.removableMedia.enabled) {
-                appendLine("# Configure removable media auto-mount")
-                appendLine("systemctl enable udisks2.service")
-                appendLine("systemctl start udisks2.service")
+            if (storage.autoMount.showInFileManager) {
+                appendLine("# Show auto-mounted devices in file manager")
             }
             
-            if (storage.autoMount.networkShares.enabled) {
-                appendLine("# Configure network shares auto-mount")
-                appendLine("systemctl enable autofs.service")
-                appendLine("systemctl start autofs.service")
+            if (storage.autoMount.allowPolkitActions) {
+                appendLine("# Allow polkit actions for mounting")
+                appendLine("systemctl enable udisks2.service")
+                appendLine("systemctl start udisks2.service")
             }
             appendLine()
         }

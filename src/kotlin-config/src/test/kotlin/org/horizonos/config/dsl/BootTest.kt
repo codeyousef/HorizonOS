@@ -8,6 +8,16 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.booleans.shouldBeFalse
 import kotlin.time.Duration.Companion.seconds
+import org.horizonos.config.dsl.boot.bootloader.BootloaderType
+import org.horizonos.config.dsl.boot.bootloader.ConsoleMode
+import org.horizonos.config.dsl.boot.kernel.KernelCompression
+import org.horizonos.config.dsl.boot.kernel.ModuleCompression
+import org.horizonos.config.dsl.boot.initramfs.InitramfsGenerator
+import org.horizonos.config.dsl.boot.initramfs.InitramfsCompression
+import org.horizonos.config.dsl.boot.initramfs.EncryptionMethod
+import org.horizonos.config.dsl.boot.kernel.SpectreV2Mitigation
+import org.horizonos.config.dsl.boot.kernel.L1TFMitigation  
+import org.horizonos.config.dsl.boot.kernel.MDSMitigation
 
 class BootTest : StringSpec({
     
@@ -24,14 +34,12 @@ class BootTest : StringSpec({
                     defaultEntry = "horizonos"
                     editor = false
                     
-                    entry("HorizonOS") {
-                        linux = "/vmlinuz-linux"
+                    entry("HorizonOS", "/vmlinuz-linux") {
                         initrd = "/initramfs-linux.img"
                         options("root=LABEL=root", "rw", "quiet")
                     }
                     
-                    entry("HorizonOS Fallback") {
-                        linux = "/vmlinuz-linux"
+                    entry("HorizonOS Fallback", "/vmlinuz-linux") {
                         initrd = "/initramfs-linux-fallback.img"
                         options("root=LABEL=root", "rw")
                     }
@@ -144,38 +152,40 @@ class BootTest : StringSpec({
                     nvidia()
                     
                     modules {
-                        blacklist("nouveau", "radeon")
-                        load("nvidia", "nvidia_modeset", "nvidia_uvm")
+                        blacklist("nouveau")
+                        blacklist("radeon")
+                        load("nvidia")
+                        load("nvidia_modeset")
+                        load("nvidia_uvm")
                         option("nvidia", "modeset=1")
                         option("snd_hda_intel", "enable_msi=1")
                         compression = ModuleCompression.ZSTD
                     }
                     
-                    variant("lts", "6.1.0-lts") {
+                    variant("lts", "6.1.0-lts", "/vmlinuz-linux-lts") {
                         description = "Long Term Support kernel"
-                        parameter("mitigations", "auto")
-                        parameter("pti", "on")
                     }
                     
                     debugging {
                         enabled = true
                         debugLevel = 3
                         earlyPrintk = true
-                        crashkernel = "256M"
                     }
+                    
+                    crashkernel("256M")
                     
                     security {
                         kaslr = true
                         smep = true
                         smap = true
                         pti = true
-                        spectre_v2 = SpectreV2Mitigation.RETPOLINE
-                        meltdown = true
+                        spectreV2 = SpectreV2Mitigation.RETPOLINE
                         l1tf = L1TFMitigation.FLUSH
                         mds = MDSMitigation.FULL
-                        selinux = false
-                        apparmor = true
                     }
+                    
+                    selinux(false)
+                    apparmor(true)
                 }
             }
         }
@@ -185,7 +195,7 @@ class BootTest : StringSpec({
         kernel.version shouldBe "6.1.0-horizonos"
         
         // Check kernel parameters
-        kernel.parameters shouldHaveSize 5 // quiet, splash, root*, rootfstype, nvidia-drm.modeset
+        kernel.parameters shouldHaveSize 8 // console(2), intel_iommu, iommu, nvidia-drm.modeset, crashkernel, selinux, apparmor
         val consoleParams = kernel.parameters.filter { it.name == "console" }
         consoleParams shouldHaveSize 2
         
@@ -208,25 +218,28 @@ class BootTest : StringSpec({
         ltsVariant shouldNotBe null
         ltsVariant!!.version shouldBe "6.1.0-lts"
         ltsVariant.description shouldBe "Long Term Support kernel"
-        ltsVariant.parameters shouldHaveSize 2
         
         // Check debugging configuration
         kernel.debugging.enabled.shouldBeTrue()
         kernel.debugging.debugLevel shouldBe 3
         kernel.debugging.earlyPrintk.shouldBeTrue()
-        kernel.debugging.crashkernel shouldBe "256M"
+        
+        // Check that crashkernel parameter was added
+        config.getKernelParameter("crashkernel") shouldNotBe null
+        config.getKernelParameter("crashkernel")!!.value shouldBe "256M"
         
         // Check security configuration
         kernel.security.kaslr.shouldBeTrue()
         kernel.security.smep.shouldBeTrue()
         kernel.security.smap.shouldBeTrue()
         kernel.security.pti.shouldBeTrue()
-        kernel.security.spectre_v2 shouldBe SpectreV2Mitigation.RETPOLINE
-        kernel.security.meltdown.shouldBeTrue()
-        kernel.security.l1tf shouldBe L1TFMitigation.FLUSH
+        kernel.security.spectreV2 shouldBe SpectreV2Mitigation.RETPOLINE
+        kernel.security.l1tf shouldBe L1TFMitigation.FLUSH  
         kernel.security.mds shouldBe MDSMitigation.FULL
-        kernel.security.selinux.shouldBeFalse()
-        kernel.security.apparmor.shouldBeTrue()
+        
+        // Check that security parameters were added
+        config.getKernelParameter("selinux")?.value shouldBe "0"
+        config.getKernelParameter("apparmor")?.value shouldBe "1"
     }
     
     "should configure initramfs with mkinitcpio" {
@@ -240,23 +253,36 @@ class BootTest : StringSpec({
                     generator = InitramfsGenerator.MKINITCPIO
                     compression = InitramfsCompression.ZSTD
                     
-                    modules("ext4", "btrfs", "dm_crypt", "dm_mod")
-                    hooks("base", "udev", "autodetect", "modconf", "block", "encrypt", "filesystems", "keyboard", "fsck")
-                    files("/etc/crypttab")
+                    module("ext4")
+                    module("btrfs")
+                    module("dm_crypt")
+                    module("dm_mod")
+                    
+                    hook("base")
+                    hook("udev")
+                    hook("autodetect")
+                    hook("modconf")
+                    hook("block")
+                    hook("encrypt")
+                    hook("filesystems")
+                    hook("keyboard")
+                    hook("fsck")
+                    
+                    file("/etc/crypttab")
                     
                     microcode {
                         enabled = true
                         intel = true
                         amd = true
-                        early = true
+                        earlyLoad = true
                     }
                     
                     encryption {
-                        method = EncryptionMethod.LUKS2
+                        enabled = true
+                        method = EncryptionMethod.LUKS
                         keyfile = "/etc/luks/keyfile"
-                        keyslot = 1
-                        tries = 3
-                        timeout = 30.seconds
+                        tpm = false
+                        yubikey = false
                     }
                     
                     customScript("/usr/local/bin/custom-init.sh")
@@ -284,15 +310,14 @@ class BootTest : StringSpec({
         initramfs.microcode.enabled.shouldBeTrue()
         initramfs.microcode.intel.shouldBeTrue()
         initramfs.microcode.amd.shouldBeTrue()
-        initramfs.microcode.early.shouldBeTrue()
+        initramfs.microcode.earlyLoad.shouldBeTrue()
         
         // Check encryption configuration
-        initramfs.encryption shouldNotBe null
-        initramfs.encryption!!.method shouldBe EncryptionMethod.LUKS2
-        initramfs.encryption!!.keyfile shouldBe "/etc/luks/keyfile"
-        initramfs.encryption!!.keyslot shouldBe 1
-        initramfs.encryption!!.tries shouldBe 3
-        initramfs.encryption!!.timeout shouldBe 30.seconds
+        initramfs.encryption.enabled.shouldBeTrue()
+        initramfs.encryption.method shouldBe EncryptionMethod.LUKS
+        initramfs.encryption.keyfile shouldBe "/etc/luks/keyfile"
+        initramfs.encryption.tpm.shouldBeFalse()
+        initramfs.encryption.yubikey.shouldBeFalse()
     }
     
     "should configure initramfs with dracut" {
@@ -306,8 +331,11 @@ class BootTest : StringSpec({
                     generator = InitramfsGenerator.DRACUT
                     compression = InitramfsCompression.XZ
                     
-                    modules("dm", "crypt", "lvm", "resume")
-                    files("/etc/dracut.conf.d/custom.conf")
+                    module("dm")
+                    module("crypt")
+                    module("lvm")
+                    module("resume")
+                    file("/etc/dracut.conf.d/custom.conf")
                 }
             }
         }
@@ -331,12 +359,16 @@ class BootTest : StringSpec({
                 plymouth {
                     enabled = true
                     theme = "horizonos-spinner"
-                    showDelay = 2.seconds
-                    deviceTimeout = 10.seconds
-                    modules("drm", "nouveau")
-                    plugins("fade-thru", "two-step")
-                    quietBoot = true
-                    showSplash = true
+                    showDelay = 2
+                    deviceTimeout = 10
+                    debug = false
+                    forceSplash = true
+                    ignoreSerialConsoles = false
+                    
+                    module("drm")
+                    module("nouveau")
+                    module("fade-thru")
+                    module("two-step")
                 }
             }
         }
@@ -344,14 +376,13 @@ class BootTest : StringSpec({
         val plymouth = config.boot!!.plymouth
         plymouth.enabled.shouldBeTrue()
         plymouth.theme shouldBe "horizonos-spinner"
-        plymouth.showDelay shouldBe 2.seconds
-        plymouth.deviceTimeout shouldBe 10.seconds
+        plymouth.showDelay shouldBe 2
+        plymouth.deviceTimeout shouldBe 10
         plymouth.modules shouldContain "drm"
         plymouth.modules shouldContain "nouveau"
-        plymouth.plugins shouldContain "fade-thru"
-        plymouth.plugins shouldContain "two-step"
-        plymouth.quietBoot.shouldBeTrue()
-        plymouth.showSplash.shouldBeTrue()
+        plymouth.modules shouldContain "fade-thru"
+        plymouth.modules shouldContain "two-step"
+        plymouth.forceSplash.shouldBeTrue()
     }
     
     "should configure Secure Boot" {
@@ -372,7 +403,7 @@ class BootTest : StringSpec({
                         platform = "/etc/secureboot/PK.auth"
                         keyExchange = "/etc/secureboot/KEK.auth"
                         signature = "/etc/secureboot/db.auth"
-                        forbidden = "/etc/secureboot/dbx.auth"
+                        forbidden("/etc/secureboot/dbx.auth")
                     }
                 }
             }
@@ -389,7 +420,7 @@ class BootTest : StringSpec({
         secureBoot.keys!!.platform shouldBe "/etc/secureboot/PK.auth"
         secureBoot.keys!!.keyExchange shouldBe "/etc/secureboot/KEK.auth"
         secureBoot.keys!!.signature shouldBe "/etc/secureboot/db.auth"
-        secureBoot.keys!!.forbidden shouldBe "/etc/secureboot/dbx.auth"
+        secureBoot.keys!!.forbidden shouldContain "/etc/secureboot/dbx.auth"
     }
     
     "should configure recovery options" {
@@ -401,31 +432,24 @@ class BootTest : StringSpec({
             boot {
                 recovery {
                     enabled = true
-                    timeout = 60.seconds
-                    autoSelect = false
-                    hideFromMenu = false
+                    timeout = 60
+                    autoboot = false
                     
-                    parameter("single")
-                    parameter("systemd.unit", "rescue.target")
-                    parameter("rd.debug")
+                    option("single")
+                    option("systemd.unit=rescue.target")
+                    option("rd.debug")
                 }
             }
         }
         
         val recovery = config.boot!!.recovery
         recovery.enabled.shouldBeTrue()
-        recovery.timeout shouldBe 60.seconds
-        recovery.autoSelect.shouldBeFalse()
-        recovery.hideFromMenu.shouldBeFalse()
-        recovery.kernelParameters shouldHaveSize 3
-        
-        val singleParam = recovery.kernelParameters.find { it.name == "single" }
-        singleParam shouldNotBe null
-        singleParam!!.value shouldBe null
-        
-        val unitParam = recovery.kernelParameters.find { it.name == "systemd.unit" }
-        unitParam shouldNotBe null
-        unitParam!!.value shouldBe "rescue.target"
+        recovery.timeout shouldBe 60
+        recovery.autoboot.shouldBeFalse()
+        recovery.options shouldHaveSize 3
+        recovery.options shouldContain "single"
+        recovery.options shouldContain "systemd.unit=rescue.target"
+        recovery.options shouldContain "rd.debug"
     }
     
     "should handle complex boot configuration with multiple bootloaders" {
@@ -447,9 +471,7 @@ class BootTest : StringSpec({
                     autoEntries = true
                     autoFirmware = false
                     
-                    entry("HorizonOS Main") {
-                        title = "HorizonOS Main"
-                        linux = "/EFI/horizonos/vmlinuz"
+                    entry("HorizonOS Main", "/EFI/horizonos/vmlinuz") {
                         initrd = "/EFI/horizonos/initramfs.img"
                         options("root=UUID=12345678-1234-1234-1234-123456789abc", "rw", "quiet", "splash")
                         architecture = "x64"
@@ -457,9 +479,7 @@ class BootTest : StringSpec({
                         sort = 1
                     }
                     
-                    entry("HorizonOS Fallback") {
-                        title = "HorizonOS Fallback"
-                        linux = "/EFI/horizonos/vmlinuz"
+                    entry("HorizonOS Fallback", "/EFI/horizonos/vmlinuz") {
                         initrd = "/EFI/horizonos/initramfs-fallback.img"
                         options("root=UUID=12345678-1234-1234-1234-123456789abc", "rw")
                         architecture = "x64"
@@ -478,8 +498,10 @@ class BootTest : StringSpec({
                     parameter("transparent_hugepage", "madvise")
                     
                     modules {
-                        blacklist("pcspkr", "snd_pcsp")
-                        load("acpi_cpufreq", "cpufreq_ondemand")
+                        blacklist("pcspkr")
+                        blacklist("snd_pcsp")
+                        load("acpi_cpufreq")
+                        load("cpufreq_ondemand")
                         option("i915", "enable_gvt=1")
                         option("kvm_intel", "nested=1")
                         autoLoad = true
@@ -491,25 +513,39 @@ class BootTest : StringSpec({
                     generator = InitramfsGenerator.MKINITCPIO
                     compression = InitramfsCompression.LZ4
                     
-                    modules("ext4", "xfs", "btrfs", "nvme")
-                    hooks("base", "udev", "autodetect", "modconf", "block", "filesystems", "keyboard", "fsck")
+                    module("ext4")
+                    module("xfs")
+                    module("btrfs")
+                    module("nvme")
+                    
+                    hook("base")
+                    hook("udev")
+                    hook("autodetect")
+                    hook("modconf")
+                    hook("block")
+                    hook("filesystems")
+                    hook("keyboard")
+                    hook("fsck")
                     
                     microcode {
                         enabled = true
                         intel = true
                         amd = false
-                        early = true
+                        earlyLoad = true
                     }
                 }
                 
                 plymouth {
                     enabled = true
                     theme = "horizonos-glow"
-                    showDelay = 0.seconds
-                    deviceTimeout = 8.seconds
-                    modules("drm", "i915")
-                    quietBoot = true
-                    showSplash = true
+                    showDelay = 0
+                    deviceTimeout = 8
+                    debug = false
+                    forceSplash = true
+                    ignoreSerialConsoles = false
+                    
+                    module("drm")
+                    module("i915")
                 }
             }
         }
@@ -555,7 +591,7 @@ class BootTest : StringSpec({
         // Verify Plymouth configuration
         boot.plymouth.theme shouldBe "horizonos-glow"
         boot.plymouth.modules shouldContain "i915"
-        boot.plymouth.deviceTimeout shouldBe 8.seconds
+        boot.plymouth.deviceTimeout shouldBe 8
     }
     
     "should provide helper functions for kernel parameters" {
@@ -573,8 +609,8 @@ class BootTest : StringSpec({
                     rootDevice("/dev/sda1")
                     rootfsType("ext4")
                     resume("/dev/sda2")
-                    cryptDevice("UUID=abc-123", "root")
-                    nvidia("drm.modeset=1")
+                    cryptDevice("UUID=abc-123:root")
+                    nvidia()
                 }
             }
         }

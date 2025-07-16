@@ -1,6 +1,7 @@
 package org.horizonos.config.compiler.generators.shell
 
 import org.horizonos.config.dsl.*
+import org.horizonos.config.dsl.boot.bootloader.BootloaderType
 import org.horizonos.config.compiler.GeneratedFile
 import org.horizonos.config.compiler.FileType
 import java.io.File
