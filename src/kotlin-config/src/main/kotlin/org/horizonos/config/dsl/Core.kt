@@ -21,6 +21,7 @@ class SystemConfiguration {
     private var desktopConfig: DesktopConfig? = null
     private var automationConfig: AutomationConfig? = null
     var aiConfig: AIConfig? = null
+    var networkConfig: NetworkConfig? = null
 
     fun packages(block: PackagesContext.() -> Unit) {
         PackagesContext().apply(block).also {
@@ -57,6 +58,10 @@ class SystemConfiguration {
     fun ai(block: AIContext.() -> Unit) {
         aiConfig = AIContext().apply(block).toConfig()
     }
+    
+    fun network(block: NetworkContext.() -> Unit) {
+        networkConfig = NetworkContext().apply(block).toConfig()
+    }
 
     fun toConfig(): CompiledConfig {
         val config = CompiledConfig(
@@ -67,7 +72,8 @@ class SystemConfiguration {
             repositories = repositories,
             desktop = desktopConfig,
             automation = automationConfig,
-            ai = aiConfig
+            ai = aiConfig,
+            network = networkConfig
         )
         
         // Validate configuration before returning
@@ -294,7 +300,8 @@ data class CompiledConfig(
     val repositories: List<Repository>,
     val desktop: DesktopConfig? = null,
     val automation: AutomationConfig? = null,
-    val ai: AIConfig? = null
+    val ai: AIConfig? = null,
+    val network: NetworkConfig? = null
 )
 
 @Serializable
