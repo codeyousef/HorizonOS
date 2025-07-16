@@ -27,6 +27,8 @@ class SystemConfiguration {
     var storageConfig: StorageConfig? = null
     var securityConfig: SecurityConfig? = null
     var enhancedServicesConfig: EnhancedServicesConfig? = null
+    var developmentConfig: DevelopmentConfig? = null
+    var environmentConfig: EnvironmentConfig? = null
 
     fun packages(block: PackagesContext.() -> Unit) {
         PackagesContext().apply(block).also {
@@ -87,6 +89,14 @@ class SystemConfiguration {
     fun enhancedServices(block: EnhancedServicesContext.() -> Unit) {
         enhancedServicesConfig = EnhancedServicesContext().apply(block).toConfig()
     }
+    
+    fun development(block: DevelopmentContext.() -> Unit) {
+        developmentConfig = DevelopmentContext().apply(block).toConfig()
+    }
+    
+    fun environment(block: EnvironmentContext.() -> Unit) {
+        environmentConfig = EnvironmentContext().apply(block).toConfig()
+    }
 
     fun toConfig(): CompiledConfig {
         val config = CompiledConfig(
@@ -103,7 +113,9 @@ class SystemConfiguration {
             hardware = hardwareConfig,
             storage = storageConfig,
             security = securityConfig,
-            enhancedServices = enhancedServicesConfig
+            enhancedServices = enhancedServicesConfig,
+            development = developmentConfig,
+            environment = environmentConfig
         )
         
         // Validate configuration before returning
@@ -336,7 +348,9 @@ data class CompiledConfig(
     val hardware: HardwareConfig? = null,
     val storage: StorageConfig? = null,
     val security: SecurityConfig? = null,
-    val enhancedServices: EnhancedServicesConfig? = null
+    val enhancedServices: EnhancedServicesConfig? = null,
+    val development: DevelopmentConfig? = null,
+    val environment: EnvironmentConfig? = null
 )
 
 @Serializable

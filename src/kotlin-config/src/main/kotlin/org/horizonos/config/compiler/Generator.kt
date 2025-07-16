@@ -99,6 +99,14 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         config.enhancedServices?.let {
             File(outputDir, "json/enhanced-services.json").writeText(json.encodeToString(it))
         }
+        
+        config.development?.let {
+            File(outputDir, "json/development.json").writeText(json.encodeToString(it))
+        }
+        
+        config.environment?.let {
+            File(outputDir, "json/environment.json").writeText(json.encodeToString(it))
+        }
     }
     
     private fun generateYamlOutput(config: CompiledConfig) {
@@ -237,6 +245,8 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             config.storage?.let { appendLine("./storage-config.sh") }
             config.security?.let { appendLine("./security-config.sh") }
             config.enhancedServices?.let { appendLine("./enhanced-services-config.sh") }
+            config.development?.let { appendLine("./development-setup.sh") }
+            config.environment?.let { appendLine("./environment-setup.sh") }
             config.desktop?.let { appendLine("./desktop-setup.sh") }
             config.automation?.let { appendLine("./automation-setup.sh") }
             appendLine()
@@ -274,6 +284,12 @@ class EnhancedConfigGenerator(private val outputDir: File) {
         
         // Enhanced services configuration script
         config.enhancedServices?.let { generateEnhancedServicesScript(config) }
+        
+        // Development environment setup script
+        config.development?.let { generateDevelopmentScript(config) }
+        
+        // Environment setup script
+        config.environment?.let { generateEnvironmentScript(config) }
         
         // Desktop setup script
         config.desktop?.let { generateDesktopScript(config) }
@@ -2996,6 +3012,467 @@ class EnhancedConfigGenerator(private val outputDir: File) {
     
     private fun StringBuilder.generateZipkinConfig(monitoring: MonitoringService) {
         appendLine("# Zipkin configuration placeholder")
+    }
+    
+    private fun generateDevelopmentScript(config: CompiledConfig) {
+        config.development?.let { dev ->
+            val script = File(outputDir, "scripts/development-setup.sh")
+            script.writeText(buildString {
+                appendLine("#!/bin/bash")
+                appendLine("# Development Environment Setup")
+                appendLine("# Generated from HorizonOS Kotlin DSL")
+                appendLine()
+                appendLine("set -euo pipefail")
+                appendLine()
+                appendLine("echo 'Setting up development environment...'")
+                appendLine()
+                
+                // Language runtimes
+                if (dev.languages.isNotEmpty()) {
+                    appendLine("# === Language Runtimes ===")
+                    dev.languages.forEach { lang ->
+                        if (lang.enabled) {
+                            appendLine("echo 'Installing ${lang.type.name.lowercase()} runtime...'")
+                            generateLanguageRuntimeSetup(lang)
+                            appendLine()
+                        }
+                    }
+                }
+                
+                // IDEs
+                if (dev.ides.isNotEmpty()) {
+                    appendLine("# === IDE Installation and Configuration ===")
+                    dev.ides.forEach { ide ->
+                        if (ide.enabled) {
+                            appendLine("echo 'Setting up ${ide.type.name.lowercase().replace("_", " ")}...'")
+                            generateIDESetup(ide)
+                            appendLine()
+                        }
+                    }
+                }
+                
+                // Editors
+                if (dev.editors.isNotEmpty()) {
+                    appendLine("# === Editor Configuration ===")
+                    dev.editors.forEach { editor ->
+                        if (editor.enabled) {
+                            appendLine("echo 'Configuring ${editor.type.name.lowercase()}...'")
+                            generateEditorSetup(editor)
+                            appendLine()
+                        }
+                    }
+                }
+                
+                // Development tools
+                if (dev.tools.isNotEmpty()) {
+                    appendLine("# === Development Tools ===")
+                    dev.tools.forEach { tool ->
+                        if (tool.enabled && tool.autoInstall) {
+                            appendLine("echo 'Installing development tool: ${tool.name}...'")
+                            generateToolSetup(tool)
+                            appendLine()
+                        }
+                    }
+                }
+                
+                // Package managers
+                if (dev.packageManagers.isNotEmpty()) {
+                    appendLine("# === Package Manager Configuration ===")
+                    dev.packageManagers.forEach { pm ->
+                        if (pm.enabled) {
+                            appendLine("echo 'Configuring ${pm.type.name.lowercase()} package manager...'")
+                            generatePackageManagerSetup(pm)
+                            appendLine()
+                        }
+                    }
+                }
+                
+                // Container development environments
+                if (dev.containerDev.isNotEmpty()) {
+                    appendLine("# === Container Development Environments ===")
+                    dev.containerDev.forEach { containerEnv ->
+                        appendLine("echo 'Setting up container dev environment: ${containerEnv.name}...'")
+                        generateContainerDevSetup(containerEnv)
+                        appendLine()
+                    }
+                }
+                
+                // Version control
+                if (dev.versionControl.isNotEmpty()) {
+                    appendLine("# === Version Control Configuration ===")
+                    dev.versionControl.forEach { vcs ->
+                        if (vcs.enabled) {
+                            appendLine("echo 'Configuring ${vcs.type.name.lowercase()} version control...'")
+                            generateVCSSetup(vcs)
+                            appendLine()
+                        }
+                    }
+                }
+                
+                appendLine("echo 'Development environment setup completed.'")
+            })
+            script.setExecutable(true)
+            generatedFiles.add(GeneratedFile("scripts/development-setup.sh", FileType.SHELL))
+        }
+    }
+    
+    private fun generateEnvironmentScript(config: CompiledConfig) {
+        config.environment?.let { env ->
+            val script = File(outputDir, "scripts/environment-setup.sh")
+            script.writeText(buildString {
+                appendLine("#!/bin/bash")
+                appendLine("# Shell and Environment Setup")
+                appendLine("# Generated from HorizonOS Kotlin DSL")
+                appendLine()
+                appendLine("set -euo pipefail")
+                appendLine()
+                appendLine("echo 'Setting up shell and environment...'")
+                appendLine()
+                
+                // Shell configurations
+                if (env.shells.isNotEmpty()) {
+                    appendLine("# === Shell Configuration ===")
+                    env.shells.forEach { shell ->
+                        if (shell.enabled) {
+                            appendLine("echo 'Configuring ${shell.type.name.lowercase()} shell...'")
+                            generateShellSetup(shell)
+                            
+                            if (shell.defaultShell) {
+                                appendLine("chsh -s /bin/${shell.type.name.lowercase()} \$USER")
+                            }
+                            appendLine()
+                        }
+                    }
+                }
+                
+                // Environment variables
+                if (env.environmentVariables.isNotEmpty()) {
+                    appendLine("# === Environment Variables ===")
+                    appendLine("echo 'Setting up environment variables...'")
+                    env.environmentVariables.values.forEach { envVar ->
+                        generateEnvironmentVariableSetup(envVar)
+                    }
+                    appendLine()
+                }
+                
+                // PATH entries
+                if (env.pathEntries.isNotEmpty()) {
+                    appendLine("# === PATH Configuration ===")
+                    appendLine("echo 'Configuring PATH entries...'")
+                    generatePathSetup(env.pathEntries)
+                    appendLine()
+                }
+                
+                // Dotfiles
+                if (env.dotfiles.isNotEmpty()) {
+                    appendLine("# === Dotfiles Management ===")
+                    env.dotfiles.forEach { dotfile ->
+                        appendLine("echo 'Managing dotfile: ${dotfile.name}...'")
+                        generateDotfileSetup(dotfile)
+                        appendLine()
+                    }
+                }
+                
+                // Terminal configurations
+                if (env.terminals.isNotEmpty()) {
+                    appendLine("# === Terminal Configuration ===")
+                    env.terminals.forEach { terminal ->
+                        if (terminal.enabled) {
+                            appendLine("echo 'Configuring ${terminal.type.name.lowercase().replace("_", "-")} terminal...'")
+                            generateTerminalSetup(terminal)
+                            appendLine()
+                        }
+                    }
+                }
+                
+                // Prompt configurations
+                if (env.prompts.isNotEmpty()) {
+                    appendLine("# === Prompt Configuration ===")
+                    env.prompts.forEach { prompt ->
+                        if (prompt.enabled) {
+                            appendLine("echo 'Setting up ${prompt.type.name.lowercase()} prompt...'")
+                            generatePromptSetup(prompt)
+                            appendLine()
+                        }
+                    }
+                }
+                
+                appendLine("echo 'Shell and environment setup completed.'")
+            })
+            script.setExecutable(true)
+            generatedFiles.add(GeneratedFile("scripts/environment-setup.sh", FileType.SHELL))
+        }
+    }
+    
+    // Development setup helper functions
+    private fun StringBuilder.generateLanguageRuntimeSetup(lang: LanguageRuntime) {
+        when (lang.type) {
+            LanguageType.NODEJS -> {
+                appendLine("# Install Node.js")
+                appendLine("curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -")
+                appendLine("sudo apt-get install -y nodejs")
+                
+                lang.nodeConfig?.let { node ->
+                    when (node.packageManager) {
+                        NodePackageManager.YARN -> {
+                            appendLine("npm install -g yarn@${node.yarnVersion}")
+                        }
+                        NodePackageManager.PNPM -> {
+                            appendLine("npm install -g pnpm")
+                        }
+                        NodePackageManager.NPM -> {} // Already installed with Node.js
+                    }
+                    
+                    if (node.enableCorepack) {
+                        appendLine("corepack enable")
+                    }
+                    
+                    node.globalPackages.forEach { pkg ->
+                        appendLine("npm install -g $pkg")
+                    }
+                }
+            }
+            LanguageType.PYTHON -> {
+                appendLine("# Install Python")
+                appendLine("sudo apt-get install -y python3 python3-pip python3-venv")
+                
+                lang.pythonConfig?.let { python ->
+                    python.globalPackages.forEach { pkg ->
+                        appendLine("pip3 install $pkg")
+                    }
+                }
+            }
+            LanguageType.JAVA -> {
+                lang.javaConfig?.let { java ->
+                    when (java.jvmImplementation) {
+                        JVMImplementation.OPENJDK -> appendLine("sudo apt-get install -y openjdk-17-jdk")
+                        JVMImplementation.ORACLE_JDK -> appendLine("# Oracle JDK installation")
+                        JVMImplementation.GRAALVM -> appendLine("# GraalVM installation")
+                        JVMImplementation.AZUL_ZULU -> appendLine("# Azul Zulu installation")
+                        JVMImplementation.ADOPTIUM -> appendLine("# Adoptium installation")
+                    }
+                }
+            }
+            LanguageType.RUST -> {
+                appendLine("# Install Rust")
+                appendLine("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y")
+                appendLine("source ~/.cargo/env")
+                
+                lang.rustConfig?.let { rust ->
+                    rust.targets.forEach { target ->
+                        appendLine("rustup target add $target")
+                    }
+                    rust.components.forEach { component ->
+                        appendLine("rustup component add $component")
+                    }
+                }
+            }
+            LanguageType.GO -> {
+                appendLine("# Install Go")
+                appendLine("wget -O go.tar.gz https://golang.org/dl/go1.21.0.linux-amd64.tar.gz")
+                appendLine("sudo tar -C /usr/local -xzf go.tar.gz")
+                appendLine("echo 'export PATH=\$PATH:/usr/local/go/bin' >> ~/.bashrc")
+            }
+            else -> {
+                appendLine("# ${lang.type.name} installation placeholder")
+            }
+        }
+        
+        // Set environment variables
+        lang.environmentVariables.forEach { (key, value) ->
+            appendLine("echo 'export $key=\"$value\"' >> ~/.bashrc")
+        }
+    }
+    
+    private fun StringBuilder.generateIDESetup(ide: IDEConfiguration) {
+        when (ide.type) {
+            IDEType.VSCODE -> {
+                appendLine("# Install Visual Studio Code")
+                appendLine("wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg")
+                appendLine("sudo install -o root -g root -m 644 packages.microsoft.gpg /etc/apt/trusted.gpg.d/")
+                appendLine("echo 'deb [arch=amd64,arm64,armhf signed-by=/etc/apt/trusted.gpg.d/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main' | sudo tee /etc/apt/sources.list.d/vscode.list")
+                appendLine("sudo apt update && sudo apt install -y code")
+                
+                ide.extensions.forEach { ext ->
+                    appendLine("code --install-extension $ext")
+                }
+            }
+            IDEType.VIM -> {
+                appendLine("sudo apt-get install -y vim")
+                ide.vimConfig?.let { vim ->
+                    appendLine("cat > ~/.vimrc <<EOF")
+                    appendLine("\" Vim configuration")
+                    if (vim.enableSyntaxHighlighting) appendLine("syntax on")
+                    if (vim.enableLineNumbers) appendLine("set number")
+                    appendLine("set tabstop=${vim.tabWidth}")
+                    appendLine("set expandtab=${if (vim.expandTabs) "true" else "false"}")
+                    appendLine("colorscheme ${vim.colorScheme}")
+                    appendLine("EOF")
+                }
+            }
+            else -> {
+                appendLine("# ${ide.type.name} installation placeholder")
+            }
+        }
+    }
+    
+    private fun StringBuilder.generateShellSetup(shell: ShellConfiguration) {
+        when (shell.type) {
+            ShellType.BASH -> {
+                shell.bashConfig?.let { bash ->
+                    appendLine("cat >> ~/.bashrc <<EOF")
+                    appendLine("# Bash configuration")
+                    appendLine("HISTSIZE=${bash.historySize}")
+                    appendLine("HISTFILESIZE=${bash.historyFileSize}")
+                    appendLine("HISTCONTROL=${bash.historyControl}")
+                    if (bash.enableColorPrompt) appendLine("force_color_prompt=yes")
+                    if (bash.enableCompletion) appendLine("source /etc/bash_completion")
+                    if (bash.enableGlobstar) appendLine("shopt -s globstar")
+                    if (bash.checkWinSize) appendLine("shopt -s checkwinsize")
+                    appendLine("EOF")
+                }
+            }
+            ShellType.ZSH -> {
+                appendLine("sudo apt-get install -y zsh")
+                shell.zshConfig?.let { zsh ->
+                    if (zsh.enableOhMyZsh) {
+                        appendLine("sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\"")
+                        appendLine("sed -i 's/ZSH_THEME=\"robbyrussell\"/ZSH_THEME=\"${zsh.theme}\"/' ~/.zshrc")
+                        appendLine("sed -i 's/plugins=(git)/plugins=(${zsh.ohMyZshPlugins.joinToString(" ")})/' ~/.zshrc")
+                    }
+                }
+            }
+            ShellType.FISH -> {
+                appendLine("sudo apt-get install -y fish")
+                shell.fishConfig?.let { fish ->
+                    appendLine("fish -c 'set -U fish_greeting \"${if (fish.enableGreeting) "Welcome to fish" else ""}\"\\'")
+                    fish.abbreviations.forEach { (abbr, expansion) ->
+                        appendLine("fish -c 'abbr $abbr \"$expansion\"'")
+                    }
+                }
+            }
+            else -> {
+                appendLine("# ${shell.type.name} setup placeholder")
+            }
+        }
+        
+        // Add aliases
+        shell.aliases.forEach { (alias, command) ->
+            appendLine("echo 'alias $alias=\"$command\"' >> ${shell.configFile}")
+        }
+        
+        // Add functions
+        shell.functions.forEach { (name, body) ->
+            appendLine("cat >> ${shell.configFile} <<EOF")
+            appendLine("$name() {")
+            appendLine("    $body")
+            appendLine("}")
+            appendLine("EOF")
+        }
+    }
+    
+    private fun StringBuilder.generateEnvironmentVariableSetup(envVar: EnvironmentVariable) {
+        val exportLine = "export ${envVar.name}=\"${envVar.value}\""
+        
+        when (envVar.scope) {
+            VariableScope.SYSTEM -> {
+                appendLine("echo '$exportLine' | sudo tee -a /etc/environment")
+            }
+            VariableScope.USER -> {
+                appendLine("echo '$exportLine' >> ~/.bashrc")
+                appendLine("echo '$exportLine' >> ~/.zshrc")
+            }
+            VariableScope.SESSION -> {
+                appendLine(exportLine)
+            }
+        }
+    }
+    
+    private fun StringBuilder.generatePathSetup(pathEntries: List<PathEntry>) {
+        val sortedEntries = pathEntries.sortedBy { it.priority }
+        
+        appendLine("# Setup PATH entries")
+        appendLine("cat >> ~/.bashrc <<EOF")
+        appendLine("# PATH configuration")
+        sortedEntries.forEach { entry ->
+            if (entry.createIfMissing) {
+                appendLine("mkdir -p ${entry.path}")
+            }
+            if (entry.condition != null) {
+                appendLine("if ${entry.condition}; then")
+                appendLine("    export PATH=\"${entry.path}:\$PATH\"")
+                appendLine("fi")
+            } else {
+                appendLine("export PATH=\"${entry.path}:\$PATH\"")
+            }
+        }
+        appendLine("EOF")
+    }
+    
+    private fun StringBuilder.generateDotfileSetup(dotfile: DotfileConfiguration) {
+        if (dotfile.backup && !dotfile.overwrite) {
+            appendLine("if [ -f ${dotfile.targetPath} ]; then")
+            appendLine("    cp ${dotfile.targetPath} ${dotfile.targetPath}.backup")
+            appendLine("fi")
+        }
+        
+        if (dotfile.sourcePath != null) {
+            if (dotfile.template) {
+                appendLine("# Process template variables for ${dotfile.name}")
+                dotfile.variables.forEach { (key, value) ->
+                    appendLine("export ${key}=\"${value}\"")
+                }
+                appendLine("envsubst < ${dotfile.sourcePath} > ${dotfile.targetPath}")
+            } else {
+                appendLine("cp ${dotfile.sourcePath} ${dotfile.targetPath}")
+            }
+        }
+        
+        if (dotfile.executable) {
+            appendLine("chmod +x ${dotfile.targetPath}")
+        }
+        
+        dotfile.owner?.let { owner ->
+            appendLine("chown ${owner}:${dotfile.group ?: owner} ${dotfile.targetPath}")
+        }
+        
+        dotfile.permissions?.let { perms ->
+            appendLine("chmod $perms ${dotfile.targetPath}")
+        }
+    }
+    
+    // Placeholder functions for other components
+    private fun StringBuilder.generateEditorSetup(editor: EditorConfiguration) {
+        appendLine("# ${editor.type.name} editor setup placeholder")
+    }
+    
+    private fun StringBuilder.generateToolSetup(tool: DevelopmentTool) {
+        appendLine("# Install ${tool.name}")
+        appendLine("# Category: ${tool.category}")
+        tool.dependencies.forEach { dep ->
+            appendLine("# Dependency: $dep")
+        }
+    }
+    
+    private fun StringBuilder.generatePackageManagerSetup(pm: PackageManagerConfig) {
+        appendLine("# ${pm.type.name} package manager setup placeholder")
+    }
+    
+    private fun StringBuilder.generateContainerDevSetup(containerEnv: ContainerDevEnvironment) {
+        appendLine("# Container dev environment: ${containerEnv.name}")
+        appendLine("# Image: ${containerEnv.image}:${containerEnv.tag}")
+    }
+    
+    private fun StringBuilder.generateVCSSetup(vcs: VCSConfiguration) {
+        appendLine("# ${vcs.type.name} version control setup placeholder")
+    }
+    
+    private fun StringBuilder.generateTerminalSetup(terminal: TerminalConfiguration) {
+        appendLine("# ${terminal.type.name} terminal setup placeholder")
+    }
+    
+    private fun StringBuilder.generatePromptSetup(prompt: PromptConfiguration) {
+        appendLine("# ${prompt.type.name} prompt setup placeholder")
     }
 }
 
