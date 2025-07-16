@@ -32,6 +32,15 @@ class ExecutionEngine(
     private val systemManager = SystemManager(systemRoot, commandExecutor)
     private val configManager = ConfigManager(configRoot, commandExecutor)
     
+    // Live update components
+    private val changeDetector = ChangeDetector()
+    private val stateSync = StateSyncManager()
+    private val serviceReloader = ServiceReloader()
+    private val notifier = UpdateNotifier()
+    private val liveUpdateManager = LiveUpdateManager(
+        systemManager, changeDetector, stateSync, serviceReloader, notifier
+    )
+    
     /**
      * Apply a compiled configuration to the system
      */
@@ -114,18 +123,63 @@ class ExecutionEngine(
     }
     
     /**
+     * Apply configuration updates to a live system
+     */
+    suspend fun applyLiveUpdates(
+        currentConfig: CompiledConfig,
+        newConfig: CompiledConfig,
+        options: LiveUpdateOptions = LiveUpdateOptions()
+    ): LiveUpdateResult {
+        return liveUpdateManager.applyLiveUpdates(currentConfig, newConfig, options)
+    }
+    
+    /**
+     * Check if live updates are possible
+     */
+    suspend fun canApplyLiveUpdates(
+        currentConfig: CompiledConfig,
+        newConfig: CompiledConfig
+    ): LiveUpdateCapability {
+        return liveUpdateManager.canApplyLiveUpdates(currentConfig, newConfig)
+    }
+    
+    /**
      * Get current system status
      */
     suspend fun getSystemStatus(): SystemStatus {
         val currentCommit = ostreeManager.getCurrentCommit()
         val availableCommits = ostreeManager.getAvailableCommits()
         val systemInfo = systemManager.getSystemInfo()
+        val syncStatus = stateSync.checkSync(getLastAppliedConfig())
         
         return SystemStatus(
             currentCommit = currentCommit,
             availableCommits = availableCommits,
-            systemInfo = systemInfo
+            systemInfo = systemInfo,
+            syncStatus = syncStatus
         )
+    }
+    
+    /**
+     * Get the last applied configuration
+     */
+    private suspend fun getLastAppliedConfig(): CompiledConfig {
+        val configFile = configRoot.resolve("current-config.json")
+        return if (configFile.exists()) {
+            kotlinx.serialization.json.Json.decodeFromString(
+                CompiledConfig.serializer(),
+                configFile.toFile().readText()
+            )
+        } else {
+            // Return a minimal default config
+            CompiledConfig(
+                system = org.horizonos.config.dsl.SystemConfig("horizonos", "UTC", "en_US.UTF-8"),
+                packages = emptyList(),
+                services = emptyList(),
+                users = emptyList(),
+                repositories = emptyList()
+            )
+        }
     }
     
     /**
@@ -400,6 +454,118 @@ class SystemManager(
             memoryInfo = memoryInfo
         )
     }
+    
+    // Methods for live updates
+    
+    suspend fun installPackages(packages: List<Package>, dryRun: Boolean) {
+        if (dryRun) {
+            println("DRY RUN: Would install packages: ${packages.joinToString { it.name }}")
+            return
+        }
+        val packageNames = packages.map { it.name }
+        commandExecutor.execute("pacman", "-S", "--needed", "--noconfirm", *packageNames.toTypedArray())
+    }
+    
+    suspend fun removePackages(packages: List<Package>, dryRun: Boolean) {
+        if (dryRun) {
+            println("DRY RUN: Would remove packages: ${packages.joinToString { it.name }}")
+            return
+        }
+        val packageNames = packages.map { it.name }
+        commandExecutor.execute("pacman", "-R", "--noconfirm", *packageNames.toTypedArray())
+    }
+    
+    suspend fun createUsers(users: List<User>, dryRun: Boolean) {
+        if (dryRun) {
+            println("DRY RUN: Would create users: ${users.joinToString { it.name }}")
+            return
+        }
+        users.forEach { user ->
+            val args = mutableListOf("useradd", "-m")
+            user.uid?.let { args.addAll(listOf("-u", it.toString())) }
+            args.addAll(listOf("-s", user.shell))
+            if (user.groups.isNotEmpty()) {
+                args.addAll(listOf("-G", user.groups.joinToString(",")))
+            }
+            args.add(user.name)
+            commandExecutor.execute(*args.toTypedArray())
+        }
+    }
+    
+    suspend fun modifyUser(oldUser: User, newUser: User, dryRun: Boolean) {
+        if (dryRun) {
+            println("DRY RUN: Would modify user ${oldUser.name}")
+            return
+        }
+        commandExecutor.execute("usermod", "-s", newUser.shell, newUser.name)
+        if (newUser.groups.isNotEmpty()) {
+            commandExecutor.execute("usermod", "-G", newUser.groups.joinToString(","), newUser.name)
+        }
+    }
+    
+    suspend fun updateServiceConfig(serviceName: String, config: org.horizonos.config.dsl.ServiceConfig?, dryRun: Boolean) {
+        if (dryRun) {
+            println("DRY RUN: Would update config for service $serviceName")
+            return
+        }
+        // Update service configuration
+        config?.let { cfg ->
+            if (cfg.environment.isNotEmpty()) {
+                val envDir = systemRoot.resolve("etc/systemd/system/$serviceName.service.d")
+                envDir.toFile().mkdirs()
+                val envFile = envDir.resolve("environment.conf")
+                val content = buildString {
+                    appendLine("[Service]")
+                    cfg.environment.forEach { (key, value) ->
+                        appendLine("Environment=\"$key=$value\"")
+                    }
+                }
+                envFile.writeText(content)
+                commandExecutor.execute("systemctl", "daemon-reload")
+            }
+        }
+    }
+    
+    suspend fun setTimezone(timezone: String, dryRun: Boolean) {
+        if (dryRun) {
+            println("DRY RUN: Would set timezone to $timezone")
+            return
+        }
+        commandExecutor.execute("timedatectl", "set-timezone", timezone)
+    }
+    
+    suspend fun setLocale(locale: String, dryRun: Boolean) {
+        if (dryRun) {
+            println("DRY RUN: Would set locale to $locale")
+            return
+        }
+        val localeFile = systemRoot.resolve("etc/locale.conf")
+        localeFile.writeText("LANG=$locale\n")
+        commandExecutor.execute("locale-gen")
+    }
+    
+    suspend fun setHostname(hostname: String, dryRun: Boolean) {
+        if (dryRun) {
+            println("DRY RUN: Would set hostname to $hostname")
+            return
+        }
+        commandExecutor.execute("hostnamectl", "set-hostname", hostname)
+    }
+    
+    suspend fun updateAutomationWorkflow(workflow: org.horizonos.config.dsl.Workflow, dryRun: Boolean) {
+        if (dryRun) {
+            println("DRY RUN: Would update automation workflow ${workflow.name}")
+            return
+        }
+        // Update automation workflow configuration
+        val workflowFile = systemRoot.resolve("etc/horizonos/workflows/${workflow.name}.json")
+        workflowFile.parent.toFile().mkdirs()
+        workflowFile.writeText(
+            kotlinx.serialization.json.Json.encodeToString(org.horizonos.config.dsl.Workflow.serializer(), workflow)
+        )
+        // Notify automation service
+        commandExecutor.execute("systemctl", "reload", "horizonos-automation")
+    }
 }
 
 /**
@@ -467,7 +633,8 @@ class CommandExecutor(private val dryRun: Boolean = false) {
 data class SystemStatus(
     val currentCommit: String,
     val availableCommits: List<String>,
-    val systemInfo: SystemInfo
+    val systemInfo: SystemInfo,
+    val syncStatus: SyncStatus? = null
 )
 
 data class SystemInfo(
