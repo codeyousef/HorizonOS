@@ -1,7 +1,7 @@
 //! Device node implementation
 
 use crate::{GraphNode, BaseNode, NodeVisualData, NodeAction, NodeActionResult, NodeActionType, NodeError, NodeExportData};
-use horizonos_graph_engine::{SceneNode, NodeType, DeviceType, SceneId, Position, Vec3};
+use horizonos_graph_engine::{SceneNode, NodeType, NodeMetadata, DeviceType, SceneId, Position, Vec3};
 
 #[derive(Debug, Clone)]
 pub struct DeviceNode {
@@ -20,6 +20,13 @@ impl GraphNode for DeviceNode {
     fn id(&self) -> SceneId { self.base.id }
     fn display_name(&self) -> String { "Device".to_string() }
     fn description(&self) -> Option<String> { Some("Device node".to_string()) }
+    fn node_type(&self) -> NodeType {
+        NodeType::Device {
+            name: "Generic Device".to_string(),
+            device_type: DeviceType::Computer,
+        }
+    }
+    fn metadata(&self) -> NodeMetadata { self.base.metadata.clone() }
     fn visual_data(&self) -> NodeVisualData { self.base.visual_data.clone() }
     fn update(&mut self, _delta_time: f32) -> Result<(), NodeError> { Ok(()) }
     fn handle_action(&mut self, action: NodeAction) -> Result<NodeActionResult, NodeError> {

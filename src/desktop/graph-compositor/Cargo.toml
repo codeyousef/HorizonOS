@@ -28,3 +28,4 @@ thiserror = { workspace = true }
 nalgebra = { workspace = true }
 chrono = { workspace = true }
 env_logger = { workspace = true }
+tracing = { workspace = true }

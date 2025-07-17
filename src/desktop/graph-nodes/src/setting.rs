@@ -541,6 +541,19 @@ impl GraphNode for SettingNode {
         })
     }
     
+    fn node_type(&self) -> NodeType {
+        NodeType::Setting {
+            key: self.key.clone(),
+            value: self.value.clone(),
+            setting_type: self.setting_type.clone(),
+            scope: self.scope.clone(),
+        }
+    }
+    
+    fn metadata(&self) -> NodeMetadata {
+        self.metadata.clone()
+    }
+    
     fn visual_data(&self) -> NodeVisualData {
         self.visual_data.clone()
     }

@@ -314,15 +314,15 @@ impl InteractionManager {
         // Check for recognized gestures
         if let Some(gesture) = self.gesture_recognizer.get_gesture() {
             match gesture {
-                Gesture::Pinch { scale, center } => {
+                Gesture::Pinch { scale, center, .. } => {
                     self.camera_controller.zoom(engine.camera_mut(), scale - 1.0);
                 }
-                Gesture::Pan { delta } => {
+                Gesture::Pan { delta, .. } => {
                     let current = self.input_handler.cursor_pos();
                     let previous = (current.0 - delta.0, current.1 - delta.1);
                     self.camera_controller.pan(engine.camera_mut(), current, previous);
                 }
-                Gesture::Rotate { angle, center } => {
+                Gesture::Rotate { angle, center, .. } => {
                     self.camera_controller.rotate_around(engine.camera_mut(), center, angle);
                 }
                 _ => {}
@@ -459,16 +459,71 @@ impl InteractionManager {
     }
 }
 
+/// Keyboard modifiers for mouse gestures
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyboardModifiers {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub meta: bool,
+}
+
+impl Default for KeyboardModifiers {
+    fn default() -> Self {
+        Self {
+            ctrl: false,
+            alt: false,
+            shift: false,
+            meta: false,
+        }
+    }
+}
+
+/// Mouse button types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    Other(u16),
+}
+
 /// Gesture types recognized by the system
 #[derive(Debug, Clone)]
 pub enum Gesture {
+    // Basic gestures
     Tap { position: (f32, f32) },
     DoubleTap { position: (f32, f32) },
-    LongPress { position: (f32, f32) },
-    Pan { delta: (f32, f32) },
-    Pinch { scale: f32, center: (f32, f32) },
-    Rotate { angle: f32, center: (f32, f32) },
-    Swipe { direction: SwipeDirection, velocity: f32 },
+    TripleTap { position: (f32, f32) },
+    LongPress { position: (f32, f32), duration: f32 },
+    
+    // Movement gestures
+    Pan { delta: (f32, f32), velocity: (f32, f32) },
+    Swipe { direction: SwipeDirection, velocity: f32, distance: f32 },
+    Fling { velocity: (f32, f32), acceleration: (f32, f32) },
+    
+    // Multi-touch gestures
+    Pinch { scale: f32, center: (f32, f32), velocity: f32 },
+    Rotate { angle: f32, center: (f32, f32), angular_velocity: f32 },
+    TwoFingerPan { delta: (f32, f32), center: (f32, f32) },
+    ThreeFingerSwipe { direction: SwipeDirection },
+    FourFingerSwipe { direction: SwipeDirection },
+    
+    // Advanced gestures
+    ZigZag { points: Vec<(f32, f32)>, frequency: f32 },
+    Circle { center: (f32, f32), radius: f32, clockwise: bool },
+    Rectangle { corners: [(f32, f32); 4] },
+    Line { start: (f32, f32), end: (f32, f32), straightness: f32 },
+    
+    // Compound gestures
+    PinchAndRotate { scale: f32, angle: f32, center: (f32, f32) },
+    PanAndPinch { pan_delta: (f32, f32), scale: f32, center: (f32, f32) },
+    
+    // Mouse-specific gestures
+    Scroll { delta: (f32, f32), modifiers: KeyboardModifiers },
+    RightClick { position: (f32, f32) },
+    MiddleClick { position: (f32, f32) },
+    MouseDrag { start: (f32, f32), current: (f32, f32), button: MouseButton },
 }
 
 /// Swipe directions

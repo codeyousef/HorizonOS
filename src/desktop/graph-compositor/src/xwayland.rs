@@ -57,71 +57,33 @@ impl XWaylandManager {
 
         info!("Initializing XWayland...");
 
-        // Create XWayland instance
-        let (xwayland, channel) = XWayland::new(display, loop_handle.clone());
-        
-        // Start XWayland
-        match xwayland.start(
-            loop_handle.clone(),
-            None, // No specific display number
-            |display_number| {
-                info!("XWayland starting on display :{}", display_number);
-                std::env::set_var("DISPLAY", format!(":{}", display_number));
-                
-                // Start window manager process
-                std::process::Command::new("Xwayland")
-                    .arg(format!(":{}", display_number))
-                    .arg("-rootless")
-                    .arg("-terminate")
-                    .arg("-listen")
-                    .arg("4")
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .ok()
-            },
+        // Create XWayland instance using Smithay 0.7 API
+        match XWayland::spawn(
+            display,
+            None, // display number
+            Vec::<(String, String)>::new(), // environment variables
+            true, // client_fd
+            Stdio::null(), // stdout
+            Stdio::null(), // stderr
+            |_user_data| {}, // user data closure
         ) {
-            Ok(display_number) => {
-                self.display_number = display_number;
+            Ok((xwayland, _client)) => {
+                info!("XWayland spawned successfully");
                 self.xwayland = Some(xwayland);
-                info!("XWayland started on display :{}", display_number);
-                
-                // Set up event handling
-                self.setup_event_handling(loop_handle, channel)?;
-                
-                Ok(())
+                info!("XWayland initialized successfully");
             }
             Err(e) => {
-                error!("Failed to start XWayland: {}", e);
-                Err(Box::new(e))
+                error!("Failed to spawn XWayland: {}", e);
+                return Err(Box::new(e));
             }
         }
+        
+        Ok(())
     }
 
-    /// Set up XWayland event handling
-    fn setup_event_handling(
-        &mut self,
-        loop_handle: &smithay::reexports::calloop::LoopHandle<'static, crate::state::AppState>,
-        channel: smithay::reexports::calloop::channel::Channel<XWaylandEvent>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let x11_to_wayland = self.x11_to_wayland.clone();
-        let wayland_to_x11 = self.wayland_to_x11.clone();
-
-        loop_handle
-            .insert_source(channel, move |event, _, state| {
-                match event {
-                    smithay::reexports::calloop::channel::Event::Msg(msg) => {
-                        handle_xwayland_event(msg, state, &x11_to_wayland, &wayland_to_x11);
-                    }
-                    smithay::reexports::calloop::channel::Event::Closed => {
-                        warn!("XWayland channel closed");
-                    }
-                }
-            })
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-        Ok(())
+    /// Get X11 window manager
+    pub fn x11_wm(&mut self) -> Option<&mut X11Wm> {
+        self.x11_wm.as_mut()
     }
 
     /// Handle X11 surface creation
@@ -177,14 +139,14 @@ impl XWaylandManager {
         debug!("X11 window {} property changed: {:?}", window_id, property);
 
         match property {
-            WmWindowProperty::Title(title) => {
-                info!("X11 window {} title: {:?}", window_id, title);
+            WmWindowProperty::Title => {
+                info!("X11 window {} title changed", window_id);
             }
-            WmWindowProperty::Class(class) => {
-                info!("X11 window {} class: {:?}", window_id, class);
+            WmWindowProperty::Class => {
+                info!("X11 window {} class changed", window_id);
             }
-            WmWindowProperty::WindowType(window_type) => {
-                info!("X11 window {} type: {:?}", window_id, window_type);
+            WmWindowProperty::WindowType => {
+                info!("X11 window {} type changed", window_id);
             }
             _ => {}
         }
@@ -193,35 +155,37 @@ impl XWaylandManager {
     /// Handle X11 configure request
     pub fn handle_configure_request(
         &mut self,
-        window_id: u32,
+        surface: &X11Surface,
         x: Option<i32>,
         y: Option<i32>,
         width: Option<u32>,
         height: Option<u32>,
-        reorder: Option<Reorder>,
+        _reorder: Option<Reorder>,
     ) {
+        let window_id = surface.window_id();
         debug!(
-            "X11 configure request for window {}: pos=({:?}, {:?}), size=({:?}, {:?}), reorder={:?}",
-            window_id, x, y, width, height, reorder
+            "X11 configure request for window {}: pos=({:?}, {:?}), size=({:?}, {:?})",
+            window_id, x, y, width, height
         );
 
-        if let Some(x11_wm) = &mut self.x11_wm {
-            if let Some(surface) = x11_wm.surfaces().find(|s| s.window_id() == window_id) {
-                let current_geo = surface.geometry();
-                
-                let new_geo = Rectangle {
-                    loc: Point::from((
-                        x.unwrap_or(current_geo.loc.x),
-                        y.unwrap_or(current_geo.loc.y),
-                    )),
-                    size: Size::from((
-                        width.map(|w| w as i32).unwrap_or(current_geo.size.w),
-                        height.map(|h| h as i32).unwrap_or(current_geo.size.h),
-                    )),
-                };
+        // Create the geometry based on the request
+        let loc = Point::from((
+            x.unwrap_or(surface.geometry().loc.x),
+            y.unwrap_or(surface.geometry().loc.y),
+        ));
+        
+        let size = Size::from((
+            width.unwrap_or(surface.geometry().size.w as u32) as i32,
+            height.unwrap_or(surface.geometry().size.h as u32) as i32,
+        ));
 
-                let _ = surface.configure(new_geo);
-            }
+        let new_geometry = Rectangle::new(loc, size);
+        
+        // Configure the X11 surface
+        if let Err(e) = surface.configure(new_geometry) {
+            warn!("Failed to configure X11 surface {}: {}", window_id, e);
+        } else {
+            debug!("Configured X11 surface {} to {:?}", window_id, new_geometry);
         }
     }
 
@@ -253,23 +217,16 @@ impl XWaylandManager {
     }
 }
 
-/// Handle XWayland events
-fn handle_xwayland_event(
-    event: XWaylandEvent,
-    state: &mut crate::state::AppState,
-    x11_to_wayland: &Arc<Mutex<HashMap<u32, WlSurface>>>,
-    wayland_to_x11: &Arc<Mutex<HashMap<WlSurface, u32>>>,
-) {
-    match event {
-        XWaylandEvent::Ready { x11_wm, xwm_id } => {
-            info!("XWayland ready with XWM id: {:?}", xwm_id);
-            // Store the X11 window manager reference
-            // state.xwayland_manager.x11_wm = Some(x11_wm);
-        }
-        XWaylandEvent::Error => {
-            error!("XWayland error occurred");
-        }
-    }
+/// Handle XWayland events - simplified for basic functionality
+pub fn handle_xwayland_ready(state: &mut crate::state::AppState, display_number: u32) {
+    info!("XWayland ready on display {}", display_number);
+    
+    // Set DISPLAY environment variable for applications
+    std::env::set_var("DISPLAY", format!(":{}", display_number));
+    
+    // Store the display number
+    state.xwayland_manager.display_number = display_number;
+    info!("XWayland setup complete, ready for X11 applications");
 }
 
 /// X11 window state for graph nodes
@@ -296,7 +253,7 @@ impl X11WindowNode {
             window_id,
             title: None,
             class: None,
-            geometry: Rectangle::from_loc_and_size((0, 0), (800, 600)),
+            geometry: Rectangle::new(Point::from((0, 0)), Size::from((800, 600))),
             mapped: false,
             override_redirect: false,
         }
@@ -304,8 +261,8 @@ impl X11WindowNode {
 
     /// Update window properties from X11 surface
     pub fn update_from_surface(&mut self, surface: &X11Surface) {
-        self.title = surface.title();
-        self.class = surface.class();
+        self.title = Some(surface.title());
+        self.class = Some(surface.class());
         self.geometry = surface.geometry();
         self.mapped = surface.is_mapped();
         self.override_redirect = surface.is_override_redirect();

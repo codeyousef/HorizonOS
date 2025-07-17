@@ -1,7 +1,7 @@
 //! System node implementation
 
 use crate::{GraphNode, BaseNode, NodeVisualData, NodeAction, NodeActionResult, NodeActionType, NodeError, NodeExportData};
-use horizonos_graph_engine::{SceneNode, NodeType, SystemStatus, SceneId, Position, Vec3};
+use horizonos_graph_engine::{SceneNode, NodeType, NodeMetadata, SystemStatus, SceneId, Position, Vec3};
 
 #[derive(Debug, Clone)]
 pub struct SystemNode {
@@ -20,6 +20,13 @@ impl GraphNode for SystemNode {
     fn id(&self) -> SceneId { self.base.id }
     fn display_name(&self) -> String { "System".to_string() }
     fn description(&self) -> Option<String> { Some("System node".to_string()) }
+    fn node_type(&self) -> NodeType {
+        NodeType::System {
+            component: "Generic System".to_string(),
+            status: SystemStatus::Running,
+        }
+    }
+    fn metadata(&self) -> NodeMetadata { self.base.metadata.clone() }
     fn visual_data(&self) -> NodeVisualData { self.base.visual_data.clone() }
     fn update(&mut self, _delta_time: f32) -> Result<(), NodeError> { Ok(()) }
     fn handle_action(&mut self, action: NodeAction) -> Result<NodeActionResult, NodeError> {

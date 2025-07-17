@@ -1,0 +1,25 @@
+[package]
+name = "horizonos-graph-notifications"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+horizonos-graph-engine = { path = "../graph-engine" }
+horizonos-graph-nodes = { path = "../graph-nodes" }
+horizonos-graph-visual = { path = "../graph-visual" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.35", features = ["full"] }
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+anyhow = "1.0"
+thiserror = "1.0"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+nalgebra = "0.32"
+crossbeam-channel = "0.5"
+notify-rust = "4.10"
+zbus = { version = "3.14", features = ["tokio"] }
+zvariant = "3.15"
+
+smithay = { workspace = true }

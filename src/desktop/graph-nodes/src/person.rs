@@ -1,7 +1,7 @@
 //! Person/Contact node implementation
 
 use crate::{GraphNode, BaseNode, NodeVisualData, NodeAction, NodeActionResult, NodeActionType, NodeError, NodeExportData};
-use horizonos_graph_engine::{SceneNode, NodeType, ContactInfo, SceneId, Position, Vec3};
+use horizonos_graph_engine::{SceneNode, NodeType, NodeMetadata, ContactInfo, SceneId, Position, Vec3};
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 
@@ -57,6 +57,17 @@ impl GraphNode for PersonNode {
     fn description(&self) -> Option<String> { 
         Some(format!("Contact: {}", self.person_data.name))
     }
+    fn node_type(&self) -> NodeType {
+        NodeType::Person {
+            name: self.person_data.name.clone(),
+            contact_info: horizonos_graph_engine::ContactInfo {
+                email: self.person_data.email.clone(),
+                phone: self.person_data.phone.clone(),
+                social: std::collections::HashMap::new(),
+            },
+        }
+    }
+    fn metadata(&self) -> NodeMetadata { self.base.metadata.clone() }
     fn visual_data(&self) -> NodeVisualData { self.base.visual_data.clone() }
     fn update(&mut self, _delta_time: f32) -> Result<(), NodeError> { Ok(()) }
     fn handle_action(&mut self, action: NodeAction) -> Result<NodeActionResult, NodeError> {

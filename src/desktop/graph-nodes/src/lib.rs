@@ -3,7 +3,7 @@
 //! This module provides concrete implementations and management for all node types
 //! in the graph desktop environment.
 
-pub use horizonos_graph_engine::{SceneNode, NodeType, NodeMetadata, SceneId, EdgeType};
+pub use horizonos_graph_engine::{SceneNode, NodeType, NodeMetadata, SceneId, EdgeType, SystemStatus};
 
 pub mod application;
 pub mod file;
@@ -46,6 +46,25 @@ pub trait GraphNode: Send + Sync {
     
     /// Get a description of this node
     fn description(&self) -> Option<String>;
+    
+    /// Get the node type - default implementation returns a generic type
+    fn node_type(&self) -> NodeType {
+        NodeType::System { 
+            component: "generic".to_string(), 
+            status: SystemStatus::Running 
+        }
+    }
+    
+    /// Get the node metadata - default implementation returns empty metadata
+    fn metadata(&self) -> NodeMetadata {
+        NodeMetadata {
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            description: self.description(),
+            tags: vec![],
+            properties: std::collections::HashMap::new(),
+        }
+    }
     
     /// Get the visual representation data
     fn visual_data(&self) -> NodeVisualData;

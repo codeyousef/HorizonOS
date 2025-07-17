@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use anyhow::{Result, Context};
-use image::{DynamicImage, ImageFormat};
+use image::DynamicImage;
 use tokio::fs;
-use log::{debug, warn};
+use log::debug;
 use dirs;
 
 /// Icon sizes supported by the system

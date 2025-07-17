@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::{Result, Context};
 use tokio::fs;
 
-use crate::GraphDesktopConfig;
+use crate::{GraphDesktopConfig, kotlindsl::KotlinDslLoader};
 
 /// Configuration loader
 #[derive(Clone)]
@@ -22,16 +22,23 @@ impl ConfigLoader {
                 ConfigFormat::Toml,
                 ConfigFormat::Json,
                 ConfigFormat::Yaml,
+                ConfigFormat::KotlinDsl,
             ],
         }
     }
     
     /// Load configuration from file
     pub async fn load_config(&self, path: &Path) -> Result<GraphDesktopConfig> {
+        let format = self.detect_format(path)?;
+        
+        // Handle Kotlin DSL separately as it loads from JSON output
+        if matches!(format, ConfigFormat::KotlinDsl) {
+            return KotlinDslLoader::load_and_convert(path).await;
+        }
+        
         let content = fs::read_to_string(path).await
             .context("Failed to read configuration file")?;
         
-        let format = self.detect_format(path)?;
         self.parse_config(&content, format)
     }
     
@@ -118,7 +125,14 @@ impl ConfigLoader {
         
         match ext.to_lowercase().as_str() {
             "toml" => Ok(ConfigFormat::Toml),
-            "json" => Ok(ConfigFormat::Json),
+            "json" => {
+                // Check if this is Kotlin DSL output by looking for specific markers
+                if path.to_string_lossy().contains("kotlin") || path.to_string_lossy().contains("dsl") {
+                    Ok(ConfigFormat::KotlinDsl)
+                } else {
+                    Ok(ConfigFormat::Json)
+                }
+            },
             "yaml" | "yml" => Ok(ConfigFormat::Yaml),
             _ => Err(anyhow::anyhow!("Unsupported configuration format: {}", ext)),
         }
@@ -139,6 +153,10 @@ impl ConfigLoader {
                 serde_yaml::from_str(content)
                     .context("Failed to parse YAML configuration")
             }
+            ConfigFormat::KotlinDsl => {
+                // This shouldn't be reached as KotlinDsl is handled separately
+                Err(anyhow::anyhow!("Kotlin DSL format should be loaded directly"))
+            }
         }
     }
     
@@ -156,6 +174,10 @@ impl ConfigLoader {
             ConfigFormat::Yaml => {
                 serde_yaml::to_string(config)
                     .context("Failed to serialize configuration to YAML")
+            }
+            ConfigFormat::KotlinDsl => {
+                // Kotlin DSL is input-only format
+                Err(anyhow::anyhow!("Cannot serialize to Kotlin DSL format"))
             }
         }
     }
@@ -196,6 +218,7 @@ enum ConfigFormat {
     Toml,
     Json,
     Yaml,
+    KotlinDsl,
 }
 
 /// Partial configuration for merging

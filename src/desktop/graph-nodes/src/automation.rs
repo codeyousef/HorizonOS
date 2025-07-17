@@ -4,11 +4,11 @@ use crate::{
     GraphNode, NodeVisualData, NodeAction, NodeActionResult, NodeActionType, NodeError, NodeExportData
 };
 use horizonos_graph_engine::{SceneNode, SceneId, NodeMetadata};
-use horizonos_graph_engine::scene::{NodeType, AutomationType, AutomationStatus, Vec3};
+use horizonos_graph_engine::scene::{NodeType, AutomationType, AutomationStatus};
 use nalgebra::Vector3;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc};
 
 /// Automation node representing scripts, workflows, and automated processes
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -461,6 +461,18 @@ impl GraphNode for AutomationNode {
     
     fn description(&self) -> Option<String> {
         Some(format!("{:?} automation ({})", self.automation_type, self.status_display()))
+    }
+    
+    fn node_type(&self) -> NodeType {
+        NodeType::Automation {
+            name: self.name.clone(),
+            automation_type: self.automation_type.clone(),
+            status: self.status.clone(),
+        }
+    }
+    
+    fn metadata(&self) -> NodeMetadata {
+        self.metadata.clone()
     }
     
     fn visual_data(&self) -> NodeVisualData {

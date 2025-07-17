@@ -33,4 +33,16 @@ pub enum GraphEngineError {
     
     #[error("System error: {0}")]
     System(String),
+    
+    #[error("Node not found: {0}")]
+    NodeNotFound(crate::SceneId),
+    
+    #[error("Thread pool error: {0}")]
+    ThreadPoolError(String),
+    
+    #[error("Scheduler shutdown")]
+    SchedulerShutdown,
+    
+    #[error("Lock error: {0}")]
+    LockError(String),
 }

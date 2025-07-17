@@ -1,7 +1,7 @@
 //! File node implementation
 
 use crate::{GraphNode, BaseNode, NodeVisualData, NodeAction, NodeActionResult, NodeActionType, NodeError, NodeExportData};
-use horizonos_graph_engine::{SceneNode, NodeType, FileType, SceneId, Position, Vec3};
+use horizonos_graph_engine::{SceneNode, NodeType, NodeMetadata, FileType, SceneId, Position, Vec3};
 use serde::{Serialize, Deserialize};
 use std::path::{Path, PathBuf};
 use std::fs;
@@ -290,6 +290,17 @@ impl GraphNode for FileNode {
             self.file_size_human(),
             self.file_data.last_modified.format("%Y-%m-%d %H:%M")
         ))
+    }
+    
+    fn node_type(&self) -> NodeType {
+        NodeType::File {
+            path: self.file_data.path.to_string_lossy().to_string(),
+            file_type: self.file_data.file_type.clone(),
+        }
+    }
+    
+    fn metadata(&self) -> NodeMetadata {
+        self.base.metadata.clone()
     }
     
     fn visual_data(&self) -> NodeVisualData {

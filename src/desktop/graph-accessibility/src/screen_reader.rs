@@ -512,14 +512,16 @@ impl ScreenReaderInterface {
             properties: SpeechProperties::default(),
         };
 
-        let mut queue = self.reading_queue.lock().unwrap();
-        
-        // Insert based on priority
-        let insert_pos = queue.iter()
-            .position(|item| item.priority < priority)
-            .unwrap_or(queue.len());
-        
-        queue.insert(insert_pos, speech_item);
+        {
+            let mut queue = self.reading_queue.lock().unwrap();
+            
+            // Insert based on priority
+            let insert_pos = queue.iter()
+                .position(|item| item.priority < priority)
+                .unwrap_or(queue.len());
+            
+            queue.insert(insert_pos, speech_item);
+        }
 
         // Start speaking if not already
         if !self.state.speaking {

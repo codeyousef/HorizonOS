@@ -437,6 +437,26 @@ impl GraphNode for ConfigGroupNode {
         self.description.clone()
     }
     
+    fn node_type(&self) -> NodeType {
+        NodeType::ConfigGroup {
+            name: self.name.clone(),
+            config_type: self.config_type.clone(),
+            items: self.items.clone(),
+        }
+    }
+    
+    fn metadata(&self) -> NodeMetadata {
+        let properties: HashMap<String, String> = self.node_metadata.clone();
+        
+        NodeMetadata {
+            created_at: chrono::Utc::now(),
+            updated_at: self.last_modified.unwrap_or_else(|| chrono::Utc::now()),
+            description: self.description.clone(),
+            tags: self.tags.clone(),
+            properties,
+        }
+    }
+    
     fn visual_data(&self) -> NodeVisualData {
         self.visual_data.clone()
     }

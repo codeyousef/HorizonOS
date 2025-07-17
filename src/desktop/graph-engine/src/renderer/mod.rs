@@ -3,6 +3,8 @@
 pub mod shaders;
 pub mod primitives;
 pub mod pipelines;
+pub mod lod;
+pub mod edge_content;
 
 use crate::{Scene, Camera, GraphEngineError};
 use std::sync::Arc;
@@ -23,13 +25,20 @@ pub struct Renderer {
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
     
+    // LOD system
+    lod_manager: lod::LodManager,
+    
+    // Edge content analysis
+    edge_content_analyzer: edge_content::EdgeContentAnalyzer,
+    
     // Performance monitoring
     frame_count: u64,
     last_frame_time: std::time::Instant,
 }
 
-// Re-export pipelines
+// Re-export pipelines and LOD
 pub use pipelines::{NodePipeline, EdgePipeline};
+pub use lod::{LodManager, LodConfig, LodLevel, LodStatistics};
 
 impl Renderer {
     /// Create a new renderer
@@ -71,6 +80,13 @@ impl Renderer {
         let node_pipeline = pipelines::NodePipeline::new(&device, surface_format).await?;
         let edge_pipeline = pipelines::EdgePipeline::new(&device, surface_format).await?;
         
+        // Create LOD manager
+        let lod_config = lod::LodConfig::default();
+        let lod_manager = lod::LodManager::new(&device, lod_config)?;
+        
+        // Create edge content analyzer
+        let edge_content_analyzer = edge_content::EdgeContentAnalyzer::new(device.clone())?;
+        
         Ok(Renderer {
             device,
             queue,
@@ -79,13 +95,16 @@ impl Renderer {
             edge_pipeline,
             depth_texture,
             depth_view,
+            lod_manager,
+            edge_content_analyzer,
             frame_count: 0,
             last_frame_time: std::time::Instant::now(),
         })
     }
     
-    /// Render a frame
+    /// Render a frame with LOD optimization
     pub fn render(&mut self, surface: &Surface, scene: &Scene, camera: &Camera) -> Result<(), GraphEngineError> {
+        let frame_start = std::time::Instant::now();
         let output = surface
             .get_current_texture()
             .map_err(|e| GraphEngineError::RenderError(format!("Surface error: {:?}", e)))?;
@@ -127,6 +146,9 @@ impl Renderer {
             // Render edges first (behind nodes)
             self.edge_pipeline.render(&mut render_pass, &self.queue, scene, camera)?;
             
+            // Analyze edge content for semantic relationships
+            self.edge_content_analyzer.analyze_edges(scene, camera)?;
+            
             // Render nodes
             self.node_pipeline.render(&mut render_pass, &self.queue, scene, camera)?;
         }
@@ -134,11 +156,18 @@ impl Renderer {
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
         
-        // Update performance counters
+        // Update performance counters and LOD system
         self.frame_count += 1;
         let now = std::time::Instant::now();
+        let frame_time = frame_start.elapsed().as_secs_f32() * 1000.0; // Convert to milliseconds
+        
+        self.lod_manager.update_performance(frame_time);
+        
         if now.duration_since(self.last_frame_time).as_secs() >= 1 {
-            log::debug!("FPS: {}", self.frame_count);
+            let stats = self.lod_manager.get_statistics();
+            log::debug!("FPS: {}, LOD Stats: High:{} Med:{} Low:{} Culled:{}, Perf:{:.2}", 
+                       self.frame_count, stats.high_count, stats.medium_count, 
+                       stats.low_count, stats.culled_count, stats.performance_scaling);
             self.frame_count = 0;
             self.last_frame_time = now;
         }
@@ -189,5 +218,45 @@ impl Renderer {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         
         (texture, view)
+    }
+    
+    /// Get LOD statistics
+    pub fn get_lod_statistics(&self) -> lod::LodStatistics {
+        self.lod_manager.get_statistics()
+    }
+    
+    /// Update LOD configuration
+    pub fn update_lod_config(&mut self, config: lod::LodConfig) {
+        self.lod_manager.update_config(config);
+    }
+    
+    /// Get LOD level for a node position
+    pub fn get_node_lod(&self, node_position: nalgebra::Point3<f32>, camera: &Camera) -> lod::LodLevel {
+        self.lod_manager.calculate_node_lod(node_position, camera)
+    }
+    
+    /// Get LOD level for an edge
+    pub fn get_edge_lod(&self, start_pos: nalgebra::Point3<f32>, end_pos: nalgebra::Point3<f32>, camera: &Camera) -> lod::LodLevel {
+        self.lod_manager.calculate_edge_lod(start_pos, end_pos, camera)
+    }
+    
+    /// Clear LOD cache
+    pub fn clear_lod_cache(&mut self) {
+        self.lod_manager.clear_cache();
+    }
+    
+    /// Get edge content analysis results
+    pub fn get_edge_content_analysis(&self) -> edge_content::EdgeContentAnalysis {
+        self.edge_content_analyzer.get_analysis()
+    }
+    
+    /// Get semantic relationship strength for an edge
+    pub fn get_edge_semantic_strength(&self, edge_id: crate::SceneId) -> f32 {
+        self.edge_content_analyzer.get_semantic_strength(edge_id)
+    }
+    
+    /// Update edge content analysis settings
+    pub fn update_edge_content_config(&mut self, config: edge_content::EdgeContentConfig) {
+        self.edge_content_analyzer.update_config(config);
     }
 }

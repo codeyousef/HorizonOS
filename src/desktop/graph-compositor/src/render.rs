@@ -10,7 +10,7 @@ use smithay::{
     },
     desktop::Window,
     output::Output,
-    utils::{Rectangle, Transform, Physical, Scale, Logical},
+    utils::{Rectangle, Transform, Physical, Scale, Logical, Point, Size},
 };
 use crate::AppState;
 use horizonos_graph_engine::{Scene, Camera};
@@ -36,7 +36,7 @@ impl GraphRenderIntegration {
         age: usize,
     ) -> Result<()> {
         let output_geometry = state.space.output_geometry(output)
-            .unwrap_or(Rectangle::from_loc_and_size((0, 0), (1920, 1080)));
+            .unwrap_or(Rectangle::from_loc_and_size(Point::from((0, 0)), Size::from((1920, 1080))));
         
         // Convert to physical coordinates
         let scale = Scale::from(output.current_scale().fractional_scale());

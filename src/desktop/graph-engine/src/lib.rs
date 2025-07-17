@@ -8,12 +8,14 @@ pub mod physics;
 pub mod camera;
 pub mod scene;
 pub mod error;
+pub mod layout;
 
 pub use renderer::*;
 pub use physics::*;
 pub use camera::*;
 pub use scene::*;
 pub use error::*;
+pub use layout::*;
 
 use std::sync::Arc;
 use wgpu::{Device, Queue, Surface};
@@ -22,8 +24,10 @@ use winit::window::Window;
 /// Main graph engine that coordinates rendering, physics, and scene management
 pub struct GraphEngine {
     /// WebGPU device for GPU operations
+    #[allow(dead_code)]
     device: Arc<Device>,
     /// Command queue for GPU commands
+    #[allow(dead_code)]
     queue: Arc<Queue>,
     /// Window surface for rendering
     surface: Surface<'static>,

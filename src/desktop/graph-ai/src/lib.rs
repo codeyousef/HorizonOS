@@ -367,7 +367,10 @@ pub enum AIError {
     PatternDetection(String),
     
     #[error("Suggestion error: {0}")]
-    Suggestion(String),
+    SuggestionError(String),
+    
+    #[error("Unsupported operation: {0}")]
+    UnsupportedOperation(String),
     
     #[error("Configuration error: {0}")]
     Configuration(String),

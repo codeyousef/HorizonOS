@@ -13,11 +13,14 @@ pub mod layout;
 pub mod persistence;
 pub mod rules;
 pub mod templates;
+pub mod collaboration;
 
 use layout::WorkspaceLayout;
 use persistence::WorkspacePersistence;
 use rules::WorkspaceRules;
 use templates::WorkspaceTemplate;
+use collaboration::CollaborationManager;
+pub use collaboration::{CollaborationEvent, SharedWorkspace, User, UserStatus};
 
 /// Workspace manager for organizing graph desktop sessions
 pub struct WorkspaceManager {
@@ -31,6 +34,8 @@ pub struct WorkspaceManager {
     persistence: WorkspacePersistence,
     /// Workspace rules engine
     rules: WorkspaceRules,
+    /// Collaboration manager
+    collaboration: CollaborationManager,
 }
 
 impl WorkspaceManager {
@@ -44,6 +49,7 @@ impl WorkspaceManager {
             event_sender,
             persistence: WorkspacePersistence::new(),
             rules: WorkspaceRules::new(),
+            collaboration: CollaborationManager::new(),
         }
     }
     
@@ -67,6 +73,9 @@ impl WorkspaceManager {
         if let Some(first_id) = workspaces.keys().next().cloned() {
             *self.active_workspace.write().unwrap() = Some(first_id);
         }
+        
+        // Initialize collaboration manager
+        self.collaboration.initialize().await?;
         
         Ok(())
     }
@@ -220,6 +229,70 @@ impl WorkspaceManager {
             Err(WorkspaceError::NotFound(workspace_id.to_string()))
         }
     }
+    
+    // Collaboration methods
+    
+    /// Share a workspace for collaboration
+    pub async fn share_workspace(
+        &self,
+        workspace_id: &str,
+        owner_id: String,
+        permissions: collaboration::WorkspacePermissions,
+    ) -> Result<String, WorkspaceError> {
+        let workspaces = self.workspaces.read().unwrap();
+        let workspace = workspaces.get(workspace_id)
+            .ok_or_else(|| WorkspaceError::NotFound(workspace_id.to_string()))?;
+        
+        self.collaboration.create_shared_workspace(
+            workspace.clone(),
+            owner_id,
+            permissions,
+        ).await
+    }
+    
+    /// Join a shared workspace
+    pub async fn join_shared_workspace(
+        &self,
+        workspace_id: &str,
+        user_id: &str,
+        invitation_code: Option<String>,
+    ) -> Result<collaboration::CollaborationSession, WorkspaceError> {
+        self.collaboration.join_workspace(workspace_id, user_id, invitation_code).await
+    }
+    
+    /// Leave a shared workspace
+    pub async fn leave_shared_workspace(
+        &self,
+        workspace_id: &str,
+        user_id: &str,
+    ) -> Result<(), WorkspaceError> {
+        self.collaboration.leave_workspace(workspace_id, user_id).await
+    }
+    
+    /// Get shared workspace information
+    pub fn get_shared_workspace(&self, workspace_id: &str) -> Option<SharedWorkspace> {
+        self.collaboration.get_shared_workspace(workspace_id)
+    }
+    
+    /// List shared workspaces for a user
+    pub fn list_shared_workspaces(&self, user_id: &str) -> Vec<SharedWorkspace> {
+        self.collaboration.list_shared_workspaces(user_id)
+    }
+    
+    /// Register a user for collaboration
+    pub fn register_user(&self, user: User) -> Result<(), WorkspaceError> {
+        self.collaboration.register_user(user)
+    }
+    
+    /// Subscribe to collaboration events
+    pub fn subscribe_collaboration(&self) -> broadcast::Receiver<CollaborationEvent> {
+        self.collaboration.subscribe()
+    }
+    
+    /// Get collaboration manager reference
+    pub fn collaboration(&self) -> &CollaborationManager {
+        &self.collaboration
+    }
 }
 
 /// Individual workspace
@@ -342,6 +415,12 @@ pub enum WorkspaceError {
     
     #[error("Cannot delete the last workspace")]
     CannotDeleteLast,
+    
+    #[error("Access denied")]
+    AccessDenied,
+    
+    #[error("Invalid template")]
+    InvalidTemplate,
     
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),

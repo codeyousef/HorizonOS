@@ -147,6 +147,12 @@ pub enum AccessibleRole {
     GraphEdge,
     /// Custom role
     Custom(String),
+    /// Generic object for complex nodes
+    GenericObject,
+    /// Check box control
+    CheckBox,
+    /// Document role
+    Document,
 }
 
 /// Accessible states
@@ -436,11 +442,17 @@ impl AccessibilityManager {
         // Determine accessible role based on node type
         let role = match node_type {
             horizonos_graph_nodes::NodeType::Application { .. } => AccessibleRole::Application,
-            horizonos_graph_nodes::NodeType::File { .. } => AccessibleRole::Button,
-            horizonos_graph_nodes::NodeType::Directory { .. } => AccessibleRole::TreeItem,
-            horizonos_graph_nodes::NodeType::Process { .. } => AccessibleRole::ListItem,
-            horizonos_graph_nodes::NodeType::Network { .. } => AccessibleRole::GraphNode,
-            _ => AccessibleRole::GraphNode,
+            horizonos_graph_nodes::NodeType::File { .. } => AccessibleRole::Document,
+            horizonos_graph_nodes::NodeType::Person { .. } => AccessibleRole::ListItem,
+            horizonos_graph_nodes::NodeType::Task { .. } => AccessibleRole::CheckBox,
+            horizonos_graph_nodes::NodeType::Device { .. } => AccessibleRole::ListItem,
+            horizonos_graph_nodes::NodeType::AIAgent { .. } => AccessibleRole::GenericObject,
+            horizonos_graph_nodes::NodeType::System { .. } => AccessibleRole::ListItem,
+            horizonos_graph_nodes::NodeType::URL { .. } => AccessibleRole::Link,
+            horizonos_graph_nodes::NodeType::Automation { .. } => AccessibleRole::ListItem,
+            horizonos_graph_nodes::NodeType::Setting { .. } => AccessibleRole::CheckBox,
+            horizonos_graph_nodes::NodeType::ConfigGroup { .. } => AccessibleRole::TreeItem,
+            horizonos_graph_nodes::NodeType::Concept { .. } => AccessibleRole::GenericObject,
         };
 
         // Create name from node type and metadata

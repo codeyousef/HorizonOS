@@ -1,7 +1,7 @@
 //! Application node implementation
 
 use crate::{GraphNode, BaseNode, NodeVisualData, NodeAction, NodeActionResult, NodeActionType, NodeError, NodeExportData};
-use horizonos_graph_engine::{SceneNode, NodeType, SceneId, Position, Vec3};
+use horizonos_graph_engine::{SceneNode, NodeType, NodeMetadata, SceneId, Position, Vec3};
 use serde::{Serialize, Deserialize};
 use std::process::Command;
 
@@ -11,6 +11,7 @@ pub struct ApplicationNode {
     base: BaseNode,
     app_data: ApplicationData,
     process: Option<u32>, // PID
+    #[allow(dead_code)]
     window_id: Option<String>,
     is_running: bool,
 }
@@ -242,6 +243,17 @@ impl GraphNode for ApplicationNode {
             self.app_data.memory_usage / 1024 / 1024,
             self.app_data.category
         ))
+    }
+    
+    fn node_type(&self) -> NodeType {
+        NodeType::Application {
+            pid: self.process.unwrap_or(0),
+            name: self.app_data.name.clone(),
+        }
+    }
+    
+    fn metadata(&self) -> NodeMetadata {
+        self.base.metadata.clone()
     }
     
     fn visual_data(&self) -> NodeVisualData {

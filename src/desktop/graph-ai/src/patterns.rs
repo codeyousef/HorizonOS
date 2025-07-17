@@ -167,13 +167,15 @@ impl PatternDetector {
                         id: uuid::Uuid::new_v4().to_string(),
                         pattern_type: PatternType::AppLaunch,
                         confidence: (count as f32 / actions.len() as f32).min(1.0),
-                        occurrences: count,
+                        occurrence_count: count,
                         data: PatternData::AppLaunch {
                             app_name: parts[0].to_string(),
                             time_of_day: parts[1].to_string(),
+                            day_of_week: None,
                         },
                         first_seen: Utc::now(),
                         last_seen: Utc::now(),
+                        enabled: true,
                     });
                 }
             }

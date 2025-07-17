@@ -120,6 +120,29 @@ impl UrlNode {
         
         params
     }
+
+    /// Get URL type based on the URL content
+    pub fn get_url_type(&self) -> UrlType {
+        if let Some(domain) = self.get_domain() {
+            if domain.contains("github.com") || domain.contains("gitlab.com") || domain.contains("bitbucket.org") {
+                UrlType::Repository
+            } else if domain.contains("youtube.com") || domain.contains("vimeo.com") || self.url.contains("video") {
+                UrlType::Media
+            } else if self.url.contains("image") || self.url.ends_with(".jpg") || self.url.ends_with(".png") || self.url.ends_with(".gif") {
+                UrlType::Media
+            } else if self.url.contains("doc") || self.url.ends_with(".pdf") || domain.contains("docs.") {
+                UrlType::Documentation
+            } else if domain.contains("reddit.com") || domain.contains("twitter.com") || domain.contains("facebook.com") {
+                UrlType::Social
+            } else if domain.contains("api.") || self.url.contains("/api/") {
+                UrlType::Api
+            } else {
+                UrlType::Website
+            }
+        } else {
+            UrlType::Website
+        }
+    }
 }
 
 impl GraphNode for UrlNode {
@@ -133,6 +156,18 @@ impl GraphNode for UrlNode {
     
     fn description(&self) -> Option<String> {
         Some(format!("URL: {}", self.url))
+    }
+    
+    fn node_type(&self) -> NodeType {
+        NodeType::URL {
+            url: self.url.clone(),
+            title: self.title.clone(),
+            url_type: self.get_url_type(),
+        }
+    }
+    
+    fn metadata(&self) -> NodeMetadata {
+        self.metadata.clone()
     }
     
     fn visual_data(&self) -> NodeVisualData {

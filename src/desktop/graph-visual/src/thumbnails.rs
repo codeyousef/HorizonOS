@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
-use anyhow::{Result, Context};
+use anyhow::Result;
 use image::{DynamicImage, ImageFormat};
 use tokio::fs;
 use tokio::process::Command;
 use sha2::{Sha256, Digest as Sha2Digest};
-use log::{debug, warn, error};
+use log::debug;
 
 /// Thumbnail sizes following XDG specification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -14,6 +14,7 @@ pub mod theme;
 pub mod loader;
 pub mod watcher;
 pub mod validation;
+pub mod kotlindsl;
 
 use theme::{Theme, ThemeManager};
 use loader::ConfigLoader;
@@ -56,17 +57,21 @@ impl ConfigManager {
     
     /// Initialize from configuration files
     pub async fn initialize(&mut self, config_dir: &Path) -> Result<()> {
-        // Load main configuration
-        let config_path = config_dir.join("graph-desktop.toml");
-        if config_path.exists() {
-            let config = self.loader.load_config(&config_path).await?;
-            
-            // Validate configuration
-            self.validator.validate(&config)?;
-            
-            *self.config.write().unwrap() = config;
-            self.change_tx.send(ConfigChangeEvent::ConfigReloaded)?;
-        }
+        // Try loading from different sources in order of preference
+        let config = if let Ok(config) = self.try_load_kotlin_dsl(config_dir).await {
+            config
+        } else if let Ok(config) = self.try_load_standard_config(config_dir).await {
+            config
+        } else {
+            log::warn!("No configuration found, using defaults");
+            GraphDesktopConfig::default()
+        };
+        
+        // Validate configuration
+        self.validator.validate(&config)?;
+        
+        *self.config.write().unwrap() = config;
+        self.change_tx.send(ConfigChangeEvent::ConfigReloaded)?;
         
         // Load themes
         let themes_dir = config_dir.join("themes");
@@ -78,6 +83,46 @@ impl ConfigManager {
         self.setup_watcher(config_dir)?;
         
         Ok(())
+    }
+    
+    /// Try to load Kotlin DSL compiled configuration
+    async fn try_load_kotlin_dsl(&self, config_dir: &Path) -> Result<GraphDesktopConfig> {
+        // Check common Kotlin DSL output locations
+        let possible_paths = vec![
+            config_dir.join("output/json/config.json"),
+            config_dir.join("kotlin-dsl/config.json"),
+            config_dir.join("dsl-output/config.json"),
+        ];
+        
+        for path in possible_paths {
+            if path.exists() {
+                log::info!("Found Kotlin DSL configuration at {:?}", path);
+                return self.loader.load_config(&path).await;
+            }
+        }
+        
+        Err(anyhow::anyhow!("No Kotlin DSL configuration found"))
+    }
+    
+    /// Try to load standard configuration files
+    async fn try_load_standard_config(&self, config_dir: &Path) -> Result<GraphDesktopConfig> {
+        let config_files = vec![
+            config_dir.join("graph-desktop.toml"),
+            config_dir.join("graph-desktop.json"),
+            config_dir.join("graph-desktop.yaml"),
+            config_dir.join("config.toml"),
+            config_dir.join("config.json"),
+            config_dir.join("config.yaml"),
+        ];
+        
+        for path in config_files {
+            if path.exists() {
+                log::info!("Found configuration at {:?}", path);
+                return self.loader.load_config(&path).await;
+            }
+        }
+        
+        Err(anyhow::anyhow!("No standard configuration found"))
     }
     
     /// Set up configuration file watcher

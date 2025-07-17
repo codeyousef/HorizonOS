@@ -713,6 +713,9 @@ impl AtSpiInterface {
             AccessibleRole::GraphNode => AtSpiRole::Icon,
             AccessibleRole::GraphEdge => AtSpiRole::Separator,
             AccessibleRole::Custom(_) => AtSpiRole::Unknown,
+            AccessibleRole::GenericObject => AtSpiRole::Unknown,
+            AccessibleRole::CheckBox => AtSpiRole::CheckBox,
+            AccessibleRole::Document => AtSpiRole::DocumentFrame,
         }
     }
 

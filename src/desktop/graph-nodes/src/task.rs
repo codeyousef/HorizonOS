@@ -1,7 +1,7 @@
 //! Task node implementation
 
 use crate::{GraphNode, BaseNode, NodeVisualData, NodeAction, NodeActionResult, NodeActionType, NodeError, NodeExportData};
-use horizonos_graph_engine::{SceneNode, NodeType, TaskStatus, SceneId, Position, Vec3};
+use horizonos_graph_engine::{SceneNode, NodeType, NodeMetadata, TaskStatus, SceneId, Position, Vec3};
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone)]
@@ -64,6 +64,13 @@ impl GraphNode for TaskNode {
     fn description(&self) -> Option<String> { 
         Some(format!("Task: {} - {:?}", self.task_data.title, self.task_data.status))
     }
+    fn node_type(&self) -> NodeType {
+        NodeType::Task {
+            title: self.task_data.title.clone(),
+            status: self.task_data.status.clone(),
+        }
+    }
+    fn metadata(&self) -> NodeMetadata { self.base.metadata.clone() }
     fn visual_data(&self) -> NodeVisualData { 
         let mut visual = self.base.visual_data.clone();
         visual.badge = match self.task_data.status {

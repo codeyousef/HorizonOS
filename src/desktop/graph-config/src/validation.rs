@@ -1,7 +1,7 @@
 //! Configuration validation system
 
 use std::collections::HashMap;
-use anyhow::{Result, Context};
+use anyhow::Result;
 
 use crate::GraphDesktopConfig;
 

@@ -301,9 +301,9 @@ impl KeyboardNavigator {
     ) -> Result<Option<NavigationAction>> {
         let key_combination = KeyCombination { key, modifiers };
         
-        if let Some(action) = self.key_bindings.get(&key_combination) {
+        if let Some(action) = self.key_bindings.get(&key_combination).cloned() {
             self.execute_navigation_action(action.clone(), node_cache)?;
-            return Ok(Some(action.clone()));
+            return Ok(Some(action));
         }
         
         Ok(None)

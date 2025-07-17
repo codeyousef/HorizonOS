@@ -10,17 +10,21 @@
 pub mod icons;
 pub mod thumbnails;
 pub mod effects;
+pub mod theme;
 
 use anyhow::Result;
 use std::sync::Arc;
 
 pub use icons::{IconLoader, IconSize, FileTypeIconMapper, AppIconExtractor};
 pub use thumbnails::{ThumbnailGenerator, ThumbnailSize, ProfilePictureGenerator};
+pub use theme::{Theme as NewTheme, ThemeSystem, ThemeObserver, Color};
 
 /// Visual resource manager
 pub struct VisualManager {
-    /// Current theme
+    /// Current theme (legacy)
     theme: Arc<Theme>,
+    /// New theme system
+    theme_system: Arc<ThemeSystem>,
 }
 
 /// Simple theme configuration
@@ -45,17 +49,28 @@ impl VisualManager {
     pub fn new() -> Result<Self> {
         Ok(Self {
             theme: Arc::new(Theme::default()),
+            theme_system: Arc::new(ThemeSystem::new()),
         })
     }
     
-    /// Get current theme
+    /// Get current theme (legacy)
     pub fn theme(&self) -> &Theme {
         &self.theme
     }
     
-    /// Set theme
+    /// Set theme (legacy)
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = Arc::new(theme);
+    }
+    
+    /// Get new theme system
+    pub fn theme_system(&self) -> &ThemeSystem {
+        &self.theme_system
+    }
+    
+    /// Get mutable theme system
+    pub fn theme_system_mut(&mut self) -> &mut ThemeSystem {
+        Arc::get_mut(&mut self.theme_system).unwrap()
     }
 }
 

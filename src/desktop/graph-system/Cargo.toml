@@ -10,18 +10,23 @@ log = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+nalgebra = { workspace = true }
+smithay = { workspace = true }
+futures = { workspace = true }
+futures-util = "0.3"
 
 # Graph components
 horizonos-graph-engine = { path = "../graph-engine" }
 horizonos-graph-nodes = { path = "../graph-nodes" }
 
-# D-Bus
+# D-Bus (updated for async compatibility)
 dbus = { version = "0.9", features = ["futures"] }
 dbus-tokio = "0.7"
+zbus = "3.14"
 
 # System integration
 notify-rust = "4.11"
-x11rb = { version = "0.13", features = ["async"] }
+x11rb = { version = "0.13", features = ["sync"] }
 
 # Desktop file parsing
 freedesktop_entry_parser = "1.3"

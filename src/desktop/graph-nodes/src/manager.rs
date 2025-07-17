@@ -35,8 +35,8 @@ impl NodeManager {
     }
     
     /// Get a node by ID
-    pub fn get_node(&self, id: SceneId) -> Option<Box<dyn GraphNode + Send + Sync>> {
-        let nodes = self.nodes.read().unwrap();
+    pub fn get_node(&self, _id: SceneId) -> Option<Box<dyn GraphNode + Send + Sync>> {
+        let _nodes = self.nodes.read().unwrap();
         // This is a simplified version - in reality we'd need more complex cloning
         None // Placeholder
     }
@@ -68,10 +68,10 @@ impl NodeManager {
     }
     
     /// Sync nodes to scene for rendering
-    pub fn sync_to_scene(&self, scene: &mut Scene) {
+    pub fn sync_to_scene(&self, _scene: &mut Scene) {
         let nodes = self.nodes.read().unwrap();
         for node in nodes.values() {
-            let scene_node = node.to_scene_node();
+            let _scene_node = node.to_scene_node();
             // This would need proper scene update logic
         }
     }

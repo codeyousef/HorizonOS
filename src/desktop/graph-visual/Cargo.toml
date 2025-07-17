@@ -9,10 +9,12 @@ anyhow = "1.0"
 log = "0.4"
 tokio = { version = "1.46", features = ["full"] }
 uuid = { version = "1.11", features = ["v4"] }
+serde = { version = "1.0", features = ["derive"] }
 
 # Graph components
 horizonos-graph-engine = { path = "../graph-engine" }
 horizonos-graph-nodes = { path = "../graph-nodes" }
+horizonos-graph-config = { path = "../graph-config" }
 
 # Image processing
 image = { version = "0.25", features = ["png", "jpeg", "webp"] }

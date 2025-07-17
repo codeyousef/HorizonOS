@@ -9,6 +9,7 @@ use serde::{Serialize, Deserialize};
 /// Analyzes relationships between nodes to determine edge types and strengths
 pub struct RelationshipAnalyzer {
     relationship_rules: Vec<RelationshipRule>,
+    #[allow(dead_code)]
     temporal_window: chrono::Duration, // How far back to look for temporal relationships
 }
 
@@ -225,7 +226,7 @@ impl RelationshipAnalyzer {
         None
     }
     
-    fn analyze_temporal_colocation(&self, source: &dyn GraphNode, target: &dyn GraphNode, edge_type: &EdgeType) -> Option<RelationshipAnalysis> {
+    fn analyze_temporal_colocation(&self, source: &dyn GraphNode, target: &dyn GraphNode, _edge_type: &EdgeType) -> Option<RelationshipAnalysis> {
         // This would analyze access times, creation times, etc.
         // For now, return a simple heuristic based on ID proximity (simulating temporal proximity)
         let id_diff = (source.id() as i64 - target.id() as i64).abs();
@@ -246,7 +247,7 @@ impl RelationshipAnalyzer {
         None
     }
     
-    fn analyze_name_similarity(&self, source: &dyn GraphNode, target: &dyn GraphNode, edge_type: &EdgeType) -> Option<RelationshipAnalysis> {
+    fn analyze_name_similarity(&self, source: &dyn GraphNode, target: &dyn GraphNode, _edge_type: &EdgeType) -> Option<RelationshipAnalysis> {
         let source_name = source.display_name().to_lowercase();
         let target_name = target.display_name().to_lowercase();
         
@@ -267,7 +268,7 @@ impl RelationshipAnalyzer {
         None
     }
     
-    fn analyze_tag_similarity(&self, source: &dyn GraphNode, target: &dyn GraphNode, edge_type: &EdgeType) -> Option<RelationshipAnalysis> {
+    fn analyze_tag_similarity(&self, source: &dyn GraphNode, target: &dyn GraphNode, _edge_type: &EdgeType) -> Option<RelationshipAnalysis> {
         // This would require access to node metadata/tags
         // For now, simple heuristic based on description content
         let source_desc = source.description().unwrap_or_default().to_lowercase();
