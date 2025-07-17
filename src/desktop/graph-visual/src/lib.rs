@@ -7,8 +7,15 @@
 //! - Visual effects and animations
 //! - Theming support
 
+pub mod icons;
+pub mod thumbnails;
+pub mod effects;
+
 use anyhow::Result;
 use std::sync::Arc;
+
+pub use icons::{IconLoader, IconSize, FileTypeIconMapper, AppIconExtractor};
+pub use thumbnails::{ThumbnailGenerator, ThumbnailSize, ProfilePictureGenerator};
 
 /// Visual resource manager
 pub struct VisualManager {

@@ -1,0 +1,27 @@
+[package]
+name = "horizonos-graph-system"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core dependencies
+anyhow = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Graph components
+horizonos-graph-engine = { path = "../graph-engine" }
+horizonos-graph-nodes = { path = "../graph-nodes" }
+
+# D-Bus
+dbus = { version = "0.9", features = ["futures"] }
+dbus-tokio = "0.7"
+
+# System integration
+notify-rust = "4.11"
+x11rb = { version = "0.13", features = ["async"] }
+
+# Desktop file parsing
+freedesktop_entry_parser = "1.3"

@@ -7,7 +7,42 @@ edition = "2021"
 # Utilities
 anyhow = "1.0"
 log = "0.4"
+tokio = { version = "1.46", features = ["full"] }
+uuid = { version = "1.11", features = ["v4"] }
 
 # Graph components
 horizonos-graph-engine = { path = "../graph-engine" }
 horizonos-graph-nodes = { path = "../graph-nodes" }
+
+# Image processing
+image = { version = "0.25", features = ["png", "jpeg", "webp"] }
+imageproc = "0.25"
+rusttype = "0.9"
+
+# SVG rendering
+resvg = "0.45"
+
+# File type detection
+tree_magic_mini = "3.1"
+
+# Hashing
+sha2 = "0.10"
+md5 = "0.7"
+
+# HTTP client for Gravatar
+reqwest = { version = "0.12", features = ["json"] }
+
+# Math
+nalgebra = { workspace = true }
+
+# GPU
+wgpu = { workspace = true }
+
+# Random
+rand = "0.8"
+
+# Byte manipulation
+bytemuck = { version = "1.19", features = ["derive"] }
+
+# Directories
+dirs = "5.0"
