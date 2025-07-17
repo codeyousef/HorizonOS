@@ -1,0 +1,87 @@
+# Cyberpunk Theme for HorizonOS Graph Desktop
+
+[metadata]
+name = "Cyberpunk"
+author = "HorizonOS Community"
+version = "1.0.0"
+description = "A neon-infused cyberpunk theme"
+
+[colors]
+# Base colors
+background = "#0A0E1B"
+foreground = "#00FFFF"
+
+# Primary colors (neon cyan)
+primary = "#00FFFF"
+primary_hover = "#40FFFF"
+primary_active = "#00CCCC"
+
+# Secondary colors (hot pink)
+secondary = "#FF0080"
+secondary_hover = "#FF3399"
+secondary_active = "#CC0066"
+
+# Accent colors (neon green)
+accent = "#00FF00"
+accent_hover = "#40FF40"
+accent_active = "#00CC00"
+
+# Status colors
+success = "#00FF00"
+warning = "#FFFF00"
+error = "#FF0040"
+info = "#00FFFF"
+
+# Surface colors
+surface = "#161B2E"
+surface_variant = "#1F2641"
+
+# Border colors
+border = "#00FFFF40"
+border_focus = "#00FFFF"
+
+# Text colors
+text = "#FFFFFF"
+text_secondary = "#00FFFF80"
+text_disabled = "#00FFFF40"
+
+# Shadow color
+shadow = "#00FFFF20"
+
+[ui]
+corner_radius = 0.0
+border_width = 2.0
+spacing = 10.0
+padding = 14.0
+icon_size = 24.0
+shadow_blur = 30.0
+shadow_offset = [0.0, 6.0]
+
+[graph]
+[graph.node_colors]
+application = "#FF0080"
+file = "#FFFF00"
+person = "#00FF00"
+task = "#00FFFF"
+device = "#FF00FF"
+ai_agent = "#FF8000"
+concept = "#FF0080"
+system = "#8080FF"
+url = "#00FFFF"
+automation = "#FFFF00"
+setting = "#FF00FF"
+config_group = "#8080FF"
+
+[graph.edge_colors]
+relationship = "#00FFFF40"
+dependency = "#FF008040"
+data_flow = "#00FF0040"
+hierarchy = "#FFFF0040"
+temporal = "#FF00FF40"
+similarity = "#FF800040"
+
+[graph.background_grid]
+enabled = true
+color = "#00FFFF10"
+size = 60.0
+subdivisions = 6

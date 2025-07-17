@@ -7,3 +7,14 @@ edition = "2021"
 horizonos-graph-engine = { path = "../graph-engine" }
 serde = { workspace = true }
 tokio = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+toml = "0.8"
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+notify = "6.1"
+chrono = { workspace = true }
+dirs = "5.0"
+
+[dev-dependencies]
+env_logger = "0.11"

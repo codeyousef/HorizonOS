@@ -8,7 +8,7 @@ use smithay::{
 use crate::AppState;
 
 /// Initialize the compositor
-pub fn init_compositor(_state: &mut AppState) {
+pub fn init_compositor(state: &mut AppState) {
     log::info!("Initializing HorizonOS Graph Compositor");
     
     // Set up initial output
@@ -16,6 +16,14 @@ pub fn init_compositor(_state: &mut AppState) {
     
     // Initialize graph scene
     // TODO: Set up initial graph layout
+    
+    // Initialize XWayland if available
+    if let Err(e) = state.xwayland_manager.init(&state.display_handle, &state.loop_handle) {
+        log::warn!("Failed to initialize XWayland: {}", e);
+        log::info!("Continuing without X11 application support");
+    } else {
+        log::info!("XWayland initialized successfully");
+    }
 }
 
 /// Handle window creation
@@ -90,4 +98,49 @@ pub fn update_window_positions(state: &mut AppState) {
     for (window, pos) in updates {
         state.space.map_element(window, pos, false);
     }
+}
+
+/// Handle X11 window creation
+pub fn handle_new_x11_window(state: &mut AppState, surface: &smithay::xwayland::X11Surface) {
+    use horizonos_graph_engine::{SceneNode, NodeType};
+    use crate::xwayland::X11WindowNode;
+    
+    let window_id = surface.window_id();
+    log::info!("New X11 window: {}", window_id);
+    
+    // Create X11 window node
+    let mut x11_node = X11WindowNode::new(window_id);
+    x11_node.update_from_surface(surface);
+    
+    // Create a graph node for the X11 window
+    let node = SceneNode {
+        id: 0, // Will be set by Scene
+        position: nalgebra::Point3::new(
+            x11_node.geometry.loc.x as f32,
+            x11_node.geometry.loc.y as f32,
+            0.0
+        ),
+        velocity: nalgebra::Vector3::zeros(),
+        node_type: NodeType::Application { 
+            pid: window_id,
+            name: x11_node.title.clone().unwrap_or_else(|| format!("X11 Window {}", window_id))
+        },
+        radius: 1.0,
+        color: [0.6, 0.4, 0.4, 1.0], // Different color for X11 windows
+        metadata: horizonos_graph_engine::NodeMetadata {
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            tags: vec!["x11".to_string()],
+            description: x11_node.class.clone(),
+            properties: std::collections::HashMap::new(),
+        },
+        visible: true,
+        selected: false,
+    };
+    
+    let node_id = state.graph_scene.lock().unwrap().add_node(node);
+    log::debug!("Created graph node {} for X11 window {}", node_id, window_id);
+    
+    // Handle the X11 surface in the manager
+    state.xwayland_manager.handle_x11_surface_created(surface);
 }

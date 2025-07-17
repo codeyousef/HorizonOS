@@ -1,0 +1,124 @@
+# HorizonOS Graph Desktop Configuration
+
+[general]
+autostart = ["waybar", "nm-applet"]
+terminal = "alacritty"
+browser = "firefox"
+log_level = "info"
+debug = false
+
+[appearance]
+theme = "horizon-dark"
+icon_theme = "Papirus-Dark"
+
+[appearance.fonts]
+ui_font = "Inter"
+ui_size = 11.0
+mono_font = "JetBrains Mono"
+mono_size = 10.0
+
+[appearance.animations]
+enabled = true
+speed = 1.0
+spring_animations = true
+spring_stiffness = 300.0
+spring_damping = 20.0
+
+[appearance.transparency]
+windows = 0.95
+panels = 0.85
+blur_radius = 20.0
+
+[graph]
+layout_algorithm = "force-directed"
+node_size = 50.0
+edge_thickness = 2.0
+show_labels = true
+label_size = 12.0
+physics_enabled = true
+
+[graph.physics]
+gravity = 0.1
+repulsion = 100.0
+link_strength = 1.0
+friction = 0.9
+
+[interaction]
+mouse_sensitivity = 1.0
+scroll_speed = 1.0
+double_click_interval = 400
+drag_threshold = 5.0
+edge_creation_mode = "DragFromNode"
+
+[performance]
+gpu_acceleration = true
+max_fps = 60
+level_of_detail = true
+lod_distances = [100.0, 500.0, 1000.0]
+max_nodes = 10000
+frustum_culling = true
+
+[ai]
+enabled = true
+ollama_endpoint = "http://localhost:11434"
+default_model = "llama3.2:latest"
+suggestions_enabled = true
+suggestion_frequency = 30
+
+[workspace]
+default_count = 4
+auto_save_interval = 300
+show_indicator = true
+switch_animation = true
+
+[accessibility]
+screen_reader = false
+keyboard_navigation = true
+magnification = false
+magnification_level = 2.0
+high_contrast = false
+reduce_motion = false
+
+[shortcuts]
+[shortcuts.quit]
+keys = "Super+Q"
+action = "quit"
+description = "Quit the compositor"
+
+[shortcuts.launcher]
+keys = "Super+Space"
+action = "open_launcher"
+description = "Open application launcher"
+
+[shortcuts.switch_workspace]
+keys = "Super+Tab"
+action = "switch_workspace"
+description = "Switch workspaces"
+
+[shortcuts.close_window]
+keys = "Super+W"
+action = "close_window"
+description = "Close focused window"
+
+[shortcuts.toggle_graph_view]
+keys = "Super+G"
+action = "toggle_graph_view"
+description = "Toggle graph view mode"
+
+[shortcuts.create_edge]
+keys = "Super+E"
+action = "create_edge"
+description = "Create edge between nodes"
+
+[shortcuts.search]
+keys = "Super+S"
+action = "open_search"
+description = "Open semantic search"
+
+[shortcuts.ai_assist]
+keys = "Super+A"
+action = "ai_assist"
+description = "Open AI assistant"
+
+# Custom configuration values
+[custom]

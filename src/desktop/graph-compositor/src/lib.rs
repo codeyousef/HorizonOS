@@ -12,6 +12,7 @@ pub mod window_manager;
 pub mod protocols;
 pub mod state;
 pub mod render;
+pub mod xwayland;
 
 pub use compositor::*;
 pub use backend::*;

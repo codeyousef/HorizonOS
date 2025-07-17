@@ -80,6 +80,9 @@ pub struct AppState {
     
     // Input
     pub seat: Seat<Self>,
+    
+    // XWayland support
+    pub xwayland_manager: crate::xwayland::XWaylandManager,
 }
 
 impl AppState {
@@ -115,6 +118,9 @@ impl AppState {
         // Initialize window manager
         let window_manager = WindowManager::new(WindowManagerConfig::default());
         
+        // Initialize XWayland manager
+        let xwayland_manager = crate::xwayland::XWaylandManager::new();
+        
         Ok(Self {
             running: true,
             loop_handle,
@@ -134,6 +140,7 @@ impl AppState {
             protocol_manager,
             window_manager,
             seat,
+            xwayland_manager,
         })
     }
 }
