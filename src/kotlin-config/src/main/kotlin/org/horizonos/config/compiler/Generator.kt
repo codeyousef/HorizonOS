@@ -35,6 +35,8 @@ class EnhancedConfigGenerator(private val outputDir: File) {
     private val automationGenerator = AutomationGenerator(outputDir, generatedFiles)
     private val aiConfigurationGenerator = AIConfigurationGenerator(outputDir, generatedFiles)
     private val documentationGenerator = DocumentationGenerator(outputDir, generatedFiles)
+    private val containerGenerator = ContainerGenerator()
+    private val layerGenerator = LayerGenerator()
     
     /**
      * Generate all output files from configuration
@@ -56,6 +58,10 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             aiConfigurationGenerator.generate(config)
             documentationGenerator.generate(config)
             
+            // Generate container and layer deployment scripts
+            containerGenerator.generateContainerDeployment(config, outputDir)
+            layerGenerator.generateLayerDeployment(config, outputDir)
+            
             return GenerationResult.Success(generatedFiles.toList())
         } catch (e: Exception) {
             return GenerationResult.Error(GenerationError.UnexpectedError(e.message ?: "Unknown error", e))
@@ -69,7 +75,7 @@ class EnhancedConfigGenerator(private val outputDir: File) {
             "configs/ollama", "configs/llm-api", "configs/nginx",
             "configs/vector-db", "configs/llm-privacy", "automation/tasks",
             "automation/workflows", "automation/systemd", "automation/cron.d",
-            "docs/services"
+            "docs/services", "containers", "layers"
         )
         dirs.forEach { 
             File(outputDir, it).mkdirs() 

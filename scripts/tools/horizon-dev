@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+set -e
+
+# HorizonOS Development Helper Script
+# Quick access to development containers and tools
+
+VERSION="1.0.0"
+SCRIPT_NAME="horizon-dev"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+show_help() {
+    cat << EOF
+HorizonOS Development Helper v$VERSION
+
+USAGE:
+    $SCRIPT_NAME <command> [args...]
+
+COMMANDS:
+    shell               Open development shell
+    run <cmd>          Run command in development container
+    install <pkg>      Install package in development container
+    setup              Setup development environment
+    test               Run project tests
+    build              Build HorizonOS
+    clean              Clean build artifacts
+
+SHORTCUTS:
+    git, gcc, make, cargo, go, npm, python
+    (These run the respective tools in the development container)
+
+EXAMPLES:
+    $SCRIPT_NAME shell
+    $SCRIPT_NAME run cargo build
+    $SCRIPT_NAME gcc --version
+    $SCRIPT_NAME setup rust
+
+EOF
+}
+
+# Check if development container exists
+check_dev_container() {
+    if ! horizon-container status development &>/dev/null; then
+        echo -e "${YELLOW}Development container not found. Installing...${NC}"
+        horizon-container install development
+    fi
+}
+
+# Main command handling
+case "${1:-help}" in
+    -h|--help|help)
+        show_help
+        ;;
+    shell|sh)
+        check_dev_container
+        exec horizon-container shell development
+        ;;
+    run)
+        shift
+        check_dev_container
+        exec horizon-container run development "$@"
+        ;;
+    install)
+        shift
+        check_dev_container
+        horizon-container run development sudo pacman -S "$@"
+        ;;
+    setup)
+        shift
+        check_dev_container
+        case "$1" in
+            rust)
+                horizon-container run development bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+                ;;
+            node|nodejs)
+                horizon-container install nodejs npm
+                ;;
+            python)
+                horizon-container install python python-pip
+                ;;
+            go|golang)
+                horizon-container install go
+                ;;
+            *)
+                echo "Unknown setup target: $1"
+                echo "Available: rust, node, python, go"
+                exit 1
+                ;;
+        esac
+        ;;
+    test)
+        shift
+        check_dev_container
+        cd /home/yousef/Development/horizonos
+        if [ -f "Makefile" ]; then
+            horizon-container run development make test
+        elif [ -f "cargo.toml" ] || [ -f "Cargo.toml" ]; then
+            horizon-container run development cargo test
+        else
+            echo "No test configuration found"
+            exit 1
+        fi
+        ;;
+    build)
+        shift
+        cd /home/yousef/Development/horizonos
+        sudo ./scripts/scripts/build-test.sh
+        ;;
+    clean)
+        cd /home/yousef/Development/horizonos
+        echo "Cleaning build artifacts..."
+        sudo rm -rf build/
+        echo "Clean complete"
+        ;;
+    # Tool shortcuts
+    git|gcc|g++|make|cmake|cargo|rustc|go|npm|node|python|python3|pip|pip3)
+        check_dev_container
+        exec horizon-container run development "$@"
+        ;;
+    *)
+        # Try to run as command in development container
+        check_dev_container
+        exec horizon-container run development "$@"
+        ;;
+esac

@@ -1,0 +1,42 @@
+{
+  "name": "development",
+  "image": "quay.io/toolbx/arch-toolbox:latest",
+  "purpose": "development",
+  "description": "Development tools and programming environments",
+  "packages": [
+    "git",
+    "curl",
+    "vim",
+    "tmux",
+    "build-essential",
+    "nodejs",
+    "python",
+    "rust",
+    "go"
+  ],
+  "export_binaries": [
+    "git",
+    "curl",
+    "vim",
+    "tmux",
+    "gcc",
+    "make",
+    "node",
+    "npm",
+    "python",
+    "rustc",
+    "cargo",
+    "go"
+  ],
+  "auto_start": false,
+  "persistent": true,
+  "mounts": [
+    "/home",
+    "/tmp",
+    "/var/cache/build"
+  ],
+  "environment": {
+    "CONTAINER_PURPOSE": "development",
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  }
+}

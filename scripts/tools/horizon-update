@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+set -e
+
+# HorizonOS Update Script
+# Updates the system and containers
+
+VERSION="1.0.0"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+show_help() {
+    cat << EOF
+HorizonOS Update Tool v$VERSION
+
+USAGE:
+    horizon-update [options]
+
+OPTIONS:
+    -h, --help          Show this help
+    -v, --version       Show version
+    --system            Update base system via OSTree
+    --containers        Update all containers
+    --flatpaks          Update Flatpak applications
+    --all               Update everything (default)
+    --check             Check for updates only
+    --rollback          Rollback to previous system version
+
+EXAMPLES:
+    horizon-update              # Update everything
+    horizon-update --check      # Check for updates
+    horizon-update --system     # Update only base system
+    horizon-update --rollback   # Rollback system update
+
+EOF
+}
+
+# Check for OSTree updates
+check_ostree_updates() {
+    info "Checking for system updates..."
+    
+    if ! command -v ostree &>/dev/null; then
+        error "OSTree not found"
+        return 1
+    fi
+    
+    # Check current deployment
+    current_commit=$(ostree admin status | grep "^\*" | awk '{print $3}')
+    info "Current system commit: $current_commit"
+    
+    # Check for updates (this would connect to a remote in production)
+    # For now, just show current status
+    ostree admin status
+}
+
+# Update base system
+update_system() {
+    info "Updating base system..."
+    
+    if [ ! -f "/etc/horizonos-release" ]; then
+        error "Not running on HorizonOS"
+        return 1
+    fi
+    
+    # In production, this would:
+    # 1. Pull latest OSTree commit from remote
+    # 2. Deploy new version
+    # 3. Set it as default for next boot
+    
+    warning "System updates require a configured OSTree remote (not yet implemented)"
+    info "Current system is up to date"
+}
+
+# Update containers
+update_containers() {
+    info "Updating containers..."
+    
+    # Get list of installed containers
+    local containers=$(horizon-container list | grep -E "^\s+\w+" | awk '{print $1}' | grep -v "^System$" | grep -v "^User$" | grep -v "^No$")
+    
+    if [ -z "$containers" ]; then
+        info "No containers installed"
+        return
+    fi
+    
+    for container in $containers; do
+        info "Updating container: $container"
+        
+        # Get container image
+        local image=$(horizon-container status "$container" | grep "^Image:" | cut -d' ' -f2)
+        
+        if [ -n "$image" ]; then
+            # Pull latest image
+            podman pull "$image"
+            
+            # If container is persistent, it needs to be recreated
+            local persistent=$(horizon-container status "$container" | grep "^Persistent:" | cut -d' ' -f2)
+            if [ "$persistent" = "true" ]; then
+                warning "Container '$container' is persistent. Manual recreation may be needed."
+            fi
+        fi
+    done
+    
+    success "Container updates complete"
+}
+
+# Update Flatpaks
+update_flatpaks() {
+    info "Updating Flatpak applications..."
+    
+    if ! command -v flatpak &>/dev/null; then
+        warning "Flatpak not installed"
+        return
+    fi
+    
+    flatpak update -y
+    success "Flatpak updates complete"
+}
+
+# Rollback system
+rollback_system() {
+    info "Rolling back to previous system version..."
+    
+    if ! command -v ostree &>/dev/null; then
+        error "OSTree not found"
+        return 1
+    fi
+    
+    # Show available deployments
+    info "Available deployments:"
+    ostree admin status
+    
+    # In a real implementation, this would:
+    # ostree admin set-default 1  # Set previous deployment as default
+    # systemctl reboot            # Reboot to apply
+    
+    warning "Rollback requires manual intervention:"
+    echo "  1. Run: sudo ostree admin set-default 1"
+    echo "  2. Reboot the system"
+}
+
+# Main function
+main() {
+    local update_system=false
+    local update_containers=false
+    local update_flatpaks=false
+    local check_only=false
+    local rollback=false
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -v|--version)
+                echo "horizon-update v$VERSION"
+                exit 0
+                ;;
+            --system)
+                update_system=true
+                shift
+                ;;
+            --containers)
+                update_containers=true
+                shift
+                ;;
+            --flatpaks)
+                update_flatpaks=true
+                shift
+                ;;
+            --all)
+                update_system=true
+                update_containers=true
+                update_flatpaks=true
+                shift
+                ;;
+            --check)
+                check_only=true
+                shift
+                ;;
+            --rollback)
+                rollback=true
+                shift
+                ;;
+            *)
+                error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+    
+    # Default to updating everything if no specific target
+    if [ "$update_system" = false ] && [ "$update_containers" = false ] && [ "$update_flatpaks" = false ] && [ "$rollback" = false ]; then
+        update_system=true
+        update_containers=true
+        update_flatpaks=true
+    fi
+    
+    echo "=== HorizonOS Update Tool ==="
+    echo
+    
+    # Handle rollback
+    if [ "$rollback" = true ]; then
+        rollback_system
+        exit $?
+    fi
+    
+    # Check only mode
+    if [ "$check_only" = true ]; then
+        check_ostree_updates
+        exit $?
+    fi
+    
+    # Perform updates
+    if [ "$update_system" = true ]; then
+        update_system
+        echo
+    fi
+    
+    if [ "$update_containers" = true ]; then
+        update_containers
+        echo
+    fi
+    
+    if [ "$update_flatpaks" = true ]; then
+        update_flatpaks
+        echo
+    fi
+    
+    success "All updates complete!"
+}
+
+main "$@"

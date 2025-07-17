@@ -1,0 +1,14 @@
+[Unit]
+Description=HorizonOS Container Management Service
+After=network.target podman.service
+Requires=podman.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/horizon-container-startup
+ExecStop=/usr/local/bin/horizon-container-shutdown
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

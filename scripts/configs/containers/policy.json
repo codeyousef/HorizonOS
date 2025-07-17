@@ -1,0 +1,75 @@
+{
+  "default": [
+    {
+      "type": "reject"
+    }
+  ],
+  "transports": {
+    "docker": {
+      "docker.io": [
+        {
+          "type": "signedBy",
+          "keyType": "GPGKeys",
+          "keyPath": "/etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release",
+          "signedIdentity": {
+            "type": "matchRepository"
+          }
+        },
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ],
+      "quay.io": [
+        {
+          "type": "signedBy",
+          "keyType": "GPGKeys",
+          "keyPath": "/etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release",
+          "signedIdentity": {
+            "type": "matchRepository"
+          }
+        },
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ],
+      "ghcr.io": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ],
+      "localhost:5000": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+    },
+    "docker-daemon": {
+      "": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+    },
+    "atomic": {
+      "": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+    },
+    "dir": {
+      "": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+    },
+    "oci": {
+      "": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+    }
+  }
+}

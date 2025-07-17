@@ -495,6 +495,12 @@ fun validateSystemImage(image: SystemImage): List<String> {
         if (!container.digest.startsWith("sha256:")) {
             errors.add("Container '${container.name}' digest must be SHA256")
         }
+        
+        // Validate SHA256 format
+        val sha256Regex = Regex("^sha256:[a-fA-F0-9]{64}$")
+        if (!sha256Regex.matches(container.digest)) {
+            errors.add("Container '${container.name}' has invalid SHA256 digest format")
+        }
     }
     
     // Validate Flatpak images

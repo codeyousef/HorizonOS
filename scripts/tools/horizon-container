@@ -1,0 +1,496 @@
+#!/usr/bin/env bash
+set -e
+
+# HorizonOS Container Management Tool
+# Manages system containers for package-like functionality
+
+VERSION="1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Configuration paths
+SYSTEM_CONTAINERS_DIR="/etc/containers/system"
+USER_CONTAINERS_DIR="$HOME/.config/horizonos/containers"
+CACHE_DIR="$HOME/.cache/horizonos/containers"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging functions
+info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+# Help text
+show_help() {
+    cat << EOF
+HorizonOS Container Management Tool v$VERSION
+
+USAGE:
+    horizon-container <command> [options]
+
+COMMANDS:
+    list                    List available containers
+    install <container>     Install/setup a container
+    remove <container>      Remove a container
+    run <container> [cmd]   Run a command in a container
+    shell <container>       Open shell in container
+    update <container>      Update container image
+    status <container>      Show container status
+    export <binary>         Export binary from container
+    search <query>          Search available containers
+    create <name>           Create new container definition
+    edit <container>        Edit container definition
+    logs <container>        Show container logs
+    stop <container>        Stop running container
+    start <container>       Start container
+    restart <container>     Restart container
+    cleanup                 Clean up unused containers
+    info <container>        Show detailed container info
+
+EXAMPLES:
+    horizon-container list
+    horizon-container install development
+    horizon-container run development git --version
+    horizon-container shell multimedia
+    horizon-container export git
+    horizon-container create my-tools
+
+OPTIONS:
+    -h, --help             Show this help
+    -v, --version          Show version
+    --system               Work with system containers
+    --user                 Work with user containers (default)
+    --no-cache             Don't use container cache
+    --dry-run              Show what would be done
+
+EOF
+}
+
+# Check if running in container-based HorizonOS
+check_horizonos() {
+    if [ ! -f "/etc/os-release" ] || ! grep -q "ID=horizonos" /etc/os-release; then
+        warning "Not running on HorizonOS. Some features may not work correctly."
+    fi
+    
+    if [ ! -f "/etc/horizonos-release" ]; then
+        warning "HorizonOS version information not found."
+        return
+    fi
+    
+    source /etc/horizonos-release
+    if [ "${HORIZONOS_ARCHITECTURE:-}" != "container-based" ]; then
+        error "This tool requires container-based HorizonOS architecture."
+        exit 1
+    fi
+}
+
+# Check dependencies
+check_dependencies() {
+    local missing_deps=()
+    
+    for dep in podman jq; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing_deps+=("$dep")
+        fi
+    done
+    
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        error "Missing dependencies: ${missing_deps[*]}"
+        error "Install with: pacman -S ${missing_deps[*]}"
+        exit 1
+    fi
+}
+
+# Initialize directories
+init_dirs() {
+    mkdir -p "$USER_CONTAINERS_DIR" "$CACHE_DIR"
+}
+
+# Get container definition path
+get_container_path() {
+    local container="$1"
+    local scope="${2:-user}"
+    
+    if [ "$scope" = "system" ] && [ -f "$SYSTEM_CONTAINERS_DIR/$container.json" ]; then
+        echo "$SYSTEM_CONTAINERS_DIR/$container.json"
+    elif [ -f "$USER_CONTAINERS_DIR/$container.json" ]; then
+        echo "$USER_CONTAINERS_DIR/$container.json"
+    else
+        return 1
+    fi
+}
+
+# Load container definition
+load_container() {
+    local container="$1"
+    local scope="${2:-user}"
+    local container_file
+    
+    if ! container_file=$(get_container_path "$container" "$scope"); then
+        error "Container '$container' not found"
+        return 1
+    fi
+    
+    if ! jq empty "$container_file" 2>/dev/null; then
+        error "Invalid JSON in container definition: $container_file"
+        return 1
+    fi
+    
+    echo "$container_file"
+}
+
+# List containers
+cmd_list() {
+    local scope="${1:-both}"
+    
+    info "Available containers:"
+    echo
+    
+    if [ "$scope" = "both" ] || [ "$scope" = "system" ]; then
+        if [ -d "$SYSTEM_CONTAINERS_DIR" ] && [ "$(ls -A "$SYSTEM_CONTAINERS_DIR" 2>/dev/null)" ]; then
+            echo "System containers:"
+            for container_file in "$SYSTEM_CONTAINERS_DIR"/*.json; do
+                [ -f "$container_file" ] || continue
+                local name=$(basename "$container_file" .json)
+                local purpose=$(jq -r '.purpose // "unknown"' "$container_file" 2>/dev/null)
+                local image=$(jq -r '.image // "unknown"' "$container_file" 2>/dev/null)
+                printf "  %-20s %-15s %s\n" "$name" "($purpose)" "$image"
+            done
+            echo
+        fi
+    fi
+    
+    if [ "$scope" = "both" ] || [ "$scope" = "user" ]; then
+        if [ -d "$USER_CONTAINERS_DIR" ] && [ "$(ls -A "$USER_CONTAINERS_DIR" 2>/dev/null)" ]; then
+            echo "User containers:"
+            for container_file in "$USER_CONTAINERS_DIR"/*.json; do
+                [ -f "$container_file" ] || continue
+                local name=$(basename "$container_file" .json)
+                local purpose=$(jq -r '.purpose // "unknown"' "$container_file" 2>/dev/null)
+                local image=$(jq -r '.image // "unknown"' "$container_file" 2>/dev/null)
+                printf "  %-20s %-15s %s\n" "$name" "($purpose)" "$image"
+            done
+        else
+            echo "No user containers found."
+        fi
+    fi
+}
+
+# Install container
+cmd_install() {
+    local container="$1"
+    local scope="${2:-user}"
+    local container_file
+    
+    if ! container_file=$(load_container "$container" "$scope"); then
+        return 1
+    fi
+    
+    local image=$(jq -r '.image' "$container_file")
+    local name=$(jq -r '.name' "$container_file")
+    
+    info "Installing container: $name"
+    info "Image: $image"
+    
+    # Pull the image
+    if ! podman pull "$image"; then
+        error "Failed to pull image: $image"
+        return 1
+    fi
+    
+    # Create container with persistent storage if needed
+    local persistent=$(jq -r '.persistent // false' "$container_file")
+    if [ "$persistent" = "true" ]; then
+        local container_name="horizonos-$name"
+        
+        if podman container exists "$container_name"; then
+            info "Container already exists: $container_name"
+        else
+            info "Creating persistent container: $container_name"
+            
+            local mounts=""
+            while IFS= read -r mount; do
+                mounts="$mounts --volume $mount:$mount"
+            done < <(jq -r '.mounts[]? // empty' "$container_file")
+            
+            local env_vars=""
+            while IFS= read -r key; do
+                local value=$(jq -r ".environment[\"$key\"]" "$container_file")
+                env_vars="$env_vars --env $key=$value"
+            done < <(jq -r '.environment // {} | keys[]' "$container_file")
+            
+            # Create but don't start the container
+            podman create \
+                --name "$container_name" \
+                --hostname "$container_name" \
+                --userns=keep-id \
+                $mounts \
+                $env_vars \
+                "$image" \
+                sleep infinity
+        fi
+    fi
+    
+    success "Container '$name' installed successfully"
+}
+
+# Run command in container
+cmd_run() {
+    local container="$1"
+    shift
+    local command=("$@")
+    local scope="user"
+    local container_file
+    
+    if ! container_file=$(load_container "$container" "$scope"); then
+        # Try system scope
+        scope="system"
+        if ! container_file=$(load_container "$container" "$scope"); then
+            return 1
+        fi
+    fi
+    
+    local image=$(jq -r '.image' "$container_file")
+    local name=$(jq -r '.name' "$container_file")
+    local persistent=$(jq -r '.persistent // false' "$container_file")
+    
+    if [ "$persistent" = "true" ]; then
+        local container_name="horizonos-$name"
+        
+        # Start container if not running
+        if ! podman container inspect "$container_name" --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
+            info "Starting container: $container_name"
+            podman start "$container_name" >/dev/null
+        fi
+        
+        # Execute command in running container
+        podman exec -it "$container_name" "${command[@]}"
+    else
+        # Run ephemeral container
+        local mounts=""
+        while IFS= read -r mount; do
+            mounts="$mounts --volume $mount:$mount"
+        done < <(jq -r '.mounts[]? // empty' "$container_file")
+        
+        local env_vars=""
+        while IFS= read -r key; do
+            local value=$(jq -r ".environment[\"$key\"]" "$container_file")
+            env_vars="$env_vars --env $key=$value"
+        done < <(jq -r '.environment // {} | keys[]' "$container_file")
+        
+        podman run --rm -it \
+            --hostname "$name" \
+            --userns=keep-id \
+            --workdir "$(pwd)" \
+            $mounts \
+            $env_vars \
+            "$image" \
+            "${command[@]}"
+    fi
+}
+
+# Open shell in container
+cmd_shell() {
+    local container="$1"
+    cmd_run "$container" "/bin/bash" || cmd_run "$container" "/bin/sh"
+}
+
+# Export binary from container
+cmd_export() {
+    local binary="$1"
+    local target_dir="/usr/local/bin"
+    
+    info "Searching for binary '$binary' in containers..."
+    
+    # Search through containers
+    local found_container=""
+    for scope in system user; do
+        local containers_dir
+        case "$scope" in
+            system) containers_dir="$SYSTEM_CONTAINERS_DIR" ;;
+            user) containers_dir="$USER_CONTAINERS_DIR" ;;
+        esac
+        
+        [ -d "$containers_dir" ] || continue
+        
+        for container_file in "$containers_dir"/*.json; do
+            [ -f "$container_file" ] || continue
+            
+            if jq -e ".export_binaries[]? | select(. == \"$binary\")" "$container_file" >/dev/null; then
+                found_container=$(basename "$container_file" .json)
+                info "Found '$binary' in container: $found_container"
+                break 2
+            fi
+        done
+    done
+    
+    if [ -z "$found_container" ]; then
+        error "Binary '$binary' not found in any container"
+        return 1
+    fi
+    
+    # Create wrapper script
+    local wrapper_script="$target_dir/$binary"
+    info "Creating wrapper script: $wrapper_script"
+    
+    sudo tee "$wrapper_script" > /dev/null << EOF
+#!/bin/bash
+# HorizonOS container binary wrapper for $binary
+exec horizon-container run "$found_container" "$binary" "\$@"
+EOF
+    
+    sudo chmod +x "$wrapper_script"
+    success "Binary '$binary' exported successfully"
+}
+
+# Show container status
+cmd_status() {
+    local container="$1"
+    local container_file
+    
+    if ! container_file=$(load_container "$container"); then
+        return 1
+    fi
+    
+    local name=$(jq -r '.name' "$container_file")
+    local image=$(jq -r '.image' "$container_file")
+    local persistent=$(jq -r '.persistent // false' "$container_file")
+    
+    echo "Container: $name"
+    echo "Image: $image"
+    echo "Persistent: $persistent"
+    
+    if [ "$persistent" = "true" ]; then
+        local container_name="horizonos-$name"
+        if podman container exists "$container_name"; then
+            local status=$(podman container inspect "$container_name" --format '{{.State.Status}}')
+            local running=$(podman container inspect "$container_name" --format '{{.State.Running}}')
+            echo "Status: $status"
+            echo "Running: $running"
+        else
+            echo "Status: not created"
+        fi
+    else
+        echo "Status: ephemeral (no persistent instance)"
+    fi
+}
+
+# Main command dispatcher
+main() {
+    # Parse global options
+    local system_mode=false
+    local user_mode=true
+    local no_cache=false
+    local dry_run=false
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -v|--version)
+                echo "horizon-container v$VERSION"
+                exit 0
+                ;;
+            --system)
+                system_mode=true
+                user_mode=false
+                shift
+                ;;
+            --user)
+                user_mode=true
+                system_mode=false
+                shift
+                ;;
+            --no-cache)
+                no_cache=true
+                shift
+                ;;
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            -*)
+                error "Unknown option: $1"
+                exit 1
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    
+    if [ $# -eq 0 ]; then
+        show_help
+        exit 1
+    fi
+    
+    local command="$1"
+    shift
+    
+    # Initialize
+    check_horizonos
+    check_dependencies
+    init_dirs
+    
+    # Dispatch commands
+    case "$command" in
+        list|ls)
+            if [ "$system_mode" = true ]; then
+                cmd_list "system"
+            elif [ "$user_mode" = true ]; then
+                cmd_list "user"
+            else
+                cmd_list "both"
+            fi
+            ;;
+        install|add)
+            [ $# -ge 1 ] || { error "Container name required"; exit 1; }
+            local scope="user"
+            [ "$system_mode" = true ] && scope="system"
+            cmd_install "$1" "$scope"
+            ;;
+        run|exec)
+            [ $# -ge 1 ] || { error "Container name required"; exit 1; }
+            cmd_run "$@"
+            ;;
+        shell|sh)
+            [ $# -ge 1 ] || { error "Container name required"; exit 1; }
+            cmd_shell "$1"
+            ;;
+        export)
+            [ $# -ge 1 ] || { error "Binary name required"; exit 1; }
+            cmd_export "$1"
+            ;;
+        status|info)
+            [ $# -ge 1 ] || { error "Container name required"; exit 1; }
+            cmd_status "$1"
+            ;;
+        *)
+            error "Unknown command: $command"
+            echo "Run 'horizon-container --help' for usage information."
+            exit 1
+            ;;
+    esac
+}
+
+# Run main function
+main "$@"

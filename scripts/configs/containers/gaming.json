@@ -1,0 +1,29 @@
+{
+  "name": "gaming",
+  "image": "docker.io/steamcmd/steamcmd:latest",
+  "purpose": "gaming",
+  "description": "Gaming platform and tools",
+  "packages": [
+    "steam",
+    "lutris",
+    "wine",
+    "gamemode",
+    "mangohud"
+  ],
+  "export_binaries": [
+    "steam",
+    "lutris",
+    "wine"
+  ],
+  "auto_start": false,
+  "persistent": true,
+  "mounts": [
+    "/home",
+    "/tmp",
+    "/dev/dri"
+  ],
+  "environment": {
+    "CONTAINER_PURPOSE": "gaming",
+    "DISPLAY": ":0"
+  }
+}

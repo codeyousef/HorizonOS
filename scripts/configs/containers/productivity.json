@@ -1,0 +1,37 @@
+{
+  "name": "productivity",
+  "image": "docker.io/library/ubuntu:22.04",
+  "purpose": "productivity",
+  "description": "Office and productivity applications",
+  "packages": [
+    "libreoffice",
+    "gimp",
+    "inkscape",
+    "scribus",
+    "calibre",
+    "pdftk",
+    "pandoc",
+    "texlive-full",
+    "zotero",
+    "obsidian"
+  ],
+  "export_binaries": [
+    "libreoffice",
+    "gimp",
+    "inkscape",
+    "scribus",
+    "calibre",
+    "pandoc"
+  ],
+  "auto_start": false,
+  "persistent": true,
+  "mounts": [
+    "/home",
+    "/tmp",
+    "/dev/dri"
+  ],
+  "environment": {
+    "CONTAINER_PURPOSE": "productivity",
+    "DISPLAY": ":0"
+  }
+}

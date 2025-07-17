@@ -1,8 +1,0 @@
-# HorizonOS Configuration
-# Generated from Kotlin DSL
-
-system:
-  hostname: horizonos-minimal
-  timezone: UTC
-  locale: en_US.UTF-8
-

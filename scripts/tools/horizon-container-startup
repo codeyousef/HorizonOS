@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -e
+
+# HorizonOS Container Startup Script
+# Starts system containers on boot
+
+echo "Starting HorizonOS system containers..."
+
+# Load configuration
+CONFIG_FILE="/etc/horizonos-release"
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+fi
+
+# Container definitions directory
+SYSTEM_CONTAINERS_DIR="/etc/containers/system"
+
+# Start auto-start containers
+if [ -d "$SYSTEM_CONTAINERS_DIR" ]; then
+    for container_def in "$SYSTEM_CONTAINERS_DIR"/*.json; do
+        [ -f "$container_def" ] || continue
+        
+        container_name=$(basename "$container_def" .json)
+        auto_start=$(jq -r '.auto_start // false' "$container_def" 2>/dev/null)
+        
+        if [ "$auto_start" = "true" ]; then
+            echo "Starting container: $container_name"
+            /usr/local/bin/horizon-container install "$container_name" --system
+            /usr/local/bin/horizon-container start "$container_name" --system
+        fi
+    done
+fi
+
+# Export commonly used binaries
+COMMON_BINARIES="git vim tmux gcc make"
+for binary in $COMMON_BINARIES; do
+    if ! command -v "$binary" &>/dev/null; then
+        echo "Exporting binary: $binary"
+        /usr/local/bin/horizon-container export "$binary" 2>/dev/null || true
+    fi
+done
+
+echo "HorizonOS container startup complete"

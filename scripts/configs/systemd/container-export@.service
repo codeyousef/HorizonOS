@@ -1,0 +1,13 @@
+[Unit]
+Description=HorizonOS Container Binary Export for %i
+After=horizonos-containers.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/horizon-container export %i
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

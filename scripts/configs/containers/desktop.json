@@ -1,0 +1,59 @@
+{
+  "name": "desktop",
+  "image": "quay.io/toolbx/arch-toolbox:latest",
+  "purpose": "desktop",
+  "description": "Complete desktop environment with KDE Plasma",
+  "packages": [
+    "plasma-meta",
+    "kde-applications-meta",
+    "xorg-server",
+    "xorg-apps",
+    "mesa",
+    "vulkan-intel",
+    "vulkan-radeon",
+    "pipewire",
+    "pipewire-alsa",
+    "pipewire-pulse",
+    "pipewire-jack",
+    "wireplumber",
+    "firefox",
+    "thunderbird",
+    "libreoffice-fresh"
+  ],
+  "export_binaries": [
+    "startplasma-x11",
+    "startplasma-wayland",
+    "firefox",
+    "thunderbird",
+    "libreoffice",
+    "dolphin",
+    "konsole",
+    "kate"
+  ],
+  "auto_start": false,
+  "persistent": true,
+  "privileged": true,
+  "mounts": [
+    "/home",
+    "/tmp",
+    "/dev/dri",
+    "/dev/input",
+    "/dev/snd",
+    "/run/user"
+  ],
+  "environment": {
+    "CONTAINER_PURPOSE": "desktop",
+    "DISPLAY": ":0",
+    "WAYLAND_DISPLAY": "wayland-0",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "PULSE_SERVER": "/run/user/1000/pulse/native"
+  },
+  "capabilities": [
+    "SYS_ADMIN",
+    "NET_ADMIN"
+  ],
+  "devices": [
+    "/dev/dri",
+    "/dev/snd"
+  ]
+}

@@ -5,46 +5,143 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
 ROOTFS_DIR="$BUILD_DIR/rootfs"
 
+# Load configuration
+source "$PROJECT_ROOT/config/dev.conf"
+
 echo "=== HorizonOS Test Build ==="
 echo "Project root: $PROJECT_ROOT"
+echo "Version: $HORIZONOS_VERSION"
+echo "Architecture: Container-based"
+
+# Check if minimal base image exists
+BASE_BUILDER="$PROJECT_ROOT/scripts/scripts/build-base-image.sh"
+if [ ! -f "$BASE_BUILDER" ]; then
+    echo "Error: Base image builder not found at $BASE_BUILDER"
+    exit 1
+fi
+
+# Check if we have a base image commit
+if ! ostree --repo="$PROJECT_ROOT/repo" rev-parse horizonos/base/x86_64 &> /dev/null; then
+    echo "Base image not found. Building minimal base image first..."
+    echo "This will create a ~500MB container-optimized base image"
+    sudo "$BASE_BUILDER"
+fi
 
 # Clean previous build
 sudo rm -rf "$ROOTFS_DIR"
 mkdir -p "$ROOTFS_DIR"
 
-# Create a minimal Arch rootfs
-echo "Creating base rootfs..."
-sudo pacstrap -c "$ROOTFS_DIR" \
-    base base-devel \
-    linux linux-firmware \
-    btrfs-progs \
-    networkmanager \
-    fish \
-    sudo \
-    htop \
-    git
+# Extract base image from OSTree
+echo "Extracting base image from OSTree..."
+BASE_COMMIT=$(ostree --repo="$PROJECT_ROOT/repo" rev-parse horizonos/base/x86_64)
+echo "Using base commit: $BASE_COMMIT"
 
-# Basic configuration
-echo "Configuring rootfs..."
-echo "horizonos" | sudo tee "$ROOTFS_DIR/etc/hostname" > /dev/null
-echo "en_US.UTF-8 UTF-8" | sudo tee "$ROOTFS_DIR/etc/locale.gen" > /dev/null
-sudo arch-chroot "$ROOTFS_DIR" locale-gen
+sudo ostree --repo="$PROJECT_ROOT/repo" checkout "$BASE_COMMIT" "$ROOTFS_DIR"
+
+# Container-specific configuration
+echo "Configuring container-based system..."
+
+# Add container image definitions for system packages
+sudo mkdir -p "$ROOTFS_DIR/etc/containers/system"
+
+# Create development tools container definition
+sudo tee "$ROOTFS_DIR/etc/containers/system/development.json" > /dev/null << 'EOF'
+{
+  "name": "development",
+  "image": "quay.io/toolbx/arch-toolbox:latest",
+  "purpose": "development",
+  "packages": ["git", "curl", "vim", "tmux", "build-essential", "nodejs", "python", "rust", "go"],
+  "export_binaries": ["git", "curl", "vim", "tmux", "gcc", "make", "node", "npm", "python", "rustc", "cargo", "go"],
+  "auto_start": false,
+  "persistent": true,
+  "mounts": ["/home", "/tmp", "/var/cache/build"],
+  "environment": {
+    "CONTAINER_PURPOSE": "development",
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  }
+}
+EOF
+
+# Create multimedia tools container definition
+sudo tee "$ROOTFS_DIR/etc/containers/system/multimedia.json" > /dev/null << 'EOF'
+{
+  "name": "multimedia",
+  "image": "docker.io/linuxserver/ffmpeg:latest",
+  "purpose": "multimedia",
+  "packages": ["ffmpeg", "imagemagick", "sox", "mediainfo"],
+  "export_binaries": ["ffmpeg", "convert", "sox", "mediainfo"],
+  "auto_start": false,
+  "persistent": false,
+  "mounts": ["/home", "/tmp"],
+  "environment": {
+    "CONTAINER_PURPOSE": "multimedia"
+  }
+}
+EOF
+
+# Create gaming container definition
+sudo tee "$ROOTFS_DIR/etc/containers/system/gaming.json" > /dev/null << 'EOF'
+{
+  "name": "gaming",
+  "image": "docker.io/steamcmd/steamcmd:latest",
+  "purpose": "gaming",
+  "packages": ["steam", "lutris", "wine", "gamemode", "mangohud"],
+  "export_binaries": ["steam", "lutris", "wine"],
+  "auto_start": false,
+  "persistent": true,
+  "mounts": ["/home", "/tmp", "/dev/dri"],
+  "environment": {
+    "CONTAINER_PURPOSE": "gaming",
+    "DISPLAY": ":0"
+  }
+}
+EOF
+
+# Update version information
+sudo tee "$ROOTFS_DIR/etc/horizonos-release" > /dev/null << EOF
+HORIZONOS_VERSION="$HORIZONOS_VERSION"
+HORIZONOS_CODENAME="$HORIZONOS_CODENAME"
+HORIZONOS_ARCHITECTURE="container-based"
+BUILD_DATE="$(date -Iseconds)"
+BASE_COMMIT="$BASE_COMMIT"
+EOF
 
 # Clean up problematic files before OSTree commit
 echo "Cleaning up rootfs..."
 sudo find "$ROOTFS_DIR" -type s -delete  # Remove socket files
-sudo rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/*
-sudo rm -rf "$ROOTFS_DIR"/var/log/*
-sudo rm -rf "$ROOTFS_DIR"/tmp/*
-sudo rm -rf "$ROOTFS_DIR"/var/tmp/*
+sudo rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/* 2>/dev/null || true
+sudo rm -rf "$ROOTFS_DIR"/var/log/* 2>/dev/null || true
+sudo rm -rf "$ROOTFS_DIR"/tmp/* 2>/dev/null || true
+sudo rm -rf "$ROOTFS_DIR"/var/tmp/* 2>/dev/null || true
 
 # Create test OSTree commit
 echo "Creating OSTree commit..."
+COMMIT_MESSAGE="HorizonOS test build v$HORIZONOS_VERSION (container-based)"
+COMMIT_BODY="Container-based HorizonOS build based on minimal base image. Includes system container definitions for development, multimedia, and gaming workloads."
+
 sudo ostree commit \
     --repo="$PROJECT_ROOT/repo" \
     --branch=horizonos/test/x86_64 \
-    --subject="Test build $(date +%Y%m%d-%H%M%S)" \
+    --subject="$COMMIT_MESSAGE" \
+    --body="$COMMIT_BODY" \
     "$ROOTFS_DIR"
 
-echo "Build complete! OSTree commit created."
-ostree log --repo="$PROJECT_ROOT/repo" horizonos/test/x86_64
+echo ""
+echo "================================"
+echo "Container-based Test Build Complete!"
+echo "================================"
+echo "Version: $HORIZONOS_VERSION"
+echo "Architecture: Container-based"
+echo "Base commit: $BASE_COMMIT"
+echo ""
+echo "Available system containers:"
+echo "- development (dev tools, compilers, languages)"
+echo "- multimedia (ffmpeg, imagemagick, media tools)"
+echo "- gaming (steam, lutris, wine)"
+echo ""
+echo "Next steps:"
+echo "1. Build ISO: sudo ./scripts/scripts/build-iso.sh"
+echo "2. Test with QEMU or write to USB"
+echo "3. Use horizon-container tool to manage containers"
+echo ""
+ostree log --repo="$PROJECT_ROOT/repo" horizonos/test/x86_64 | head -10

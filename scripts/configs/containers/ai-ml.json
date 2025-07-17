@@ -1,0 +1,41 @@
+{
+  "name": "ai-ml",
+  "image": "docker.io/pytorch/pytorch:latest",
+  "purpose": "ai-ml",
+  "description": "AI/ML development and research tools",
+  "packages": [
+    "python3",
+    "jupyter",
+    "tensorflow",
+    "pytorch",
+    "scikit-learn",
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "seaborn",
+    "opencv-python",
+    "transformers",
+    "langchain",
+    "ollama"
+  ],
+  "export_binaries": [
+    "python3",
+    "jupyter",
+    "ollama"
+  ],
+  "auto_start": false,
+  "persistent": true,
+  "mounts": [
+    "/home",
+    "/tmp",
+    "/dev/dri"
+  ],
+  "environment": {
+    "CONTAINER_PURPOSE": "ai-ml",
+    "PYTHONPATH": "/usr/local/lib/python3/dist-packages"
+  },
+  "devices": [
+    "/dev/dri"
+  ],
+  "runtime": "nvidia"
+}

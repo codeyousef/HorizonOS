@@ -264,6 +264,32 @@ GRUBCFG
     echo "Configuring system..."
     echo "horizonos" > /mnt/etc/hostname
     
+    # Configure container runtime for installed system
+    echo "Setting up container runtime..."
+    
+    # Create container directories
+    mkdir -p /mnt/etc/containers
+    mkdir -p /mnt/var/lib/containers
+    mkdir -p /mnt/var/lib/flatpak
+    
+    # Copy container configurations
+    cp -r /etc/containers/* /mnt/etc/containers/ 2>/dev/null || true
+    
+    # Configure systemd services for containers
+    arch-chroot /mnt systemctl enable podman.socket
+    arch-chroot /mnt systemctl enable flatpak-system-helper
+    
+    # Create container user group
+    arch-chroot /mnt groupadd -f containers
+    
+    # Copy HorizonOS tools to installed system
+    cp /usr/local/bin/horizon-container /mnt/usr/local/bin/
+    chmod +x /mnt/usr/local/bin/horizon-container
+    
+    # Set up subuid/subgid for rootless containers
+    echo "containers:100000:65536" >> /mnt/etc/subuid
+    echo "containers:100000:65536" >> /mnt/etc/subgid
+    
     # Create fstab
     genfstab -U /mnt >> /mnt/etc/fstab
     
@@ -280,6 +306,12 @@ main
 INSTALLER
 
 chmod +x airootfs/usr/local/bin/horizonos-install
+
+# Copy HorizonOS tools
+echo "Including HorizonOS container management tools..."
+mkdir -p airootfs/usr/local/bin
+cp "$PROJECT_ROOT/scripts/tools/horizon-container" airootfs/usr/local/bin/
+chmod +x airootfs/usr/local/bin/horizon-container
 
 # Copy OSTree repository to ISO (if it exists and is small enough)
 if [ -d "$PROJECT_ROOT/repo" ]; then

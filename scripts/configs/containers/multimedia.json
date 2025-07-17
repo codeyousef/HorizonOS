@@ -1,0 +1,27 @@
+{
+  "name": "multimedia",
+  "image": "docker.io/linuxserver/ffmpeg:latest",
+  "purpose": "multimedia",
+  "description": "Multimedia tools for audio, video, and image processing",
+  "packages": [
+    "ffmpeg",
+    "imagemagick",
+    "sox",
+    "mediainfo"
+  ],
+  "export_binaries": [
+    "ffmpeg",
+    "convert",
+    "sox",
+    "mediainfo"
+  ],
+  "auto_start": false,
+  "persistent": false,
+  "mounts": [
+    "/home",
+    "/tmp"
+  ],
+  "environment": {
+    "CONTAINER_PURPOSE": "multimedia"
+  }
+}

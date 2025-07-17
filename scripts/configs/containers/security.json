@@ -1,0 +1,44 @@
+{
+  "name": "security",
+  "image": "docker.io/kalilinux/kali-rolling:latest",
+  "purpose": "security",
+  "description": "Security testing and analysis tools",
+  "packages": [
+    "nmap",
+    "wireshark",
+    "metasploit-framework",
+    "burpsuite",
+    "aircrack-ng",
+    "john",
+    "hashcat",
+    "sqlmap",
+    "nikto",
+    "hydra"
+  ],
+  "export_binaries": [
+    "nmap",
+    "wireshark",
+    "msfconsole",
+    "aircrack-ng",
+    "john",
+    "hashcat",
+    "sqlmap",
+    "nikto",
+    "hydra"
+  ],
+  "auto_start": false,
+  "persistent": true,
+  "privileged": true,
+  "mounts": [
+    "/home",
+    "/tmp"
+  ],
+  "environment": {
+    "CONTAINER_PURPOSE": "security"
+  },
+  "capabilities": [
+    "NET_ADMIN",
+    "NET_RAW",
+    "SYS_PTRACE"
+  ]
+}

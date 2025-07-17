@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -e
+
+# HorizonOS Container Shutdown Script
+# Stops running containers on shutdown
+
+echo "Stopping HorizonOS system containers..."
+
+# Stop all running HorizonOS containers
+for container in $(podman ps --format "{{.Names}}" | grep "^horizonos-" || true); do
+    echo "Stopping container: $container"
+    podman stop "$container" --time 10
+done
+
+echo "HorizonOS container shutdown complete"
