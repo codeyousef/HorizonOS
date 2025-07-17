@@ -8,6 +8,7 @@ pub mod backend;
 pub mod input;
 pub mod output;
 pub mod window;
+pub mod window_manager;
 pub mod protocols;
 pub mod state;
 pub mod render;

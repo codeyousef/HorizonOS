@@ -31,6 +31,8 @@ use std::collections::HashMap;
 use horizonos_graph_engine::{Scene, SceneId};
 use horizonos_graph_nodes::manager::NodeManager;
 use horizonos_graph_interaction::InteractionManager;
+use crate::protocols::ProtocolManager;
+use crate::window_manager::{WindowManager, WindowManagerConfig};
 
 /// Client data stored per connected client
 #[derive(Default)]
@@ -70,6 +72,12 @@ pub struct AppState {
     pub interaction_manager: Arc<Mutex<InteractionManager>>,
     pub surface_to_node: HashMap<WlSurface, SceneId>,
     
+    // Protocol extensions
+    pub protocol_manager: ProtocolManager,
+    
+    // Window management
+    pub window_manager: WindowManager,
+    
     // Input
     pub seat: Seat<Self>,
 }
@@ -101,6 +109,12 @@ impl AppState {
         let node_manager = Arc::new(Mutex::new(NodeManager::new()));
         let interaction_manager = Arc::new(Mutex::new(InteractionManager::new()));
         
+        // Initialize protocol manager
+        let protocol_manager = ProtocolManager::new();
+        
+        // Initialize window manager
+        let window_manager = WindowManager::new(WindowManagerConfig::default());
+        
         Ok(Self {
             running: true,
             loop_handle,
@@ -117,6 +131,8 @@ impl AppState {
             node_manager,
             interaction_manager,
             surface_to_node: HashMap::new(),
+            protocol_manager,
+            window_manager,
             seat,
         })
     }

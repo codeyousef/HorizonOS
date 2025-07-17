@@ -51,6 +51,10 @@ pub enum NodeType {
     AIAgent { name: String, model: String },
     Concept { title: String, content: String },
     System { component: String, status: SystemStatus },
+    URL { url: String, title: Option<String>, url_type: UrlType },
+    Automation { name: String, automation_type: AutomationType, status: AutomationStatus },
+    Setting { key: String, value: String, setting_type: SettingType, scope: SettingScope },
+    ConfigGroup { name: String, config_type: ConfigType, items: Vec<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -96,6 +100,80 @@ pub enum SystemStatus {
     Stopped,
     Error,
     Warning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UrlType {
+    Website,
+    Api,
+    Documentation,
+    Reference,
+    Social,
+    Repository,
+    Issue,
+    Forum,
+    News,
+    Media,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AutomationType {
+    Script,
+    Workflow,
+    Trigger,
+    Schedule,
+    Rule,
+    Macro,
+    Service,
+    Integration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AutomationStatus {
+    Active,
+    Inactive,
+    Paused,
+    Failed,
+    Running,
+    Scheduled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SettingType {
+    String,
+    Integer,
+    Float,
+    Boolean,
+    Color,
+    Path,
+    Enum,
+    Array,
+    Object,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SettingScope {
+    System,
+    User,
+    Application,
+    Session,
+    Workspace,
+    Project,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConfigType {
+    Application,
+    System,
+    Environment,
+    Project,
+    Workspace,
+    Theme,
+    KeyBindings,
+    Shortcuts,
+    Preferences,
+    Profile,
 }
 
 /// Additional metadata for nodes

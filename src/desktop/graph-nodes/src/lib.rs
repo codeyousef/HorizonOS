@@ -14,6 +14,10 @@ pub mod ai_agent;
 pub mod concept;
 pub mod system;
 pub mod manager;
+pub mod url;
+pub mod automation;
+pub mod setting;
+pub mod config_group;
 
 pub use application::*;
 pub use file::*;
@@ -24,6 +28,10 @@ pub use ai_agent::*;
 pub use concept::*;
 pub use system::*;
 pub use manager::*;
+pub use url::*;
+pub use automation::*;
+pub use setting::*;
+pub use config_group::*;
 
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};

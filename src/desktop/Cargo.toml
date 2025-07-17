@@ -10,8 +10,12 @@ members = [
     "graph-workspaces",
     "graph-compositor",
     "graph-config",
-    "graph-bridge"
-, "graph-visual", "graph-clustering", "graph-performance"]
+    "graph-bridge",
+    "graph-visual", 
+    "graph-clustering", 
+    "graph-performance",
+    "graph-accessibility"
+]
 
 [workspace.dependencies]
 # Core graphics and rendering
