@@ -1,6 +1,6 @@
 //! Edge manager for the graph desktop
 
-use crate::{GraphEdge, EdgeError, RelationshipData};
+use crate::{GraphEdge, EdgeError};
 use horizonos_graph_engine::{SceneId, EdgeType, Scene};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
@@ -45,7 +45,10 @@ impl EdgeManager {
         }
         
         let edge_id = self.next_id();
-        let edge = GraphEdge::new(edge_id, source, target, edge_type);
+        let edge = GraphEdge::new(edge_id, source, target, edge_type.clone());
+        
+        // Log before moving the edge
+        log::info!("Added edge {} -> {} (type: {:?})", source, target, edge.edge_type);
         
         // Add to data structures
         {
@@ -63,7 +66,6 @@ impl EdgeManager {
             rev_adj.entry(target).or_insert_with(HashSet::new).insert(source);
         }
         
-        log::info!("Added edge {} -> {} (type: {:?})", source, target, edge.edge_type);
         Ok(edge_id)
     }
     

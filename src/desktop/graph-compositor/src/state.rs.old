@@ -1,0 +1,287 @@
+//! Compositor state management
+
+use smithay::{
+    delegate_compositor, delegate_shm, delegate_xdg_shell, delegate_seat,
+    delegate_data_device, delegate_output,
+    desktop::{Space, Window, WindowSurfaceType},
+    input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
+    reexports::{
+        calloop::{generic::Generic, Interest, LoopHandle, Mode, PostAction},
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::{
+            backend::{ClientData, ClientId, DisconnectReason},
+            protocol::{wl_buffer, wl_surface::WlSurface},
+            Display, DisplayHandle, Resource,
+        },
+    },
+    utils::{Logical, Point},
+    wayland::{
+        buffer::BufferHandler,
+        compositor::{CompositorClientState, CompositorHandler, CompositorState as SmithayCompositorState},
+        data_device::{
+            ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
+        },
+        output::{OutputHandler, OutputManagerState},
+        seat::SeatHandler as WlSeatHandler,
+        shell::xdg::{PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState},
+        shm::{ShmHandler, ShmState},
+    },
+};
+use horizonos_graph_engine::{GraphEngine, SceneId};
+use horizonos_graph_nodes::{GraphNode, NodeManager};
+use horizonos_graph_interaction::InteractionManager;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use anyhow::Result;
+
+/// Main compositor state
+pub struct CompositorState {
+    /// Running flag
+    pub running: bool,
+    
+    /// Display handle
+    pub display_handle: DisplayHandle,
+    
+    /// Event loop handle
+    pub loop_handle: LoopHandle<'static, Self>,
+    
+    /// Smithay compositor state
+    pub compositor_state: SmithayCompositorState,
+    
+    /// XDG shell state
+    pub xdg_shell_state: XdgShellState,
+    
+    /// SHM state
+    pub shm_state: ShmState,
+    
+    /// Output manager state
+    pub output_state: OutputManagerState,
+    
+    /// Seat state
+    pub seat_state: SeatState<Self>,
+    
+    /// Data device state
+    pub data_device_state: DataDeviceState,
+    
+    /// Desktop space
+    pub space: Space<Window>,
+    
+    /// Graph scene (temporary until GraphEngine supports headless)
+    pub graph_scene: Arc<Mutex<horizonos_graph_engine::Scene>>,
+    
+    /// Node manager
+    pub node_manager: Arc<Mutex<NodeManager>>,
+    
+    /// Interaction manager
+    pub interaction_manager: Arc<Mutex<InteractionManager>>,
+    
+    /// Mapping from Wayland surfaces to graph nodes
+    pub surface_to_node: HashMap<WlSurface, SceneId>,
+    
+    /// Primary seat
+    pub seat: Seat<Self>,
+}
+
+impl CompositorState {
+    /// Create new compositor state
+    pub fn new(display: DisplayHandle, loop_handle: LoopHandle<'static, Self>) -> Result<Self> {
+        // Initialize Smithay states
+        let compositor_state = SmithayCompositorState::new::<Self>(&display);
+        let xdg_shell_state = XdgShellState::new::<Self>(&display);
+        let shm_state = ShmState::new::<Self>(&display, vec![]);
+        let output_state = OutputManagerState::new_with_xdg_output::<Self>(&display);
+        let mut seat_state = SeatState::new();
+        let data_device_state = DataDeviceState::new::<Self>(&display);
+        
+        // Create primary seat
+        let seat = seat_state.new_wl_seat(&display, "seat0");
+        
+        // Create desktop space
+        let space = Space::default();
+        
+        // Create graph engine components directly
+        // TODO: Refactor GraphEngine to support headless operation
+        let scene = horizonos_graph_engine::Scene::new();
+        let graph_engine = Arc::new(Mutex::new(scene));
+        
+        // Create managers
+        let node_manager = Arc::new(Mutex::new(NodeManager::new()));
+        let interaction_manager = Arc::new(Mutex::new(InteractionManager::new()));
+        
+        Ok(Self {
+            running: true,
+            display_handle: display,
+            loop_handle,
+            compositor_state,
+            xdg_shell_state,
+            shm_state,
+            output_state,
+            seat_state,
+            data_device_state,
+            space,
+            graph_scene: graph_engine,
+            node_manager,
+            interaction_manager,
+            surface_to_node: HashMap::new(),
+            seat,
+        })
+    }
+    
+    /// Initialize backend
+    pub fn init_backend(&mut self) -> Result<()> {
+        // This will be implemented in the backend module
+        Ok(())
+    }
+    
+    /// Handle new window
+    pub fn handle_new_window(&mut self, window: Window) {
+        // Add window to space
+        self.space.map_element(window.clone(), (0, 0), true);
+        
+        // Create a graph node for the window
+        if let Some(surface) = window.toplevel() {
+            let node_id = self.create_window_node(&window);
+            self.surface_to_node.insert(surface.wl_surface().clone(), node_id);
+        }
+    }
+    
+    /// Create a graph node for a window
+    fn create_window_node(&mut self, window: &Window) -> SceneId {
+        // Get window title
+        let title = window.toplevel()
+            .and_then(|t| t.with_pending_state(|state| state.title.clone()))
+            .unwrap_or_else(|| "Untitled".to_string());
+        
+        // Create node in graph scene
+        let mut scene = self.graph_scene.lock().unwrap();
+        let node_id = scene.next_id();
+        
+        // Create scene node
+        let node = horizonos_graph_engine::SceneNode {
+            id: node_id,
+            position: nalgebra::Point3::new(0.0, 0.0, 0.0),
+            velocity: nalgebra::Vector3::zeros(),
+            radius: 1.0,
+            color: [0.7, 0.7, 0.7, 1.0],
+            node_type: horizonos_graph_engine::NodeType::Application {
+                pid: 0, // TODO: Get actual PID
+                name: title,
+            },
+            metadata: horizonos_graph_engine::NodeMetadata::default(),
+            visible: true,
+            selected: false,
+        };
+        
+        scene.add_node(node);
+        node_id
+    }
+}
+
+/// Client data stored on each client
+#[derive(Default)]
+pub struct ClientState {
+    pub compositor_state: CompositorClientState,
+}
+
+impl ClientData for ClientState {
+    fn initialized(&self, _client_id: ClientId) {}
+    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+}
+
+// Smithay handler implementations
+impl CompositorHandler for CompositorState {
+    fn compositor_state(&mut self) -> &mut SmithayCompositorState {
+        &mut self.compositor_state
+    }
+
+    fn client_compositor_state<'a>(&self, client: &'a smithay::reexports::wayland_server::Client) -> &'a CompositorClientState {
+        &client.get_data::<ClientState>().unwrap().compositor_state
+    }
+
+    fn commit(&mut self, surface: &WlSurface) {
+        // Handle surface commits
+        if let Some(window) = self.space.elements().find(|w| {
+            w.toplevel().map(|t| t.wl_surface() == surface).unwrap_or(false)
+        }) {
+            window.on_commit();
+        }
+    }
+}
+
+impl BufferHandler for CompositorState {
+    fn buffer_destroyed(&mut self, _buffer: &wl_buffer::WlBuffer) {}
+}
+
+impl ShmHandler for CompositorState {
+    fn shm_state(&self) -> &ShmState {
+        &self.shm_state
+    }
+}
+
+impl XdgShellHandler for CompositorState {
+    fn xdg_shell_state(&mut self) -> &mut XdgShellState {
+        &mut self.xdg_shell_state
+    }
+
+    fn new_toplevel(&mut self, surface: ToplevelSurface) {
+        let window = Window::new_wayland_window(surface);
+        self.handle_new_window(window);
+    }
+
+    fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {
+        // TODO: Handle popups
+    }
+
+    fn move_request(&mut self, _surface: ToplevelSurface, _seat: smithay::input::Seat<Self>, _serial: smithay::utils::Serial) {
+        // TODO: Handle move requests
+    }
+
+    fn resize_request(&mut self, _surface: ToplevelSurface, _seat: smithay::input::Seat<Self>, _serial: smithay::utils::Serial, _edges: xdg_toplevel::ResizeEdge) {
+        // TODO: Handle resize requests
+    }
+
+    fn grab(&mut self, _surface: PopupSurface, _seat: smithay::input::Seat<Self>, _serial: smithay::utils::Serial) {
+        // TODO: Handle popup grabs
+    }
+
+    fn reposition_request(&mut self, _surface: PopupSurface, _positioner: PositionerState, _token: u32) {
+        // TODO: Handle reposition requests
+    }
+}
+
+impl SeatHandler for CompositorState {
+    type KeyboardFocus = WlSurface;
+    type PointerFocus = WlSurface;
+    type TouchFocus = WlSurface;
+
+    fn seat_state(&mut self) -> &mut SeatState<Self> {
+        &mut self.seat_state
+    }
+
+    fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {
+        // TODO: Handle cursor image changes
+    }
+
+    fn focus_changed(&mut self, _seat: &Seat<Self>, _focused: Option<&WlSurface>) {
+        // TODO: Handle focus changes
+    }
+}
+
+impl DataDeviceHandler for CompositorState {
+    fn data_device_state(&self) -> &DataDeviceState {
+        &self.data_device_state
+    }
+}
+
+impl ClientDndGrabHandler for CompositorState {}
+impl ServerDndGrabHandler for CompositorState {}
+
+impl OutputHandler for CompositorState {}
+
+// Delegate macros
+delegate_compositor!(CompositorState);
+delegate_shm!(CompositorState);
+delegate_xdg_shell!(CompositorState);
+delegate_seat!(CompositorState);
+delegate_data_device!(CompositorState);
+delegate_output!(CompositorState);

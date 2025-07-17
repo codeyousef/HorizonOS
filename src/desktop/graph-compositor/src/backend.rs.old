@@ -1,0 +1,277 @@
+//! Backend management for the compositor
+
+use smithay::{
+    backend::{
+        allocator::{
+            dmabuf::Dmabuf,
+            gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
+            Allocator,
+        },
+        drm::{
+            DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmEventMetadata,
+            DrmNode, NodeType,
+        },
+        egl::{EGLContext, EGLDevice},
+        libinput::{LibinputInputBackend, LibinputSessionInterface},
+        renderer::{
+            damage::OutputDamageTracker,
+            element::surface::WaylandSurfaceRenderElement,
+            gles::GlesRenderer,
+            ImportDma, ImportEgl, Renderer,
+        },
+        session::{libseat::LibSeatSession, Session},
+        udev::{self, UdevBackend},
+    },
+    desktop::space::SpaceElement,
+    output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
+    reexports::{
+        calloop::{EventLoop, LoopHandle},
+        drm::control::{connector, crtc, ModeTypeFlags},
+        input::Libinput,
+        nix::{fcntl::OFlag, sys::stat::dev_t},
+        wayland_server::{Display, DisplayHandle},
+    },
+    utils::{DeviceFd, Size, Transform},
+};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{Arc, Mutex},
+};
+use anyhow::{Context, Result};
+
+/// Backend type
+pub enum Backend {
+    /// DRM/KMS backend for TTY
+    Drm(DrmBackend),
+    /// Winit backend for development
+    Winit(WinitBackend),
+}
+
+/// DRM/KMS backend
+pub struct DrmBackend {
+    /// Session
+    session: LibSeatSession,
+    /// GPU data
+    gpus: HashMap<DrmNode, GpuData>,
+    /// Primary GPU
+    primary_gpu: DrmNode,
+}
+
+/// Data associated with a GPU
+pub struct GpuData {
+    /// DRM device
+    device: DrmDevice,
+    /// GBM device
+    gbm: GbmDevice<DrmDeviceFd>,
+    /// GBM allocator
+    allocator: GbmAllocator<DrmDeviceFd>,
+    /// Renderer
+    renderer: GlesRenderer,
+    /// Surfaces (one per CRTC/output)
+    surfaces: HashMap<crtc::Handle, Surface>,
+}
+
+/// Surface data
+pub struct Surface {
+    /// Output
+    output: Output,
+    /// Damage tracker
+    damage_tracker: OutputDamageTracker,
+}
+
+/// Winit backend for development
+pub struct WinitBackend {
+    // TODO: Implement winit backend
+}
+
+impl Backend {
+    /// Create a new backend
+    pub fn new_auto(display: &DisplayHandle, event_loop: &EventLoop<crate::CompositorState>) -> Result<Self> {
+        // Try to create DRM backend first
+        if let Ok(backend) = DrmBackend::new(display, event_loop) {
+            return Ok(Backend::Drm(backend));
+        }
+        
+        // Fall back to winit
+        log::info!("Failed to create DRM backend, falling back to winit");
+        Ok(Backend::Winit(WinitBackend::new(display, event_loop)?))
+    }
+    
+    /// Initialize outputs
+    pub fn init_outputs(&mut self, display: &DisplayHandle) -> Result<()> {
+        match self {
+            Backend::Drm(backend) => backend.init_outputs(display),
+            Backend::Winit(backend) => backend.init_outputs(display),
+        }
+    }
+}
+
+impl DrmBackend {
+    /// Create a new DRM backend
+    pub fn new(display: &DisplayHandle, event_loop: &EventLoop<crate::CompositorState>) -> Result<Self> {
+        // Create session
+        let (session, notifier) = LibSeatSession::new()
+            .context("Failed to create libseat session")?;
+        
+        // Create udev backend
+        let udev_backend = UdevBackend::new(session.seat())?;
+        
+        // Find primary GPU
+        let primary_gpu = udev_backend
+            .device_list()
+            .find_map(|device| {
+                let node = DrmNode::from_dev_id(device.devnum()).ok()?;
+                if device.property_value("ID_SEAT").unwrap_or("seat0".into()) == session.seat() {
+                    Some(node)
+                } else {
+                    None
+                }
+            })
+            .context("No GPU found")?;
+        
+        let mut backend = Self {
+            session,
+            gpus: HashMap::new(),
+            primary_gpu,
+        };
+        
+        // Initialize primary GPU
+        backend.init_gpu(primary_gpu)?;
+        
+        Ok(backend)
+    }
+    
+    /// Initialize a GPU
+    fn init_gpu(&mut self, node: DrmNode) -> Result<()> {
+        // Open DRM device
+        let fd = self.session.open(
+            &node.dev_path()?,
+            OFlag::O_RDWR | OFlag::O_CLOEXEC | OFlag::O_NOCTTY | OFlag::O_NONBLOCK,
+        )?;
+        
+        let device_fd = DrmDeviceFd::new(DeviceFd::from(fd));
+        let device = DrmDevice::new(device_fd.clone(), true)?;
+        
+        // Create GBM device
+        let gbm = GbmDevice::new(device_fd.clone())?;
+        
+        // Create allocator
+        let allocator = GbmAllocator::new(
+            gbm.clone(),
+            GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
+        );
+        
+        // Create renderer
+        let egl = EGLDevice::device_for_display(&gbm)?
+            .context("Failed to create EGL device")?;
+        let context = EGLContext::new(&egl)?;
+        let renderer = unsafe { GlesRenderer::new(context)? };
+        
+        let gpu_data = GpuData {
+            device,
+            gbm,
+            allocator,
+            renderer,
+            surfaces: HashMap::new(),
+        };
+        
+        self.gpus.insert(node, gpu_data);
+        Ok(())
+    }
+    
+    /// Initialize outputs
+    pub fn init_outputs(&mut self, display: &DisplayHandle) -> Result<()> {
+        let gpu = self.gpus.get_mut(&self.primary_gpu)
+            .context("Primary GPU not initialized")?;
+        
+        // Get available CRTCs and connectors
+        let res = gpu.device.resource_handles()?;
+        
+        // Find connected outputs
+        for connector in res.connectors() {
+            let conn_info = gpu.device.get_connector(*connector, false)?;
+            
+            if conn_info.state() != connector::State::Connected {
+                continue;
+            }
+            
+            // Find suitable CRTC
+            let crtc = res.crtcs()
+                .iter()
+                .find(|crtc| {
+                    // Check if CRTC is available
+                    // TODO: Proper CRTC allocation
+                    true
+                })
+                .copied()
+                .context("No available CRTC")?;
+            
+            // Get preferred mode
+            let mode = conn_info.modes()
+                .iter()
+                .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
+                .or_else(|| conn_info.modes().first())
+                .context("No modes available")?;
+            
+            // Create output
+            let output_name = format!("{}-{}", 
+                conn_info.interface().as_str(),
+                conn_info.interface_id()
+            );
+            
+            let output = Output::new(
+                output_name,
+                PhysicalProperties {
+                    size: (conn_info.size().unwrap_or((0, 0)).into()),
+                    subpixel: Subpixel::Unknown,
+                    make: "Unknown".into(),
+                    model: "Unknown".into(),
+                },
+            );
+            
+            // Set mode
+            let mode = Mode {
+                size: (mode.size().0 as i32, mode.size().1 as i32).into(),
+                refresh: mode.vrefresh() as i32 * 1000,
+            };
+            
+            output.change_current_state(
+                Some(mode),
+                Some(Transform::Normal),
+                Some(Scale::Fractional(1.0)),
+                None,
+            );
+            output.set_preferred(mode);
+            
+            // Create global
+            output.create_global::<crate::CompositorState>(display);
+            
+            // Create surface
+            let surface = Surface {
+                output: output.clone(),
+                damage_tracker: OutputDamageTracker::from_output(&output),
+            };
+            
+            gpu.surfaces.insert(crtc, surface);
+            
+            log::info!("Initialized output: {}", output_name);
+        }
+        
+        Ok(())
+    }
+}
+
+impl WinitBackend {
+    /// Create a new winit backend
+    pub fn new(display: &DisplayHandle, event_loop: &EventLoop<crate::CompositorState>) -> Result<Self> {
+        // TODO: Implement winit backend
+        Ok(Self {})
+    }
+    
+    /// Initialize outputs
+    pub fn init_outputs(&mut self, display: &DisplayHandle) -> Result<()> {
+        // TODO: Create virtual output
+        Ok(())
+    }
+}

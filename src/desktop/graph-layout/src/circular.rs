@@ -145,7 +145,7 @@ impl CircularLayout {
         
         let mut current_radius = spacing;
         let mut current_angle = self.start_angle;
-        let angle_increment = spacing / current_radius; // Adaptive angle increment
+        let mut angle_increment = spacing / current_radius; // Adaptive angle increment
         
         for node in nodes {
             let x = self.center.x + current_radius * current_angle.cos();

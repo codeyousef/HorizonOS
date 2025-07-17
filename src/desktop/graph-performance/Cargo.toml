@@ -1,14 +1,15 @@
 [package]
-name = "horizonos-graph-interaction"
+name = "horizonos-graph-performance"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 horizonos-graph-engine = { path = "../graph-engine" }
 horizonos-graph-nodes = { path = "../graph-nodes" }
-horizonos-graph-clustering = { path = "../graph-clustering" }
 serde = { workspace = true }
-tokio = { workspace = true }
-winit = { workspace = true }
 nalgebra = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
 log = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }

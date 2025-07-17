@@ -1,0 +1,13 @@
+[package]
+name = "horizonos-graph-visual"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Utilities
+anyhow = "1.0"
+log = "0.4"
+
+# Graph components
+horizonos-graph-engine = { path = "../graph-engine" }
+horizonos-graph-nodes = { path = "../graph-nodes" }

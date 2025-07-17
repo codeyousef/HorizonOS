@@ -161,6 +161,11 @@ impl Renderer {
         Ok(())
     }
     
+    /// Get current window size
+    pub fn window_size(&self) -> (u32, u32) {
+        (self.surface_config.width, self.surface_config.height)
+    }
+    
     /// Create depth texture and view
     fn create_depth_texture(device: &Device, config: &SurfaceConfiguration) -> (wgpu::Texture, wgpu::TextureView) {
         let size = wgpu::Extent3d {

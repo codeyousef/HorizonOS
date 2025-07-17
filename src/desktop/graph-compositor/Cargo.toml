@@ -1,0 +1,30 @@
+[package]
+name = "horizonos-graph-compositor"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "horizonos-compositor"
+path = "src/main.rs"
+
+[dependencies]
+horizonos-graph-engine = { path = "../graph-engine" }
+horizonos-graph-nodes = { path = "../graph-nodes" }
+horizonos-graph-interaction = { path = "../graph-interaction" }
+serde = { workspace = true }
+tokio = { workspace = true }
+smithay = { workspace = true }
+wayland-server = { workspace = true }
+wayland-backend = { workspace = true }
+wayland-protocols = { workspace = true }
+calloop = { workspace = true }
+input = { workspace = true }
+gbm = { workspace = true }
+drm = { workspace = true }
+xkbcommon = { workspace = true }
+log = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+nalgebra = { workspace = true }
+chrono = { workspace = true }
+env_logger = { workspace = true }

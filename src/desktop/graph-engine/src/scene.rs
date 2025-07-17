@@ -204,8 +204,8 @@ impl Scene {
     }
     
     /// Get all nodes
-    pub fn nodes(&self) -> impl Iterator<Item = &SceneNode> {
-        self.nodes.values()
+    pub fn nodes(&self) -> impl Iterator<Item = (&SceneId, &SceneNode)> {
+        self.nodes.iter()
     }
     
     /// Get all edges
@@ -265,6 +265,21 @@ impl Scene {
         
         // Remove the node
         self.nodes.remove(&node_id)
+    }
+    
+    /// Get node position by ID
+    pub fn get_node_position(&self, node_id: SceneId) -> Option<Position> {
+        self.nodes.get(&node_id).map(|node| node.position)
+    }
+    
+    /// Get all node IDs
+    pub fn get_all_nodes(&self) -> Vec<SceneId> {
+        self.nodes.keys().copied().collect()
+    }
+    
+    /// Get all edges
+    pub fn get_all_edges(&self) -> Vec<&SceneEdge> {
+        self.edges.values().collect()
     }
     
     /// Clear the entire scene

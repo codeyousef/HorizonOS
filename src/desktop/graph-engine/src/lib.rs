@@ -38,6 +38,13 @@ pub struct GraphEngine {
 }
 
 impl GraphEngine {
+    /// Create a new graph engine for headless operation (compositor mode)
+    pub fn new_headless() -> Result<Self, GraphEngineError> {
+        // For headless mode, we only need scene management
+        // The compositor will handle its own rendering
+        Err(GraphEngineError::System("Headless mode requires refactoring to make renderer optional".into()))
+    }
+    
     /// Initialize the graph engine with a window
     pub async fn new(window: Arc<Window>) -> Result<Self, GraphEngineError> {
         log::info!("Initializing HorizonOS Graph Engine");
@@ -142,6 +149,11 @@ impl GraphEngine {
     /// Get mutable reference to the physics engine
     pub fn physics_mut(&mut self) -> &mut PhysicsEngine {
         &mut self.physics
+    }
+    
+    /// Get current window size
+    pub fn window_size(&self) -> (u32, u32) {
+        self.renderer.window_size()
     }
 }
 

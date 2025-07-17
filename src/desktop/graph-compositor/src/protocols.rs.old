@@ -1,0 +1,166 @@
+//! Custom Wayland protocols for the graph compositor
+
+use smithay::reexports::wayland_server::{
+    protocol::wl_surface::WlSurface,
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+};
+use std::sync::{Arc, Mutex};
+
+/// Graph shell protocol for graph-aware clients
+pub mod graph_shell {
+    use super::*;
+    
+    /// Version of the graph shell protocol
+    pub const VERSION: u32 = 1;
+    
+    /// Graph shell global
+    pub struct GraphShellGlobal {
+        /// Display handle
+        display: DisplayHandle,
+    }
+    
+    impl GraphShellGlobal {
+        /// Create a new graph shell global
+        pub fn new(display: &DisplayHandle) -> Self {
+            display.create_global::<crate::CompositorState, Self>(VERSION, ());
+            Self {
+                display: display.clone(),
+            }
+        }
+    }
+    
+    /// Graph shell state for a client
+    pub struct GraphShellState {
+        /// Surfaces managed by this client
+        surfaces: Vec<WlSurface>,
+    }
+    
+    /// Graph surface role
+    pub struct GraphSurfaceRole {
+        /// Surface
+        surface: WlSurface,
+        /// Node type hint
+        node_type_hint: Option<String>,
+        /// Relationship hints
+        relationship_hints: Vec<RelationshipHint>,
+        /// Tags
+        tags: Vec<String>,
+    }
+    
+    /// Relationship hint from client
+    #[derive(Debug, Clone)]
+    pub struct RelationshipHint {
+        /// Target surface or identifier
+        pub target: String,
+        /// Relationship type
+        pub relationship_type: String,
+        /// Strength (0.0 to 1.0)
+        pub strength: f32,
+    }
+}
+
+/// Layer shell implementation for panels, docks, etc.
+pub mod layer_shell {
+    use super::*;
+    use smithay::wayland::shell::wlr_layer::{
+        Layer, LayerSurface, LayerSurfaceData, WlrLayerShellGlobal, WlrLayerShellHandler,
+    };
+    
+    /// Initialize layer shell
+    pub fn init_layer_shell(display: &DisplayHandle) -> WlrLayerShellGlobal {
+        WlrLayerShellGlobal::new::<crate::CompositorState>(display, 4)
+    }
+}
+
+/// Screenshot protocol
+pub mod screenshot {
+    use super::*;
+    
+    /// Screenshot manager
+    pub struct ScreenshotManager {
+        /// Pending screenshot requests
+        pending: Vec<ScreenshotRequest>,
+    }
+    
+    /// Screenshot request
+    pub struct ScreenshotRequest {
+        /// Output to capture
+        pub output: Option<String>,
+        /// Region to capture
+        pub region: Option<(i32, i32, i32, i32)>,
+        /// Include cursor
+        pub include_cursor: bool,
+        /// Callback
+        pub callback: Box<dyn FnOnce(Result<Vec<u8>, String>) + Send>,
+    }
+    
+    impl ScreenshotManager {
+        /// Create a new screenshot manager
+        pub fn new() -> Self {
+            Self {
+                pending: Vec::new(),
+            }
+        }
+        
+        /// Request a screenshot
+        pub fn request_screenshot<F>(&mut self, request: ScreenshotRequest) {
+            self.pending.push(request);
+        }
+        
+        /// Process pending screenshots
+        pub fn process_pending(&mut self) {
+            // TODO: Implement screenshot capture
+        }
+    }
+}
+
+/// Idle inhibit protocol
+pub mod idle_inhibit {
+    use super::*;
+    use smithay::wayland::idle_inhibit::{
+        IdleInhibitHandler, IdleInhibitManagerGlobal, IdleInhibitManagerState,
+    };
+    
+    /// Initialize idle inhibit
+    pub fn init_idle_inhibit(display: &DisplayHandle) -> IdleInhibitManagerGlobal {
+        IdleInhibitManagerGlobal::new::<crate::CompositorState>(display, 1)
+    }
+}
+
+/// Virtual keyboard protocol
+pub mod virtual_keyboard {
+    use super::*;
+    use smithay::wayland::virtual_keyboard::{
+        VirtualKeyboardManagerGlobal, VirtualKeyboardManagerState,
+    };
+    
+    /// Initialize virtual keyboard
+    pub fn init_virtual_keyboard(display: &DisplayHandle) -> VirtualKeyboardManagerGlobal {
+        VirtualKeyboardManagerGlobal::new::<crate::CompositorState>(display, 1)
+    }
+}
+
+/// Protocol initialization
+pub fn init_protocols(display: &DisplayHandle) -> Protocols {
+    Protocols {
+        graph_shell: graph_shell::GraphShellGlobal::new(display),
+        layer_shell: layer_shell::init_layer_shell(display),
+        idle_inhibit: idle_inhibit::init_idle_inhibit(display),
+        virtual_keyboard: virtual_keyboard::init_virtual_keyboard(display),
+        screenshot: Arc::new(Mutex::new(screenshot::ScreenshotManager::new())),
+    }
+}
+
+/// All protocol handlers
+pub struct Protocols {
+    /// Graph shell
+    pub graph_shell: graph_shell::GraphShellGlobal,
+    /// Layer shell
+    pub layer_shell: smithay::wayland::shell::wlr_layer::WlrLayerShellGlobal,
+    /// Idle inhibit
+    pub idle_inhibit: smithay::wayland::idle_inhibit::IdleInhibitManagerGlobal,
+    /// Virtual keyboard
+    pub virtual_keyboard: smithay::wayland::virtual_keyboard::VirtualKeyboardManagerGlobal,
+    /// Screenshot manager
+    pub screenshot: Arc<Mutex<screenshot::ScreenshotManager>>,
+}

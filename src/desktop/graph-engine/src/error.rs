@@ -30,4 +30,7 @@ pub enum GraphEngineError {
     
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+    
+    #[error("System error: {0}")]
+    System(String),
 }

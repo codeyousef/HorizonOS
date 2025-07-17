@@ -65,25 +65,42 @@ pub struct EdgeMetadata {
 }
 
 /// Errors that can occur during edge operations
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum EdgeError {
-    #[error("Edge not found: {id}")]
     EdgeNotFound { id: SceneId },
-    
-    #[error("Invalid relationship: {source} -> {target}")]
     InvalidRelationship { source: SceneId, target: SceneId },
-    
-    #[error("Circular dependency detected")]
     CircularDependency,
-    
-    #[error("Maximum edges exceeded for node: {node_id}")]
     MaxEdgesExceeded { node_id: SceneId },
-    
-    #[error("Serialization error: {0}")]
-    SerializationError(#[from] serde_json::Error),
-    
-    #[error("System error: {message}")]
+    SerializationError(serde_json::Error),
     SystemError { message: String },
+}
+
+impl std::fmt::Display for EdgeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EdgeError::EdgeNotFound { id } => write!(f, "Edge not found: {}", id),
+            EdgeError::InvalidRelationship { source, target } => write!(f, "Invalid relationship: {} -> {}", source, target),
+            EdgeError::CircularDependency => write!(f, "Circular dependency detected"),
+            EdgeError::MaxEdgesExceeded { node_id } => write!(f, "Maximum edges exceeded for node: {}", node_id),
+            EdgeError::SerializationError(e) => write!(f, "Serialization error: {}", e),
+            EdgeError::SystemError { message } => write!(f, "System error: {}", message),
+        }
+    }
+}
+
+impl std::error::Error for EdgeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            EdgeError::SerializationError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<serde_json::Error> for EdgeError {
+    fn from(err: serde_json::Error) -> Self {
+        EdgeError::SerializationError(err)
+    }
 }
 
 impl Default for RelationshipData {

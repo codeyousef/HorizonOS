@@ -1,0 +1,119 @@
+//! Core compositor functionality
+
+use smithay::{
+    backend::renderer::{
+        element::{surface::WaylandSurfaceRenderElement, AsRenderElements},
+        ImportAll, Renderer,
+    },
+    desktop::{Space, Window},
+    output::Output,
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Physical, Point, Rectangle, Scale},
+};
+use crate::state::CompositorState;
+
+/// Render the compositor output
+pub fn render_output<R>(
+    renderer: &mut R,
+    output: &Output,
+    state: &CompositorState,
+) -> Result<(), R::Error>
+where
+    R: Renderer + ImportAll,
+    <R as Renderer>::TextureId: 'static,
+{
+    let output_geometry = output.geometry();
+    let scale = output.current_scale().fractional_scale();
+    
+    // Clear the frame
+    renderer.clear([0.1, 0.1, 0.1, 1.0])?;
+    
+    // Render all windows
+    let elements = state.space
+        .elements()
+        .filter_map(|window| {
+            window.render_elements(
+                renderer,
+                (0, 0).into(),
+                Scale::from(scale),
+                1.0,
+            ).ok()
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+    
+    // Draw elements
+    for element in elements {
+        renderer.draw_element(
+            element,
+            output_geometry,
+            Scale::from(scale),
+        )?;
+    }
+    
+    Ok(())
+}
+
+/// Handle surface commit
+pub fn handle_surface_commit(state: &mut CompositorState, surface: &WlSurface) {
+    // Find window for this surface
+    if let Some(window) = state.space.elements().find(|w| {
+        w.toplevel().map(|t| t.wl_surface() == surface).unwrap_or(false)
+    }) {
+        window.on_commit();
+    }
+    
+    // Update graph node if needed
+    if let Some(node_id) = state.surface_to_node.get(surface) {
+        // TODO: Update node properties based on surface state
+    }
+}
+
+/// Position windows based on graph layout
+pub fn layout_windows(state: &mut CompositorState) {
+    let scene = state.graph_scene.lock().unwrap();
+    
+    // Map graph positions to screen positions
+    let output = state.space.outputs().next();
+    if let Some(output) = output {
+        let output_size = output.geometry().size;
+        
+        for (surface, node_id) in &state.surface_to_node {
+            if let Some(node) = scene.get_node(*node_id) {
+                // Convert 3D graph position to 2D screen position
+                let screen_x = ((node.position.x + 10.0) / 20.0 * output_size.w as f32) as i32;
+                let screen_y = ((node.position.y + 10.0) / 20.0 * output_size.h as f32) as i32;
+                
+                // Find window for surface
+                if let Some(window) = state.space.elements().find(|w| {
+                    w.toplevel().map(|t| t.wl_surface() == surface).unwrap_or(false)
+                }) {
+                    state.space.map_element(window.clone(), (screen_x, screen_y), false);
+                }
+            }
+        }
+    }
+}
+
+/// Focus window based on graph selection
+pub fn update_focus(state: &mut CompositorState) {
+    let interaction = state.interaction_manager.lock().unwrap();
+    let selection = interaction.selection().get_primary_selection();
+    
+    if let Some(selected_node) = selection {
+        // Find surface for selected node
+        let surface = state.surface_to_node
+            .iter()
+            .find(|(_, node_id)| **node_id == selected_node)
+            .map(|(surface, _)| surface.clone());
+        
+        if let Some(surface) = surface {
+            // Set keyboard focus
+            state.seat.get_keyboard().unwrap().set_focus(
+                state,
+                Some(surface),
+                smithay::utils::SERIAL_COUNTER.next_serial(),
+            );
+        }
+    }
+}

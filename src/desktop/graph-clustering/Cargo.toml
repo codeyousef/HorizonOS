@@ -1,0 +1,32 @@
+[package]
+name = "horizonos-graph-clustering"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Math and algorithms  
+nalgebra = "0.32"
+petgraph = "0.6"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Utilities
+anyhow = "1.0"
+thiserror = "1.0"
+log = "0.4"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Collections
+dashmap = "6.1"
+indexmap = "2.0"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Graph components
+horizonos-graph-engine = { path = "../graph-engine" }
+horizonos-graph-nodes = { path = "../graph-nodes" }
+horizonos-graph-edges = { path = "../graph-edges" }
+horizonos-graph-visual = { path = "../graph-visual" }

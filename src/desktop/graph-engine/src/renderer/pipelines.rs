@@ -334,9 +334,9 @@ impl NodePipeline {
         
         // Collect instance data
         let instances: Vec<NodeInstance> = scene.nodes()
-            .filter(|node| node.visible)
+            .filter(|(_, node)| node.visible)
             .take(self.max_instances)
-            .map(|node| NodeInstance {
+            .map(|(_, node)| NodeInstance {
                 position: [node.position.x, node.position.y, node.position.z],
                 color: node.color,
                 radius: node.radius,

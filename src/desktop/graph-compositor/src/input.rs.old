@@ -1,0 +1,240 @@
+//! Input handling for the compositor
+
+use smithay::{
+    backend::input::{
+        AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend,
+        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+        PointerMotionAbsoluteEvent, PointerMotionEvent,
+    },
+    input::{
+        keyboard::{keysyms, FilterResult, Keysym, ModifiersState},
+        pointer::{AxisFrame, ButtonEvent, MotionEvent},
+    },
+    utils::{Logical, Point, SERIAL_COUNTER},
+};
+use crate::CompositorState;
+
+/// Process input events
+pub fn process_input_event<I: InputBackend>(
+    state: &mut CompositorState,
+    event: InputEvent<I>,
+) {
+    match event {
+        InputEvent::Keyboard { event } => handle_keyboard(state, event),
+        InputEvent::PointerMotion { event } => handle_pointer_motion(state, event),
+        InputEvent::PointerMotionAbsolute { event } => handle_pointer_absolute(state, event),
+        InputEvent::PointerButton { event } => handle_pointer_button(state, event),
+        InputEvent::PointerAxis { event } => handle_pointer_axis(state, event),
+        _ => {} // Handle other events as needed
+    }
+}
+
+/// Handle keyboard events
+fn handle_keyboard<E: KeyboardKeyEvent>(state: &mut CompositorState, event: E) {
+    let serial = SERIAL_COUNTER.next_serial();
+    let time = Event::time_msec(&event);
+    let key_code = event.key_code();
+    let keyboard = state.seat.get_keyboard().unwrap();
+    
+    // Update keyboard state
+    keyboard.input::<(), _>(
+        state,
+        key_code,
+        event.state(),
+        serial,
+        time,
+        |state, modifiers, handle| {
+            // Check for compositor shortcuts
+            if modifiers.alt && event.state() == KeyState::Pressed {
+                match handle.modified_sym() {
+                    // Alt+Q to quit
+                    keysyms::KEY_q => {
+                        state.running = false;
+                        return FilterResult::Intercept(());
+                    }
+                    // Alt+Tab for window switching via graph
+                    keysyms::KEY_Tab => {
+                        cycle_windows_graph(state);
+                        return FilterResult::Intercept(());
+                    }
+                    _ => {}
+                }
+            }
+            
+            FilterResult::Forward
+        },
+    );
+}
+
+/// Handle pointer motion
+fn handle_pointer_motion<E: PointerMotionEvent>(state: &mut CompositorState, event: E) {
+    let serial = SERIAL_COUNTER.next_serial();
+    let delta = event.delta();
+    
+    let pointer = state.seat.get_pointer().unwrap();
+    
+    // Update pointer position
+    let current_location = pointer.current_location();
+    let new_location = current_location + Point::from((delta.0, delta.1));
+    
+    // Send motion event through graph interaction system
+    let mut interaction = state.interaction_manager.lock().unwrap();
+    let win_event = winit::event::WindowEvent::CursorMoved {
+        device_id: unsafe { winit::event::DeviceId::from_raw(0) },
+        position: winit::dpi::PhysicalPosition::new(new_location.x, new_location.y),
+    };
+    
+    // Update pointer focus
+    let surface_under = state.space.element_under(new_location)
+        .and_then(|(window, loc)| {
+            window.surface_under(new_location - loc.to_f64(), WindowSurfaceType::ALL)
+        });
+    
+    pointer.motion(
+        state,
+        surface_under.map(|(s, _)| s),
+        &MotionEvent {
+            location: new_location,
+            serial,
+            time: Event::time_msec(&event),
+        },
+    );
+}
+
+/// Handle absolute pointer motion
+fn handle_pointer_absolute<E: PointerMotionAbsoluteEvent>(
+    state: &mut CompositorState,
+    event: E,
+) {
+    let serial = SERIAL_COUNTER.next_serial();
+    let pointer = state.seat.get_pointer().unwrap();
+    
+    // Get output dimensions
+    let output = state.space.outputs().next().unwrap();
+    let output_geometry = output.geometry();
+    
+    let position = event.position_transformed(output_geometry.size);
+    let location = Point::<f64, Logical>::from((position.0, position.1)) + output_geometry.loc.to_f64();
+    
+    // Find surface under pointer
+    let surface_under = state.space.element_under(location)
+        .and_then(|(window, loc)| {
+            window.surface_under(location - loc.to_f64(), WindowSurfaceType::ALL)
+        });
+    
+    pointer.motion(
+        state,
+        surface_under.map(|(s, _)| s),
+        &MotionEvent {
+            location,
+            serial,
+            time: Event::time_msec(&event),
+        },
+    );
+}
+
+/// Handle pointer button events
+fn handle_pointer_button<E: PointerButtonEvent>(state: &mut CompositorState, event: E) {
+    let serial = SERIAL_COUNTER.next_serial();
+    let button = event.button_code();
+    let pointer = state.seat.get_pointer().unwrap();
+    
+    // Convert button state
+    let button_state = match event.state() {
+        ButtonState::Pressed => smithay::input::pointer::ButtonState::Pressed,
+        ButtonState::Released => smithay::input::pointer::ButtonState::Released,
+    };
+    
+    // Handle button through graph interaction
+    if button_state == smithay::input::pointer::ButtonState::Pressed {
+        // Check if clicking on a window
+        let location = pointer.current_location();
+        if let Some((window, _)) = state.space.element_under(location) {
+            // Focus the window
+            state.space.raise_element(&window, true);
+            
+            // Update graph selection
+            if let Some(surface) = window.toplevel() {
+                if let Some(node_id) = state.surface_to_node.get(surface.wl_surface()) {
+                    let mut interaction = state.interaction_manager.lock().unwrap();
+                    interaction.selection().set_selection(vec![*node_id]);
+                }
+            }
+        }
+    }
+    
+    pointer.button(
+        state,
+        &ButtonEvent {
+            button,
+            state: button_state,
+            serial,
+            time: Event::time_msec(&event),
+        },
+    );
+}
+
+/// Handle pointer axis events (scroll)
+fn handle_pointer_axis<E: PointerAxisEvent>(state: &mut CompositorState, event: E) {
+    let pointer = state.seat.get_pointer().unwrap();
+    let mut frame = AxisFrame::new(Event::time_msec(&event)).source(event.source());
+    
+    // Handle horizontal scroll
+    if let Some(amount) = event.amount(Axis::Horizontal) {
+        frame = frame.value(Axis::Horizontal, amount);
+        if let Some(discrete) = event.amount_discrete(Axis::Horizontal) {
+            frame = frame.discrete(Axis::Horizontal, discrete as i32);
+        }
+    }
+    
+    // Handle vertical scroll
+    if let Some(amount) = event.amount(Axis::Vertical) {
+        frame = frame.value(Axis::Vertical, amount);
+        if let Some(discrete) = event.amount_discrete(Axis::Vertical) {
+            frame = frame.discrete(Axis::Vertical, discrete as i32);
+        }
+    }
+    
+    // Send scroll to graph for zoom/pan
+    if event.source() == AxisSource::Wheel {
+        let mut interaction = state.interaction_manager.lock().unwrap();
+        // TODO: Convert to graph zoom/pan
+    }
+    
+    pointer.axis(state, frame);
+}
+
+/// Cycle through windows using graph traversal
+fn cycle_windows_graph(state: &mut CompositorState) {
+    let scene = state.graph_scene.lock().unwrap();
+    let interaction = state.interaction_manager.lock().unwrap();
+    
+    // Get current selection
+    if let Some(current) = interaction.selection().get_primary_selection() {
+        // Find connected nodes
+        let edges = scene.get_connected_edges(current);
+        
+        // Pick next node (simple traversal for now)
+        if let Some(edge) = edges.first() {
+            let next_node = if edge.source == current {
+                edge.target
+            } else {
+                edge.source
+            };
+            
+            // Focus window for next node
+            if let Some((surface, _)) = state.surface_to_node
+                .iter()
+                .find(|(_, node_id)| **node_id == next_node)
+            {
+                state.seat.get_keyboard().unwrap().set_focus(
+                    state,
+                    Some(surface.clone()),
+                    SERIAL_COUNTER.next_serial(),
+                );
+            }
+        }
+    }
+}
+
+use smithay::desktop::WindowSurfaceType;

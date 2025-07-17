@@ -1,8 +1,8 @@
 //! Relationship analysis and discovery for graph edges
 
-use crate::{GraphEdge, EdgeError, RelationshipData};
+use crate::{GraphEdge};
 use horizonos_graph_engine::{SceneId, EdgeType};
-use horizonos_graph_nodes::{GraphNode, ApplicationNode, FileNode};
+use horizonos_graph_nodes::{GraphNode};
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
@@ -235,7 +235,7 @@ impl RelationshipAnalyzer {
             return Some(RelationshipAnalysis {
                 source_id: source.id(),
                 target_id: target.id(),
-                suggested_edge_type: EdgeType::Temporal { sequence_order: id_diff as i32 },
+                suggested_edge_type: EdgeType::Temporal { sequence_order: id_diff as u32 },
                 confidence,
                 strength: confidence,
                 evidence: vec![format!("Temporal proximity detected (ID diff: {})", id_diff)],

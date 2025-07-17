@@ -1,0 +1,220 @@
+//! Output management for the compositor
+
+use smithay::{
+    backend::{
+        allocator::{dmabuf::Dmabuf, Format},
+        drm::{DrmNode, DrmError},
+        renderer::{
+            damage::OutputDamageTracker,
+            element::surface::WaylandSurfaceRenderElement,
+            gles::GlesRenderer,
+        },
+    },
+    output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
+    reexports::{
+        drm::control::{connector, crtc, ModeTypeFlags},
+        wayland_server::DisplayHandle,
+    },
+    utils::{Size, Transform, Physical, Rectangle},
+};
+use std::collections::HashMap;
+use anyhow::Result;
+
+/// Output configuration
+#[derive(Debug, Clone)]
+pub struct OutputConfig {
+    /// Output name
+    pub name: String,
+    /// Mode (resolution and refresh rate)
+    pub mode: Option<Mode>,
+    /// Scale factor
+    pub scale: f64,
+    /// Transform (rotation)
+    pub transform: Transform,
+    /// Position in the global space
+    pub position: (i32, i32),
+}
+
+/// Manage outputs for the compositor
+pub struct OutputManager {
+    /// All outputs
+    outputs: HashMap<String, ManagedOutput>,
+    /// Output configurations
+    configs: HashMap<String, OutputConfig>,
+}
+
+/// A managed output
+pub struct ManagedOutput {
+    /// Smithay output
+    pub output: Output,
+    /// Damage tracker
+    pub damage_tracker: OutputDamageTracker,
+    /// Renderer for this output
+    pub renderer: Option<GlesRenderer>,
+    /// DRM node (if applicable)
+    pub drm_node: Option<DrmNode>,
+    /// CRTC handle (if applicable)
+    pub crtc: Option<crtc::Handle>,
+}
+
+impl OutputManager {
+    /// Create a new output manager
+    pub fn new() -> Self {
+        Self {
+            outputs: HashMap::new(),
+            configs: HashMap::new(),
+        }
+    }
+    
+    /// Add a new output
+    pub fn add_output(
+        &mut self,
+        name: String,
+        physical_properties: PhysicalProperties,
+        modes: Vec<Mode>,
+        display: &DisplayHandle,
+    ) -> Result<()> {
+        // Create output
+        let output = Output::new(name.clone(), physical_properties);
+        
+        // Get configuration or use defaults
+        let config = self.configs.get(&name).cloned().unwrap_or(OutputConfig {
+            name: name.clone(),
+            mode: modes.first().cloned(),
+            scale: 1.0,
+            transform: Transform::Normal,
+            position: (0, 0),
+        });
+        
+        // Set preferred mode
+        if let Some(mode) = &config.mode {
+            output.set_preferred(*mode);
+            output.change_current_state(
+                Some(*mode),
+                Some(config.transform),
+                Some(Scale::Fractional(config.scale)),
+                Some(config.position.into()),
+            );
+        }
+        
+        // Add all modes
+        for mode in modes {
+            output.add_mode(mode);
+        }
+        
+        // Create global
+        output.create_global::<crate::CompositorState>(display);
+        
+        // Create damage tracker
+        let damage_tracker = OutputDamageTracker::from_output(&output);
+        
+        let managed = ManagedOutput {
+            output,
+            damage_tracker,
+            renderer: None,
+            drm_node: None,
+            crtc: None,
+        };
+        
+        self.outputs.insert(name, managed);
+        Ok(())
+    }
+    
+    /// Remove an output
+    pub fn remove_output(&mut self, name: &str) -> Option<ManagedOutput> {
+        self.outputs.remove(name)
+    }
+    
+    /// Get an output by name
+    pub fn get_output(&self, name: &str) -> Option<&ManagedOutput> {
+        self.outputs.get(name)
+    }
+    
+    /// Get a mutable output by name
+    pub fn get_output_mut(&mut self, name: &str) -> Option<&mut ManagedOutput> {
+        self.outputs.get_mut(name)
+    }
+    
+    /// Get all outputs
+    pub fn outputs(&self) -> impl Iterator<Item = &ManagedOutput> {
+        self.outputs.values()
+    }
+    
+    /// Update output configuration
+    pub fn update_config(&mut self, name: String, config: OutputConfig) {
+        self.configs.insert(name.clone(), config.clone());
+        
+        // Apply configuration if output exists
+        if let Some(managed) = self.outputs.get(&name) {
+            managed.output.change_current_state(
+                config.mode,
+                Some(config.transform),
+                Some(Scale::Fractional(config.scale)),
+                Some(config.position.into()),
+            );
+        }
+    }
+    
+    /// Arrange outputs based on graph layout
+    pub fn arrange_outputs_graph(&mut self) {
+        // TODO: Use graph layout to position outputs
+        // For now, arrange horizontally
+        let mut x = 0;
+        
+        for managed in self.outputs.values() {
+            let mode = managed.output.current_mode();
+            if let Some(mode) = mode {
+                managed.output.change_current_state(
+                    None,
+                    None,
+                    None,
+                    Some((x, 0).into()),
+                );
+                x += mode.size.w;
+            }
+        }
+    }
+    
+    /// Get the total bounding box of all outputs
+    pub fn bounding_box(&self) -> Rectangle<i32, Physical> {
+        let mut min_x = i32::MAX;
+        let mut min_y = i32::MAX;
+        let mut max_x = i32::MIN;
+        let mut max_y = i32::MIN;
+        
+        for managed in self.outputs.values() {
+            let geometry = managed.output.geometry();
+            min_x = min_x.min(geometry.loc.x);
+            min_y = min_y.min(geometry.loc.y);
+            max_x = max_x.max(geometry.loc.x + geometry.size.w);
+            max_y = max_y.max(geometry.loc.y + geometry.size.h);
+        }
+        
+        if min_x == i32::MAX {
+            // No outputs
+            Rectangle::from_loc_and_size((0, 0), (0, 0))
+        } else {
+            Rectangle::from_loc_and_size(
+                (min_x, min_y),
+                (max_x - min_x, max_y - min_y),
+            )
+        }
+    }
+    
+    /// Find output at a given position
+    pub fn output_at(&self, position: (i32, i32)) -> Option<&Output> {
+        for managed in self.outputs.values() {
+            let geometry = managed.output.geometry();
+            if geometry.contains(position.into()) {
+                return Some(&managed.output);
+            }
+        }
+        None
+    }
+}
+
+impl Default for OutputManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}

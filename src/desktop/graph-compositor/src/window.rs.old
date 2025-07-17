@@ -1,0 +1,191 @@
+//! Window management for the graph compositor
+
+use smithay::{
+    desktop::{Window as SmithayWindow, WindowSurfaceType},
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Logical, Point, Rectangle, Size},
+    wayland::shell::xdg::ToplevelSurface,
+};
+use horizonos_graph_engine::{SceneId, NodeType};
+use std::sync::{Arc, Mutex};
+
+/// Extended window type that integrates with the graph
+#[derive(Clone)]
+pub struct GraphWindow {
+    /// Smithay window
+    pub window: SmithayWindow,
+    /// Associated graph node ID
+    pub node_id: SceneId,
+    /// Window state
+    pub state: Arc<Mutex<WindowState>>,
+}
+
+/// Window state
+#[derive(Debug, Clone)]
+pub struct WindowState {
+    /// Window title
+    pub title: String,
+    /// Application name
+    pub app_name: String,
+    /// Process ID
+    pub pid: Option<u32>,
+    /// Window class
+    pub class: Option<String>,
+    /// Is minimized
+    pub minimized: bool,
+    /// Is maximized
+    pub maximized: bool,
+    /// Is fullscreen
+    pub fullscreen: bool,
+    /// Is sticky (visible on all workspaces)
+    pub sticky: bool,
+    /// Tags
+    pub tags: Vec<String>,
+    /// Custom properties
+    pub properties: std::collections::HashMap<String, String>,
+}
+
+impl GraphWindow {
+    /// Create a new graph window
+    pub fn new(window: SmithayWindow, node_id: SceneId) -> Self {
+        let state = Arc::new(Mutex::new(WindowState::default()));
+        Self {
+            window,
+            node_id,
+            state,
+        }
+    }
+    
+    /// Get the window title
+    pub fn title(&self) -> String {
+        if let Some(toplevel) = self.window.toplevel() {
+            toplevel.with_pending_state(|state| {
+                state.title.clone().unwrap_or_else(|| "Untitled".to_string())
+            })
+        } else {
+            self.state.lock().unwrap().title.clone()
+        }
+    }
+    
+    /// Get the application name
+    pub fn app_name(&self) -> String {
+        if let Some(toplevel) = self.window.toplevel() {
+            toplevel.with_pending_state(|state| {
+                state.app_id.clone().unwrap_or_else(|| "Unknown".to_string())
+            })
+        } else {
+            self.state.lock().unwrap().app_name.clone()
+        }
+    }
+    
+    /// Update window state from toplevel surface
+    pub fn update_from_toplevel(&self, toplevel: &ToplevelSurface) {
+        let mut state = self.state.lock().unwrap();
+        
+        toplevel.with_pending_state(|pending| {
+            if let Some(title) = &pending.title {
+                state.title = title.clone();
+            }
+            if let Some(app_id) = &pending.app_id {
+                state.app_name = app_id.clone();
+            }
+            state.maximized = pending.states.contains(xdg_toplevel::State::Maximized);
+            state.fullscreen = pending.states.contains(xdg_toplevel::State::Fullscreen);
+        });
+    }
+    
+    /// Set minimized state
+    pub fn set_minimized(&self, minimized: bool) {
+        self.state.lock().unwrap().minimized = minimized;
+    }
+    
+    /// Is the window minimized?
+    pub fn is_minimized(&self) -> bool {
+        self.state.lock().unwrap().minimized
+    }
+    
+    /// Add a tag
+    pub fn add_tag(&self, tag: String) {
+        let mut state = self.state.lock().unwrap();
+        if !state.tags.contains(&tag) {
+            state.tags.push(tag);
+        }
+    }
+    
+    /// Remove a tag
+    pub fn remove_tag(&self, tag: &str) {
+        let mut state = self.state.lock().unwrap();
+        state.tags.retain(|t| t != tag);
+    }
+    
+    /// Check if window has a tag
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.state.lock().unwrap().tags.contains(&tag.to_string())
+    }
+    
+    /// Create a graph node type for this window
+    pub fn to_node_type(&self) -> NodeType {
+        let state = self.state.lock().unwrap();
+        NodeType::Application {
+            pid: state.pid.unwrap_or(0),
+            name: state.app_name.clone(),
+        }
+    }
+}
+
+impl Default for WindowState {
+    fn default() -> Self {
+        Self {
+            title: "Untitled".to_string(),
+            app_name: "Unknown".to_string(),
+            pid: None,
+            class: None,
+            minimized: false,
+            maximized: false,
+            fullscreen: false,
+            sticky: false,
+            tags: Vec::new(),
+            properties: std::collections::HashMap::new(),
+        }
+    }
+}
+
+/// Window management utilities
+pub mod utils {
+    use super::*;
+    use smithay::utils::{Logical, Rectangle};
+    
+    /// Calculate window bounds for graph node sizing
+    pub fn window_to_node_bounds(window: &SmithayWindow) -> Rectangle<f32, Logical> {
+        let bbox = window.bbox();
+        Rectangle::from_loc_and_size(
+            (bbox.loc.x as f32, bbox.loc.y as f32),
+            (bbox.size.w as f32, bbox.size.h as f32),
+        )
+    }
+    
+    /// Convert graph node position to window position
+    pub fn node_to_window_position(
+        node_x: f32,
+        node_y: f32,
+        output_size: Size<i32, Logical>,
+    ) -> Point<i32, Logical> {
+        // Map from graph space [-10, 10] to screen space
+        let x = ((node_x + 10.0) / 20.0 * output_size.w as f32) as i32;
+        let y = ((node_y + 10.0) / 20.0 * output_size.h as f32) as i32;
+        Point::from((x, y))
+    }
+    
+    /// Convert window position to graph node position
+    pub fn window_to_node_position(
+        window_pos: Point<i32, Logical>,
+        output_size: Size<i32, Logical>,
+    ) -> (f32, f32) {
+        // Map from screen space to graph space [-10, 10]
+        let x = (window_pos.x as f32 / output_size.w as f32) * 20.0 - 10.0;
+        let y = (window_pos.y as f32 / output_size.h as f32) * 20.0 - 10.0;
+        (x, y)
+    }
+}
+
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;

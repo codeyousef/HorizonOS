@@ -1,9 +1,9 @@
 //! Automated relationship discovery system
 
-use crate::{GraphEdge, EdgeError, RelationshipAnalyzer, RelationshipAnalysis, EdgeManager};
+use crate::{EdgeError, RelationshipAnalyzer, RelationshipAnalysis, EdgeManager};
 use horizonos_graph_engine::SceneId;
 use horizonos_graph_nodes::GraphNode;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
 use serde::{Serialize, Deserialize};
