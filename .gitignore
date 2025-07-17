@@ -55,3 +55,10 @@ __pycache__/
 
 # Log files
 *.log
+
+# Test verification scripts and outputs
+scripts/test/verify-graph-desktop-dev*.sh
+scripts/test/verify_graph_desktop.py
+scripts/test/*-summary.md
+scripts/test/*-status.txt
+scripts/test/*-results.txt
