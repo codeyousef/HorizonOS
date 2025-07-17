@@ -253,6 +253,10 @@ impl SuggestionEngine {
                     horizonos_graph_engine::NodeType::AIAgent { .. } => "AI Agents",
                     horizonos_graph_engine::NodeType::Concept { .. } => "Concepts",
                     horizonos_graph_engine::NodeType::System { .. } => "System Components",
+                    horizonos_graph_engine::NodeType::URL { .. } => "URLs",
+                    horizonos_graph_engine::NodeType::Automation { .. } => "Automations",
+                    horizonos_graph_engine::NodeType::Setting { .. } => "Settings",
+                    horizonos_graph_engine::NodeType::ConfigGroup { .. } => "Configuration Groups",
                 };
                 
                 suggestions.push(ClusterSuggestion {

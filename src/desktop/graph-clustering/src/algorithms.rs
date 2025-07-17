@@ -164,6 +164,10 @@ impl ClusteringAlgorithms {
                     horizonos_graph_engine::NodeType::AIAgent { .. } => "AI Agents".to_string(),
                     horizonos_graph_engine::NodeType::Concept { .. } => "Concepts".to_string(),
                     horizonos_graph_engine::NodeType::System { .. } => "System Components".to_string(),
+                    horizonos_graph_engine::NodeType::URL { .. } => "URLs".to_string(),
+                    horizonos_graph_engine::NodeType::Automation { .. } => "Automations".to_string(),
+                    horizonos_graph_engine::NodeType::Setting { .. } => "Settings".to_string(),
+                    horizonos_graph_engine::NodeType::ConfigGroup { .. } => "Configuration".to_string(),
                 };
                 
                 clusters.entry(cluster_key).or_insert_with(Vec::new).push(node_id);
