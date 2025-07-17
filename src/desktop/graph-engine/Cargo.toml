@@ -1,0 +1,32 @@
+[package]
+name = "horizonos-graph-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Core rendering and physics engine for HorizonOS graph desktop"
+authors = ["HorizonOS Team"]
+license = "MIT"
+
+[dependencies]
+wgpu = { workspace = true }
+winit = { workspace = true }
+pollster = { workspace = true }
+nalgebra = { workspace = true, features = ["serde-serialize"] }
+nalgebra-glm = { workspace = true }
+rapier3d = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+bytemuck = { version = "1.14", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+env_logger = { workspace = true }
+criterion = { workspace = true }
+
+[[example]]
+name = "basic_graph"
+required-features = []

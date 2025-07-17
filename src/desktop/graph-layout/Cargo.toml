@@ -1,0 +1,15 @@
+[package]
+name = "horizonos-graph-layout"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+horizonos-graph-engine = { path = "../graph-engine" }
+horizonos-graph-nodes = { path = "../graph-nodes" }
+horizonos-graph-edges = { path = "../graph-edges" }
+nalgebra = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+log = { workspace = true }
+rand = "0.8"

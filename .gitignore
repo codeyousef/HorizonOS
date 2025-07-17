@@ -62,3 +62,7 @@ scripts/test/verify_graph_desktop.py
 scripts/test/*-summary.md
 scripts/test/*-status.txt
 scripts/test/*-results.txt
+
+# Rust build artifacts
+src/desktop/target/
+src/desktop/Cargo.lock

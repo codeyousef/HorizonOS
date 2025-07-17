@@ -1,0 +1,9 @@
+[package]
+name = "horizonos-graph-workspaces"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+horizonos-graph-engine = { path = "../graph-engine" }
+serde = { workspace = true }
+tokio = { workspace = true }
