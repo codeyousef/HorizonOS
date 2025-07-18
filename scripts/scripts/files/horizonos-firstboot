@@ -1,0 +1,56 @@
+#!/bin/bash
+# HorizonOS First Boot Configuration
+
+set -e
+
+FIRST_BOOT_FLAG="/var/lib/horizonos/.first-boot-complete"
+
+if [ -f "$FIRST_BOOT_FLAG" ]; then
+    exit 0
+fi
+
+echo "==============================================="
+echo "    Welcome to HorizonOS!"
+echo "==============================================="
+echo ""
+echo "Performing first-boot configuration..."
+
+# Create user if not exists
+if ! id horizonos &>/dev/null; then
+    echo "Creating default user 'horizonos'..."
+    useradd -m -G wheel -s /bin/bash horizonos
+    echo "horizonos:horizonos" | chpasswd
+    echo "Default user created (username: horizonos, password: horizonos)"
+    echo "Please change the password after first login!"
+fi
+
+# Initialize container runtime
+echo "Initializing container runtime..."
+systemctl start podman.socket
+
+# Configure network
+echo "Configuring network..."
+systemctl start NetworkManager
+
+# Initialize OSTree if needed
+if [ -d /ostree ]; then
+    echo "OSTree system detected"
+fi
+
+# Set up HorizonOS directories
+mkdir -p /var/lib/horizonos/{containers,updates,config}
+
+# Mark first boot complete
+mkdir -p /var/lib/horizonos
+touch "$FIRST_BOOT_FLAG"
+
+echo ""
+echo "First boot configuration complete!"
+echo ""
+echo "You can now log in with:"
+echo "  Username: horizonos"
+echo "  Password: horizonos"
+echo ""
+echo "To start the graph desktop (when available):"
+echo "  horizonos-compositor"
+echo ""

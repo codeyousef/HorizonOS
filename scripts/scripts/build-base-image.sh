@@ -119,6 +119,35 @@ echo "Configuring minimal base system..."
 # Set hostname
 echo "horizonos" > "$BASE_DIR/etc/hostname"
 
+# Configure hosts file
+cat > "$BASE_DIR/etc/hosts" << EOF
+127.0.0.1   localhost
+127.0.1.1   horizonos
+::1         localhost
+EOF
+
+# Set system branding (replace Arch Linux branding)
+cat > "$BASE_DIR/etc/os-release" << EOF
+NAME="HorizonOS"
+VERSION="$HORIZONOS_VERSION"
+ID=horizonos
+ID_LIKE=arch
+PRETTY_NAME="HorizonOS $HORIZONOS_VERSION"
+ANSI_COLOR="0;36"
+HOME_URL="https://github.com/codeyousef/HorizonOS"
+DOCUMENTATION_URL="https://github.com/codeyousef/HorizonOS/wiki"
+SUPPORT_URL="https://github.com/codeyousef/HorizonOS/issues"
+BUG_REPORT_URL="https://github.com/codeyousef/HorizonOS/issues"
+LOGO=horizonos
+EOF
+
+# Create issue file for login prompt
+cat > "$BASE_DIR/etc/issue" << 'EOF'
+Welcome to HorizonOS - The Future of Computing
+\S Kernel \r on an \m (\l)
+
+EOF
+
 # Configure locale
 echo "en_US.UTF-8 UTF-8" > "$BASE_DIR/etc/locale.gen"
 arch-chroot "$BASE_DIR" locale-gen
@@ -188,6 +217,31 @@ arch-chroot "$BASE_DIR" systemctl enable sshd
 arch-chroot "$BASE_DIR" systemctl enable podman.socket
 arch-chroot "$BASE_DIR" systemctl enable flatpak-system-helper
 
+# Fix getty service configuration to prevent loops
+echo "Configuring boot services..."
+mkdir -p "$BASE_DIR/etc/systemd/system/getty@tty1.service.d"
+cat > "$BASE_DIR/etc/systemd/system/getty@tty1.service.d/override.conf" << 'EOF'
+[Service]
+Type=idle
+ExecStart=
+ExecStart=-/usr/bin/agetty --autologin root --noclear %I $TERM
+RestartSec=0
+Restart=no
+StandardInput=tty
+StandardOutput=tty
+EOF
+
+# Disable automatic VT allocation which can cause loops
+mkdir -p "$BASE_DIR/etc/systemd/logind.conf.d"
+cat > "$BASE_DIR/etc/systemd/logind.conf.d/horizonos.conf" << 'EOF'
+[Login]
+NAutoVTs=1
+ReserveVT=1
+EOF
+
+# Set default target to multi-user (no graphical)
+arch-chroot "$BASE_DIR" systemctl set-default multi-user.target
+
 # Create container management directories
 mkdir -p "$BASE_DIR/var/lib/containers"
 mkdir -p "$BASE_DIR/var/lib/flatpak"
@@ -201,6 +255,18 @@ EOF
 
 # Create container helper scripts
 mkdir -p "$BASE_DIR/usr/local/bin"
+
+# Copy first boot script
+if [ -f "$PROJECT_ROOT/scripts/scripts/files/horizonos-firstboot" ]; then
+    cp "$PROJECT_ROOT/scripts/scripts/files/horizonos-firstboot" "$BASE_DIR/usr/local/bin/"
+    chmod +x "$BASE_DIR/usr/local/bin/horizonos-firstboot"
+fi
+
+# Copy firstboot service
+if [ -f "$PROJECT_ROOT/scripts/systemd-units/horizonos-firstboot.service" ]; then
+    cp "$PROJECT_ROOT/scripts/systemd-units/horizonos-firstboot.service" "$BASE_DIR/etc/systemd/system/"
+    arch-chroot "$BASE_DIR" systemctl enable horizonos-firstboot.service
+fi
 
 # Create container wrapper script
 cat > "$BASE_DIR/usr/local/bin/container-run" << 'EOF'

@@ -1,0 +1,15 @@
+[Unit]
+Description=HorizonOS First Boot Configuration
+ConditionPathExists=!/var/lib/horizonos/.first-boot-complete
+Before=getty@tty1.service
+After=systemd-remount-fs.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/horizonos-firstboot
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=sysinit.target
