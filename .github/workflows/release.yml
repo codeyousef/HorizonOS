@@ -90,7 +90,7 @@ jobs:
         mv horizonos-ostree-${{ env.VERSION }}.tar.gz build/out/
     
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: horizonos-${{ env.VERSION }}
         path: |
@@ -105,14 +105,35 @@ jobs:
       contents: write
     
     steps:
+    - name: Set version from tag
+      run: |
+        if [ "${{ github.event_name }}" = "push" ]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+        else
+          VERSION="${{ github.event.inputs.version }}"
+        fi
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+    
     - name: Download artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: horizonos-${{ env.VERSION }}
         path: ./release
     
+    - name: Determine channel from version
+      run: |
+        VERSION="${{ env.VERSION }}"
+        if [[ "$VERSION" == *-dev* ]]; then
+          CHANNEL="dev"
+        elif [[ "$VERSION" == *-beta* ]] || [[ "$VERSION" == *-rc* ]]; then
+          CHANNEL="testing"
+        else
+          CHANNEL="stable"
+        fi
+        echo "CHANNEL=$CHANNEL" >> $GITHUB_ENV
+    
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ github.ref_name }}
         name: HorizonOS ${{ env.VERSION }}
