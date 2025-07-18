@@ -32,7 +32,8 @@ jobs:
       run: |
         pacman -Syu --noconfirm
         pacman -S --noconfirm base-devel git archiso ostree btrfs-progs \
-          dosfstools grub efibootmgr squashfs-tools sudo
+          dosfstools grub efibootmgr squashfs-tools sudo podman \
+          arch-install-scripts
     
     - name: Checkout code
       uses: actions/checkout@v4
