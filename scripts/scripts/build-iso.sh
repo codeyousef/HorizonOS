@@ -341,30 +341,13 @@ menuentry "HorizonOS Live (x86_64, UEFI) with speech" {
 }
 EOF
 
-# Fix getty service for live environment
-echo "Configuring live boot services..."
-mkdir -p airootfs/etc/systemd/system/getty@tty1.service.d
-cat > airootfs/etc/systemd/system/getty@tty1.service.d/override.conf << 'EOF'
-[Service]
-ExecStart=
-ExecStart=-/usr/bin/agetty --autologin root --noclear %I $TERM
-Type=idle
-Restart=no
-RestartSec=0
-EOF
+# MINIMAL CHANGES - Keep it simple to ensure boot works
+echo "Applying minimal branding..."
 
-# Mask conflicting services that might cause loops
-mkdir -p airootfs/etc/systemd/system
-ln -sf /dev/null airootfs/etc/systemd/system/getty@tty2.service
-ln -sf /dev/null airootfs/etc/systemd/system/getty@tty3.service
-ln -sf /dev/null airootfs/etc/systemd/system/getty@tty4.service
-ln -sf /dev/null airootfs/etc/systemd/system/getty@tty5.service
-ln -sf /dev/null airootfs/etc/systemd/system/getty@tty6.service
+# Just set hostname
+echo "horizonos" > airootfs/etc/hostname
 
-# Create custom hostname for live environment
-echo "horizonos-live" > airootfs/etc/hostname
-
-# Replace Arch Linux branding in live environment
+# Basic os-release for branding
 cat > airootfs/etc/os-release << 'EOF'
 NAME="HorizonOS"
 PRETTY_NAME="HorizonOS Live"
@@ -372,12 +355,6 @@ ID=horizonos
 ID_LIKE=arch
 ANSI_COLOR="0;36"
 HOME_URL="https://github.com/codeyousef/HorizonOS"
-EOF
-
-# Create custom issue file
-cat > airootfs/etc/issue << 'EOF'
-HorizonOS Live Environment \r (\l)
-
 EOF
 
 # Create custom welcome message
@@ -397,79 +374,11 @@ cat > airootfs/etc/motd << 'EOF'
 
 EOF
 
-# Copy live setup script
-if [ -f "$PROJECT_ROOT/scripts/scripts/files/horizonos-live-setup" ]; then
-    cp "$PROJECT_ROOT/scripts/scripts/files/horizonos-live-setup" airootfs/usr/local/bin/
-    chmod +x airootfs/usr/local/bin/horizonos-live-setup
-fi
+# Let archiso handle the boot process - don't interfere
+# The system will boot normally with autologin to root
 
-# Create a service to run on boot instead of getty
-cat > airootfs/etc/systemd/system/horizonos-live.service << 'EOF'
-[Unit]
-Description=HorizonOS Live Environment Setup
-After=multi-user.target
-Conflicts=getty@tty1.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/horizonos-live-setup
-StandardInput=tty
-StandardOutput=tty
-TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Enable our service and disable getty
-mkdir -p airootfs/etc/systemd/system/multi-user.target.wants
-ln -sf /etc/systemd/system/horizonos-live.service airootfs/etc/systemd/system/multi-user.target.wants/
-rm -f airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service
-
-# Create custom mkinitcpio preset to change early boot messages
-echo "Creating custom boot configuration..."
-mkdir -p airootfs/etc/mkinitcpio.d
-cat > airootfs/etc/mkinitcpio.d/horizonos.preset << 'EOF'
-# mkinitcpio preset file for HorizonOS
-
-ALL_config="/etc/mkinitcpio.conf"
-ALL_kver="/boot/vmlinuz-linux"
-
-PRESETS=('default')
-
-default_image="/boot/initramfs-linux.img"
-EOF
-
-# Create a custom hook to display HorizonOS branding during early boot
-mkdir -p airootfs/usr/lib/initcpio/hooks
-cat > airootfs/usr/lib/initcpio/hooks/horizonos << 'EOF'
-#!/usr/bin/ash
-run_hook() {
-    msg ":: Welcome to HorizonOS ::"
-}
-EOF
-chmod +x airootfs/usr/lib/initcpio/hooks/horizonos
-
-mkdir -p airootfs/usr/lib/initcpio/install
-cat > airootfs/usr/lib/initcpio/install/horizonos << 'EOF'
-#!/usr/bin/bash
-build() {
-    add_runscript
-}
-help() {
-    cat <<HELPEOF
-This hook displays HorizonOS branding during boot.
-HELPEOF
-}
-EOF
-chmod +x airootfs/usr/lib/initcpio/install/horizonos
-
-# Add our hook to mkinitcpio.conf
-if [ -f airootfs/etc/mkinitcpio.conf ]; then
-    sed -i 's/^HOOKS=(\(.*\))/HOOKS=(horizonos \1)/' airootfs/etc/mkinitcpio.conf
-fi
+# Skip custom mkinitcpio hooks - they can cause boot issues
+# Let archiso use its default boot process
 
 # Customize profiledef.sh
 sed -i 's/iso_name=.*/iso_name="horizonos"/' profiledef.sh
