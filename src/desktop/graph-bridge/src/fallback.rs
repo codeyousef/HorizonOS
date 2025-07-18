@@ -78,6 +78,7 @@ pub enum FallbackCategory {
 }
 
 /// Emergency file manager
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EmergencyFileManager {
     /// Current directory
@@ -128,6 +129,7 @@ pub enum OperationStatus {
 }
 
 /// System monitor
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SystemMonitor {
     /// CPU usage
@@ -240,6 +242,7 @@ pub enum HealthStatus {
 }
 
 /// Recovery tools
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RecoveryTools {
     /// Available recovery actions
@@ -433,4 +436,407 @@ impl FallbackInterface {
                 // Check if graph system can be restored
                 if self.config.auto_restart_graph {
                     if self.can_restart_graph_system() {
-                        events.push(BridgeEvent::FallbackActivated { \n                            reason: "Attempting to restart graph system".to_string() \n                        });\n                    }\n                }\n                \n                // Process file operations\n                self.file_manager.process_operations();\n            }\n            FallbackState::Recovery => {\n                // Update recovery tools\n                self.recovery_tools.update();\n            }\n            _ => {}\n        }\n        \n        Ok(events)\n    }\n    \n    /// Launch emergency application\n    pub fn launch_application(&mut self, app_name: &str) -> Result<(), BridgeError> {\n        if let Some(app) = self.applications.iter().find(|a| a.name == app_name) {\n            let result = Command::new(&app.executable).spawn();\n            \n            match result {\n                Ok(_) => {\n                    log::info!("Launched emergency application: {}", app_name);\n                    Ok(())\n                }\n                Err(e) => {\n                    let error = format!("Failed to launch {}: {}", app_name, e);\n                    self.add_error(FallbackError {\n                        message: error.clone(),\n                        timestamp: std::time::SystemTime::now(),\n                        severity: ErrorSeverity::Error,\n                        component: "fallback_launcher".to_string(),\n                        details: Some(e.to_string()),\n                    });\n                    Err(BridgeError::IoError(error))\n                }\n            }\n        } else {\n            Err(BridgeError::IoError(format!("Application not found: {}", app_name)))\n        }\n    }\n    \n    /// Open emergency file manager\n    pub fn open_file_manager(&mut self, path: Option<PathBuf>) -> Result<(), BridgeError> {\n        let target_path = path.unwrap_or_else(|| std::env::home_dir().unwrap_or_else(|| PathBuf::from("/")));\n        \n        if target_path.exists() {\n            self.file_manager.navigate_to(target_path);\n            log::info!("Opened emergency file manager at: {}", self.file_manager.current_dir.display());\n            Ok(())\n        } else {\n            Err(BridgeError::IoError(format!("Path does not exist: {}", target_path.display())))\n        }\n    }\n    \n    /// Execute recovery action\n    pub fn execute_recovery_action(&mut self, action_id: &str) -> Result<(), BridgeError> {\n        if let Some(action) = self.recovery_tools.recovery_actions.iter().find(|a| a.id == action_id) {\n            if !action.available {\n                return Err(BridgeError::FallbackFailed(format!("Recovery action not available: {}", action_id)));\n            }\n            \n            log::warn!("Executing recovery action: {} (Risk: {:?})", action.name, action.risk_level);\n            \n            // Execute the recovery command if available\n            if let Some(ref command) = action.command {\n                let result = Command::new("sh")\n                    .arg("-c")\n                    .arg(command)\n                    .output();\n                \n                match result {\n                    Ok(output) => {\n                        if output.status.success() {\n                            log::info!("Recovery action completed successfully: {}", action.name);\n                            Ok(())\n                        } else {\n                            let error = String::from_utf8_lossy(&output.stderr);\n                            Err(BridgeError::FallbackFailed(format!("Recovery action failed: {}", error)))\n                        }\n                    }\n                    Err(e) => {\n                        Err(BridgeError::FallbackFailed(format!("Failed to execute recovery action: {}", e)))\n                    }\n                }\n            } else {\n                // Manual recovery action - just log\n                log::info!("Manual recovery action: {}", action.description);\n                Ok(())\n            }\n        } else {\n            Err(BridgeError::FallbackFailed(format!("Recovery action not found: {}", action_id)))\n        }\n    }\n    \n    /// Enter recovery mode\n    pub fn enter_recovery_mode(&mut self) {\n        self.state = FallbackState::Recovery;\n        log::warn!("Entered recovery mode");\n        \n        // Scan for additional recovery options\n        self.recovery_tools.scan_system();\n    }\n    \n    /// Enter diagnostics mode\n    pub fn enter_diagnostics_mode(&mut self) {\n        self.state = FallbackState::Diagnostics;\n        log::info!("Entered diagnostics mode");\n        \n        // Run system diagnostics\n        self.run_diagnostics();\n    }\n    \n    /// Check if graph system can be restarted\n    fn can_restart_graph_system(&self) -> bool {\n        // Simple health check - in practice this would be more comprehensive\n        self.system_monitor.health_status == HealthStatus::Healthy ||\n        self.system_monitor.health_status == HealthStatus::Warning\n    }\n    \n    /// Initialize emergency applications\n    fn initialize_emergency_apps(&mut self) {\n        self.applications = vec![\n            FallbackApplication {\n                name: "Terminal".to_string(),\n                executable: PathBuf::from("/usr/bin/gnome-terminal"),\n                description: "Command line terminal".to_string(),\n                category: FallbackCategory::Terminal,\n                is_critical: true,\n                priority: 1,\n            },\n            FallbackApplication {\n                name: "File Manager".to_string(),\n                executable: PathBuf::from("/usr/bin/nautilus"),\n                description: "File browser".to_string(),\n                category: FallbackCategory::Files,\n                is_critical: true,\n                priority: 2,\n            },\n            FallbackApplication {\n                name: "Text Editor".to_string(),\n                executable: PathBuf::from("/usr/bin/gedit"),\n                description: "Text editor".to_string(),\n                category: FallbackCategory::Editor,\n                is_critical: false,\n                priority: 3,\n            },\n            FallbackApplication {\n                name: "System Monitor".to_string(),\n                executable: PathBuf::from("/usr/bin/gnome-system-monitor"),\n                description: "System resource monitor".to_string(),\n                category: FallbackCategory::System,\n                is_critical: false,\n                priority: 4,\n            },\n        ];\n        \n        // Filter to only available applications\n        self.applications.retain(|app| app.executable.exists());\n        \n        log::info!("Initialized {} emergency applications", self.applications.len());\n    }\n    \n    /// Run system diagnostics\n    fn run_diagnostics(&mut self) {\n        // Check system health\n        self.system_monitor.update();\n        \n        // Check disk space\n        for (mount, usage) in &self.system_monitor.disk_usage {\n            let usage_percent = (usage.used as f64 / usage.total as f64) * 100.0;\n            if usage_percent > 90.0 {\n                self.add_error(FallbackError {\n                    message: format!("Disk space critical on {}: {:.1}% used", mount, usage_percent),\n                    timestamp: std::time::SystemTime::now(),\n                    severity: ErrorSeverity::Critical,\n                    component: "disk_monitor".to_string(),\n                    details: None,\n                });\n            }\n        }\n        \n        // Check memory usage\n        let memory_percent = (self.system_monitor.memory_usage.used as f64 / \n                             self.system_monitor.memory_usage.total as f64) * 100.0;\n        if memory_percent > 90.0 {\n            self.add_error(FallbackError {\n                message: format!("Memory usage critical: {:.1}% used", memory_percent),\n                timestamp: std::time::SystemTime::now(),\n                severity: ErrorSeverity::Warning,\n                component: "memory_monitor".to_string(),\n                details: None,\n            });\n        }\n        \n        log::info!("System diagnostics completed");\n    }\n    \n    /// Add error to history\n    fn add_error(&mut self, error: FallbackError) {\n        self.error_history.push(error);\n        \n        // Limit error history size\n        if self.error_history.len() > 100 {\n            self.error_history.remove(0);\n        }\n    }\n    \n    /// Get current state\n    pub fn state(&self) -> FallbackState {\n        self.state\n    }\n    \n    /// Get available applications\n    pub fn applications(&self) -> &[FallbackApplication] {\n        &self.applications\n    }\n    \n    /// Get system monitor\n    pub fn system_monitor(&self) -> &SystemMonitor {\n        &self.system_monitor\n    }\n    \n    /// Get recovery tools\n    pub fn recovery_tools(&self) -> &RecoveryTools {\n        &self.recovery_tools\n    }\n    \n    /// Get error history\n    pub fn error_history(&self) -> &[FallbackError] {\n        &self.error_history\n    }\n    \n    /// Set configuration\n    pub fn set_config(&mut self, config: FallbackConfig) {\n        self.config = config;\n    }\n    \n    /// Get configuration\n    pub fn config(&self) -> &FallbackConfig {\n        &self.config\n    }\n}\n\nimpl EmergencyFileManager {\n    fn new() -> Self {\n        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));\n        \n        Self {\n            current_dir: current_dir.clone(),\n            history: vec![current_dir],\n            bookmarks: vec![\n                std::env::home_dir().unwrap_or_else(|| PathBuf::from("/home")),\n                PathBuf::from("/"),\n                PathBuf::from("/tmp"),\n            ],\n            operations: Vec::new(),\n        }\n    }\n    \n    fn navigate_to(&mut self, path: PathBuf) {\n        if path.exists() && path.is_dir() {\n            self.current_dir = path.clone();\n            self.history.push(path);\n            \n            // Limit history size\n            if self.history.len() > 50 {\n                self.history.remove(0);\n            }\n        }\n    }\n    \n    fn process_operations(&mut self) {\n        // Process file operations\n        for operation in &mut self.operations {\n            if operation.status == OperationStatus::Pending {\n                operation.status = OperationStatus::InProgress;\n                // In a real implementation, this would perform the actual operation\n                operation.progress = 1.0;\n                operation.status = OperationStatus::Completed;\n            }\n        }\n        \n        // Remove completed operations\n        self.operations.retain(|op| op.status != OperationStatus::Completed);\n    }\n}\n\nimpl SystemMonitor {\n    fn new() -> Self {\n        Self {\n            cpu_usage: 0.0,\n            memory_usage: MemoryUsage {\n                total: 0,\n                used: 0,\n                available: 0,\n                cached: 0,\n                buffers: 0,\n            },\n            disk_usage: HashMap::new(),\n            network_status: NetworkStatus {\n                connected: false,\n                interfaces: Vec::new(),\n                dns_working: false,\n                internet_access: false,\n            },\n            processes: Vec::new(),\n            health_status: HealthStatus::Healthy,\n        }\n    }\n    \n    fn update(&mut self) {\n        // Update system statistics\n        // In a real implementation, this would read from /proc, /sys, etc.\n        self.health_status = HealthStatus::Healthy;\n    }\n}\n\nimpl RecoveryTools {\n    fn new() -> Self {\n        Self {\n            recovery_actions: Vec::new(),\n            backup_status: BackupStatus {\n                has_backup: false,\n                last_backup: None,\n                backup_location: None,\n                backup_size: None,\n                is_valid: false,\n            },\n            log_files: Vec::new(),\n            config_files: Vec::new(),\n        }\n    }\n    \n    fn scan_system(&mut self) {\n        self.recovery_actions = vec![\n            RecoveryAction {\n                id: "restart_graph".to_string(),\n                name: "Restart Graph System".to_string(),\n                description: "Attempt to restart the graph desktop system".to_string(),\n                risk_level: RiskLevel::Safe,\n                command: Some("systemctl restart horizonos-graph".to_string()),\n                available: true,\n                estimated_time: 30,\n            },\n            RecoveryAction {\n                id: "reset_config".to_string(),\n                name: "Reset Configuration".to_string(),\n                description: "Reset graph desktop to default configuration".to_string(),\n                risk_level: RiskLevel::Medium,\n                command: Some("rm -rf ~/.config/horizonos && mkdir -p ~/.config/horizonos".to_string()),\n                available: true,\n                estimated_time: 10,\n            },\n            RecoveryAction {\n                id: "clear_cache".to_string(),\n                name: "Clear Cache".to_string(),\n                description: "Clear all graph desktop cache files".to_string(),\n                risk_level: RiskLevel::Safe,\n                command: Some("rm -rf ~/.cache/horizonos".to_string()),\n                available: true,\n                estimated_time: 5,\n            },\n        ];\n    }\n    \n    fn update(&mut self) {\n        // Update recovery tool status\n    }\n}\n\nimpl Default for FallbackInterface {\n    fn default() -> Self {\n        Self::new()\n    }\n}\n\nimpl Default for FallbackConfig {\n    fn default() -> Self {\n        Self {\n            auto_activate: true,\n            show_system_monitor: true,\n            enable_recovery_tools: true,\n            emergency_apps: vec![\n                "Terminal".to_string(),\n                "File Manager".to_string(),\n                "Text Editor".to_string(),\n                "System Monitor".to_string(),\n            ],\n            auto_restart_graph: true,\n            max_restart_attempts: 3,\n        }\n    }\n}"
+                        events.push(BridgeEvent::FallbackActivated {
+                            reason: "Attempting to restart graph system".to_string()
+                        });
+                    }
+                }
+                
+                // Process file operations
+                self.file_manager.process_operations();
+            }
+            FallbackState::Recovery => {
+                // Update recovery tools
+                self.recovery_tools.update();
+            }
+            _ => {}
+        }
+        
+        Ok(events)
+    }
+    
+    /// Launch emergency application
+    pub fn launch_application(&mut self, app_name: &str) -> Result<(), BridgeError> {
+        if let Some(app) = self.applications.iter().find(|a| a.name == app_name) {
+            let result = Command::new(&app.executable).spawn();
+            
+            match result {
+                Ok(_) => {
+                    log::info!("Launched emergency application: {}", app_name);
+                    Ok(())
+                }
+                Err(e) => {
+                    let error = format!("Failed to launch {}: {}", app_name, e);
+                    self.add_error(FallbackError {
+                        message: error.clone(),
+                        timestamp: std::time::SystemTime::now(),
+                        severity: ErrorSeverity::Error,
+                        component: "fallback_launcher".to_string(),
+                        details: Some(e.to_string()),
+                    });
+                    Err(BridgeError::IoError(error))
+                }
+            }
+        } else {
+            Err(BridgeError::IoError(format!("Application not found: {}", app_name)))
+        }
+    }
+    
+    /// Open emergency file manager
+    pub fn open_file_manager(&mut self, path: Option<PathBuf>) -> Result<(), BridgeError> {
+        let target_path = path.unwrap_or_else(|| std::env::home_dir().unwrap_or_else(|| PathBuf::from("/")));
+        
+        if target_path.exists() {
+            self.file_manager.navigate_to(target_path);
+            log::info!("Opened emergency file manager at: {}", self.file_manager.current_dir.display());
+            Ok(())
+        } else {
+            Err(BridgeError::IoError(format!("Path does not exist: {}", target_path.display())))
+        }
+    }
+    
+    /// Execute recovery action
+    pub fn execute_recovery_action(&mut self, action_id: &str) -> Result<(), BridgeError> {
+        if let Some(action) = self.recovery_tools.recovery_actions.iter().find(|a| a.id == action_id) {
+            if !action.available {
+                return Err(BridgeError::FallbackFailed(format!("Recovery action not available: {}", action_id)));
+            }
+            
+            log::warn!("Executing recovery action: {} (Risk: {:?})", action.name, action.risk_level);
+            
+            // Execute the recovery command if available
+            if let Some(ref command) = action.command {
+                let result = Command::new("sh")
+                    .arg("-c")
+                    .arg(command)
+                    .output();
+                
+                match result {
+                    Ok(output) => {
+                        if output.status.success() {
+                            log::info!("Recovery action completed successfully: {}", action.name);
+                            Ok(())
+                        } else {
+                            let error = String::from_utf8_lossy(&output.stderr);
+                            Err(BridgeError::FallbackFailed(format!("Recovery action failed: {}", error)))
+                        }
+                    }
+                    Err(e) => {
+                        Err(BridgeError::FallbackFailed(format!("Failed to execute recovery action: {}", e)))
+                    }
+                }
+            } else {
+                // Manual recovery action - just log
+                log::info!("Manual recovery action: {}", action.description);
+                Ok(())
+            }
+        } else {
+            Err(BridgeError::FallbackFailed(format!("Recovery action not found: {}", action_id)))
+        }
+    }
+    
+    /// Enter recovery mode
+    pub fn enter_recovery_mode(&mut self) {
+        self.state = FallbackState::Recovery;
+        log::warn!("Entered recovery mode");
+        
+        // Scan for additional recovery options
+        self.recovery_tools.scan_system();
+    }
+    
+    /// Enter diagnostics mode
+    pub fn enter_diagnostics_mode(&mut self) {
+        self.state = FallbackState::Diagnostics;
+        log::info!("Entered diagnostics mode");
+        
+        // Run system diagnostics
+        self.run_diagnostics();
+    }
+    
+    /// Check if graph system can be restarted
+    fn can_restart_graph_system(&self) -> bool {
+        // Simple health check - in practice this would be more comprehensive
+        self.system_monitor.health_status == HealthStatus::Healthy ||
+        self.system_monitor.health_status == HealthStatus::Warning
+    }
+    
+    /// Initialize emergency applications
+    fn initialize_emergency_apps(&mut self) {
+        self.applications = vec![
+            FallbackApplication {
+                name: "Terminal".to_string(),
+                executable: PathBuf::from("/usr/bin/gnome-terminal"),
+                description: "Command line terminal".to_string(),
+                category: FallbackCategory::Terminal,
+                is_critical: true,
+                priority: 1,
+            },
+            FallbackApplication {
+                name: "File Manager".to_string(),
+                executable: PathBuf::from("/usr/bin/nautilus"),
+                description: "File browser".to_string(),
+                category: FallbackCategory::Files,
+                is_critical: true,
+                priority: 2,
+            },
+            FallbackApplication {
+                name: "Text Editor".to_string(),
+                executable: PathBuf::from("/usr/bin/gedit"),
+                description: "Text editor".to_string(),
+                category: FallbackCategory::Editor,
+                is_critical: false,
+                priority: 3,
+            },
+            FallbackApplication {
+                name: "System Monitor".to_string(),
+                executable: PathBuf::from("/usr/bin/gnome-system-monitor"),
+                description: "System resource monitor".to_string(),
+                category: FallbackCategory::System,
+                is_critical: false,
+                priority: 4,
+            },
+        ];
+        
+        // Filter to only available applications
+        self.applications.retain(|app| app.executable.exists());
+        
+        log::info!("Initialized {} emergency applications", self.applications.len());
+    }
+    
+    /// Run system diagnostics
+    fn run_diagnostics(&mut self) {
+        // Check system health
+        self.system_monitor.update();
+        
+        // Check disk space - collect critical disk issues first
+        let mut critical_disks = Vec::new();
+        for (mount, usage) in &self.system_monitor.disk_usage {
+            let usage_percent = (usage.used as f64 / usage.total as f64) * 100.0;
+            if usage_percent > 90.0 {
+                critical_disks.push((mount.clone(), usage_percent));
+            }
+        }
+        
+        // Now add errors for critical disks
+        for (mount, usage_percent) in critical_disks {
+            self.add_error(FallbackError {
+                message: format!("Disk space critical on {}: {:.1}% used", mount, usage_percent),
+                timestamp: std::time::SystemTime::now(),
+                severity: ErrorSeverity::Critical,
+                component: "disk_monitor".to_string(),
+                details: None,
+            });
+        }
+        
+        // Check memory usage
+        let memory_percent = (self.system_monitor.memory_usage.used as f64 / 
+                             self.system_monitor.memory_usage.total as f64) * 100.0;
+        if memory_percent > 90.0 {
+            self.add_error(FallbackError {
+                message: format!("Memory usage critical: {:.1}% used", memory_percent),
+                timestamp: std::time::SystemTime::now(),
+                severity: ErrorSeverity::Warning,
+                component: "memory_monitor".to_string(),
+                details: None,
+            });
+        }
+        
+        log::info!("System diagnostics completed");
+    }
+    
+    /// Add error to history
+    fn add_error(&mut self, error: FallbackError) {
+        self.error_history.push(error);
+        
+        // Limit error history size
+        if self.error_history.len() > 100 {
+            self.error_history.remove(0);
+        }
+    }
+    
+    /// Get current state
+    pub fn state(&self) -> FallbackState {
+        self.state
+    }
+    
+    /// Get available applications
+    pub fn applications(&self) -> &[FallbackApplication] {
+        &self.applications
+    }
+    
+    /// Get system monitor
+    pub fn system_monitor(&self) -> &SystemMonitor {
+        &self.system_monitor
+    }
+    
+    /// Get recovery tools
+    pub fn recovery_tools(&self) -> &RecoveryTools {
+        &self.recovery_tools
+    }
+    
+    /// Get error history
+    pub fn error_history(&self) -> &[FallbackError] {
+        &self.error_history
+    }
+    
+    /// Set configuration
+    pub fn set_config(&mut self, config: FallbackConfig) {
+        self.config = config;
+    }
+    
+    /// Get configuration
+    pub fn config(&self) -> &FallbackConfig {
+        &self.config
+    }
+}
+
+impl EmergencyFileManager {
+    fn new() -> Self {
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+        
+        Self {
+            current_dir: current_dir.clone(),
+            history: vec![current_dir],
+            bookmarks: vec![
+                std::env::home_dir().unwrap_or_else(|| PathBuf::from("/home")),
+                PathBuf::from("/"),
+                PathBuf::from("/tmp"),
+            ],
+            operations: Vec::new(),
+        }
+    }
+    
+    fn navigate_to(&mut self, path: PathBuf) {
+        if path.exists() && path.is_dir() {
+            self.current_dir = path.clone();
+            self.history.push(path);
+            
+            // Limit history size
+            if self.history.len() > 50 {
+                self.history.remove(0);
+            }
+        }
+    }
+    
+    fn process_operations(&mut self) {
+        // Process file operations
+        for operation in &mut self.operations {
+            if operation.status == OperationStatus::Pending {
+                operation.status = OperationStatus::InProgress;
+                // In a real implementation, this would perform the actual operation
+                operation.progress = 1.0;
+                operation.status = OperationStatus::Completed;
+            }
+        }
+        
+        // Remove completed operations
+        self.operations.retain(|op| op.status != OperationStatus::Completed);
+    }
+}
+
+impl SystemMonitor {
+    fn new() -> Self {
+        Self {
+            cpu_usage: 0.0,
+            memory_usage: MemoryUsage {
+                total: 0,
+                used: 0,
+                available: 0,
+                cached: 0,
+                buffers: 0,
+            },
+            disk_usage: HashMap::new(),
+            network_status: NetworkStatus {
+                connected: false,
+                interfaces: Vec::new(),
+                dns_working: false,
+                internet_access: false,
+            },
+            processes: Vec::new(),
+            health_status: HealthStatus::Healthy,
+        }
+    }
+    
+    fn update(&mut self) {
+        // Update system statistics
+        // In a real implementation, this would read from /proc, /sys, etc.
+        self.health_status = HealthStatus::Healthy;
+    }
+}
+
+impl RecoveryTools {
+    fn new() -> Self {
+        Self {
+            recovery_actions: Vec::new(),
+            backup_status: BackupStatus {
+                has_backup: false,
+                last_backup: None,
+                backup_location: None,
+                backup_size: None,
+                is_valid: false,
+            },
+            log_files: Vec::new(),
+            config_files: Vec::new(),
+        }
+    }
+    
+    fn scan_system(&mut self) {
+        self.recovery_actions = vec![
+            RecoveryAction {
+                id: "restart_graph".to_string(),
+                name: "Restart Graph System".to_string(),
+                description: "Attempt to restart the graph desktop system".to_string(),
+                risk_level: RiskLevel::Safe,
+                command: Some("systemctl restart horizonos-graph".to_string()),
+                available: true,
+                estimated_time: 30,
+            },
+            RecoveryAction {
+                id: "reset_config".to_string(),
+                name: "Reset Configuration".to_string(),
+                description: "Reset graph desktop to default configuration".to_string(),
+                risk_level: RiskLevel::Medium,
+                command: Some("rm -rf ~/.config/horizonos && mkdir -p ~/.config/horizonos".to_string()),
+                available: true,
+                estimated_time: 10,
+            },
+            RecoveryAction {
+                id: "clear_cache".to_string(),
+                name: "Clear Cache".to_string(),
+                description: "Clear all graph desktop cache files".to_string(),
+                risk_level: RiskLevel::Safe,
+                command: Some("rm -rf ~/.cache/horizonos".to_string()),
+                available: true,
+                estimated_time: 5,
+            },
+        ];
+    }
+    
+    fn update(&mut self) {
+        // Update recovery tool status
+    }
+}
+
+impl Default for FallbackInterface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for FallbackConfig {
+    fn default() -> Self {
+        Self {
+            auto_activate: true,
+            show_system_monitor: true,
+            enable_recovery_tools: true,
+            emergency_apps: vec![
+                "Terminal".to_string(),
+                "File Manager".to_string(),
+                "Text Editor".to_string(),
+                "System Monitor".to_string(),
+            ],
+            auto_restart_graph: true,
+            max_restart_attempts: 3,
+        }
+    }
+}

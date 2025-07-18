@@ -3,7 +3,7 @@
 //! Provides a traditional application launcher grid interface
 
 use horizonos_graph_engine::GraphEngine;
-use horizonos_graph_nodes::{NodeManager, ApplicationNode, NodeType};
+use horizonos_graph_nodes::NodeManager;
 use crate::{BridgeError, BridgeEvent};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -13,6 +13,7 @@ use std::process::Command;
 /// 
 /// Presents applications in a traditional grid launcher while
 /// mapping to graph application nodes
+#[allow(dead_code)]
 pub struct ApplicationGrid {
     /// Available applications
     applications: HashMap<String, ApplicationInfo>,
@@ -156,11 +157,14 @@ impl ApplicationGrid {
     
     /// Launch application
     pub fn launch_application(&mut self, app_id: &str) -> Result<(), BridgeError> {
-        let app = self.applications.get(app_id)
-            .ok_or_else(|| BridgeError::IoError(format!("Application not found: {}", app_id)))?;
+        let app_executable = {
+            let app = self.applications.get(app_id)
+                .ok_or_else(|| BridgeError::IoError(format!("Application not found: {}", app_id)))?;
+            app.executable.clone()
+        };
         
         // Launch the application
-        let result = Command::new(&app.executable)
+        let result = Command::new(&app_executable)
             .spawn();
         
         match result {
@@ -174,11 +178,11 @@ impl ApplicationGrid {
                 // Update recent apps
                 self.add_to_recent(app_id.to_string());
                 
-                log::info!("Launched application: {} ({})", app.name, app_id);
+                log::info!("Launched application: {}", app_id);
                 Ok(())
             }
             Err(e) => {
-                Err(BridgeError::IoError(format!("Failed to launch {}: {}", app.name, e)))
+                Err(BridgeError::IoError(format!("Failed to launch {}: {}", app_id, e)))
             }
         }
     }
@@ -226,9 +230,9 @@ impl ApplicationGrid {
     /// Create application nodes in the graph
     fn create_application_nodes(&mut self, _engine: &mut GraphEngine, node_manager: &mut NodeManager) -> Result<(), BridgeError> {
         for app in self.applications.values() {
-            let node_id = node_manager.create_application_node(
+            let node_id = node_manager.create_application(
                 app.name.clone(),
-                app.executable.clone(),
+                app.executable.to_string_lossy().to_string(),
             );
             
             log::debug!("Created application node: {} -> {:?}", app.name, node_id);

@@ -4,7 +4,6 @@ use crate::{Notification, NotificationAction};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use uuid::Uuid;
 
 /// Handler for notification actions
 pub struct NotificationHandler {

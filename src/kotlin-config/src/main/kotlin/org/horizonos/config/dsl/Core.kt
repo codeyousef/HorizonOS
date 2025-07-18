@@ -563,8 +563,6 @@ class SystemConfiguration {
 
 // ===== Package Management DSL =====
 
-
-
 /**
  * DSL context for configuring a Flatpak application
  * 

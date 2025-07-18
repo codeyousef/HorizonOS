@@ -1,0 +1,256 @@
+version: '3.8'
+
+services:
+  # Ollama - Local LLM Runtime
+  ollama:
+    image: ollama/ollama:latest
+    container_name: horizonos-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_MODELS=/root/.ollama/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          memory: 8G
+    networks:
+      - ai-network
+
+  # TimescaleDB - Time-series Database for Pattern Storage
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: horizonos-timescaledb
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./scripts/sql/init-timescaledb.sql:/docker-entrypoint-initdb.d/init-timescaledb.sql
+    environment:
+      - POSTGRES_DB=horizonos_ai
+      - POSTGRES_USER=horizonos
+      - POSTGRES_PASSWORD=horizonos_ai_secure
+      - POSTGRES_HOST_AUTH_METHOD=scram-sha-256
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U horizonos -d horizonos_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-network
+
+  # n8n - Visual Workflow Orchestration
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: horizonos-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./src/ai-integration/n8n-nodes:/home/node/.n8n/nodes
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_EXECUTIONS_PROCESS=main
+      - N8N_EXECUTIONS_MODE=regular
+      - N8N_LOG_LEVEL=info
+      - N8N_METRICS=true
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=UTC
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=timescaledb
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=horizonos
+      - DB_POSTGRESDB_PASSWORD=horizonos_ai_secure
+      - DB_POSTGRESDB_SCHEMA=n8n
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ai-network
+
+  # Temporal - Workflow Orchestration for Long-running Tasks
+  temporal:
+    image: temporalio/auto-setup:latest
+    container_name: horizonos-temporal
+    restart: unless-stopped
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    volumes:
+      - temporal_data:/tmp/temporal
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_HOST=timescaledb
+      - POSTGRES_DB=temporal
+      - POSTGRES_USER=horizonos
+      - POSTGRES_PWD=horizonos_ai_secure
+      - POSTGRES_SEEDS=timescaledb
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "tctl", "cluster", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - ai-network
+
+  # Redis - Caching and Session Management
+  redis:
+    image: redis:7-alpine
+    container_name: horizonos-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ai-network
+
+  # InfluxDB - Alternative Time-series Database for Metrics
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: horizonos-influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    volumes:
+      - influx_data:/var/lib/influxdb2
+      - influx_config:/etc/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=horizonos
+      - DOCKER_INFLUXDB_INIT_PASSWORD=horizonos_metrics_secure
+      - DOCKER_INFLUXDB_INIT_ORG=horizonos
+      - DOCKER_INFLUXDB_INIT_BUCKET=ai_metrics
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=horizonos-ai-metrics-token
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ai-network
+
+  # Grafana - Monitoring and Visualization
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: horizonos-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=horizonos_admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    depends_on:
+      - influxdb
+    networks:
+      - ai-network
+
+  # Jupyter - Data Science and Analysis Environment
+  jupyter:
+    image: jupyter/datascience-notebook:latest
+    container_name: horizonos-jupyter
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    volumes:
+      - jupyter_data:/home/jovyan/work
+      - ./src/ai-integration/notebooks:/home/jovyan/work/horizonos
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=horizonos-ai-analysis
+    networks:
+      - ai-network
+
+  # Minio - S3-compatible Object Storage for AI Models and Data
+  minio:
+    image: minio/minio:latest
+    container_name: horizonos-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      - MINIO_ROOT_USER=horizonos
+      - MINIO_ROOT_PASSWORD=horizonos_storage_secure
+      - MINIO_BROWSER_REDIRECT_URL=http://localhost:9001
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ai-network
+
+volumes:
+  ollama_models:
+    driver: local
+  timescale_data:
+    driver: local
+  n8n_data:
+    driver: local
+  temporal_data:
+    driver: local
+  redis_data:
+    driver: local
+  influx_data:
+    driver: local
+  influx_config:
+    driver: local
+  grafana_data:
+    driver: local
+  jupyter_data:
+    driver: local
+  minio_data:
+    driver: local
+
+networks:
+  ai-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16

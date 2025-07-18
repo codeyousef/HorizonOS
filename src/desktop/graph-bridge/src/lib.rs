@@ -12,15 +12,20 @@ pub mod window_bridge;
 pub mod migration;
 pub mod fallback;
 
-pub use file_manager::*;
-pub use app_grid::*;
-pub use window_bridge::*;
-pub use migration::*;
-pub use fallback::*;
+// Re-export main types with specific imports to avoid conflicts
+pub use file_manager::{FileManagerBridge, ViewMode, FileManagerWindow, WindowDimensions, FileManagerState, FileManagerEvent, FileEntry, FilePermissions};
+pub use app_grid::{ApplicationGrid, ApplicationInfo, GridLayout, IconSize, GridState};
+pub use window_bridge::{WindowBridge, ManagedWindow, WindowState, WindowGeometry, WindowDecorations, WindowBridgeConfig, Workspace, LayoutMode, WindowEvent};
+pub use migration::{MigrationTools, MigrationStatus, MigrationStep, StepStatus, StepType, MigrationConfig, DiscoveredConfig, DesktopEnvironment, DiscoveredApplication, Bookmark, DesktopSettings, FontSettings, Shortcut, DiscoveredWorkspace, ThemeInfo};
+pub use fallback::{FallbackInterface, FallbackState, FallbackApplication, FallbackCategory, EmergencyFileManager, SystemMonitor, RecoveryTools, FallbackConfig, FallbackError, ErrorSeverity};
+
+// Re-export operation types with module prefixes to avoid conflicts
+pub use fallback::FileOperation as FallbackFileOperation;
+pub use fallback::OperationType as FallbackOperationType;
+pub use fallback::OperationStatus as FallbackOperationStatus;
 
 use horizonos_graph_engine::GraphEngine;
 use horizonos_graph_nodes::NodeManager;
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Traditional Mode Bridge Manager
@@ -144,7 +149,7 @@ impl TraditionalBridge {
     
     /// Set bridge mode
     pub fn set_mode(&mut self, mode: BridgeMode) -> Result<(), BridgeError> {
-        let old_mode = self.mode;
+        let _old_mode = self.mode;
         self.mode = mode;
         
         // Handle mode transition
@@ -252,7 +257,7 @@ impl TraditionalBridge {
     /// Show traditional UI
     fn show_traditional_ui(&mut self) {
         self.file_manager.show();
-        self.app_grid.show();
+        let _ = self.app_grid.show();
         self.window_bridge.show_full_decorations();
     }
     

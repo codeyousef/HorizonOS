@@ -126,7 +126,7 @@ mod tests {
                         "description": "Running applications",
                         "category": "APPLICATION",
                         "icon": "window",
-                        "color": "#4A90E2",
+                        "color": "#4A_90E2",
                         "shape": "ROUNDED_RECTANGLE",
                         "size": "MEDIUM",
                         "visual": {
@@ -146,14 +146,14 @@ mod tests {
                 "workspaces": {},
                 "themes": {
                     "dark": {
-                        "displayName": "Dark Theme",
+                        "displayName": "Dark_Theme",
                         "isDark": true,
                         "colors": {
                             "background": "#1E1E1E",
-                            "foreground": "#E0E0E0",
+                            "foreground": "#E0_E0E0",
                             "primary": "#64B5F6",
-                            "secondary": "#BA68C8",
-                            "accent": "#FFB74D",
+                            "secondary": "#BA_68C8",
+                            "accent": "#FF_B74D",
                             "nodeDefault": "#424242",
                             "edgeDefault": "#666666",
                             "selection": "#2196F3"

@@ -1,0 +1,269 @@
+```
+#!/usr/bin/env bash
+# /usr/local/bin/horizonos-autoupdate
+set -euo pipefail
+
+VERSION="1.0.0"
+GITHUB_REPO="codeyousef/HorizonOS"
+UPDATE_CACHE="/var/cache/horizonos/updates"
+CONFIG_FILE="/etc/horizonos/update.conf"
+LOG_FILE="/var/log/horizonos-update.log"
+
+# Default configuration
+UPDATE_CHANNEL="${UPDATE_CHANNEL:-stable}"
+CHECK_INTERVAL="${CHECK_INTERVAL:-86400}" # 24 hours
+AUTO_STAGE="${AUTO_STAGE:-true}"
+AUTO_REBOOT="${AUTO_REBOOT:-false}"
+
+# Logging
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+}
+
+error() {
+    log "ERROR: $*" >&2
+    return 1
+}
+
+# Load configuration
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+    fi
+}
+
+# Check for updates from GitHub
+check_github_updates() {
+    log "Checking for updates from GitHub..."
+    
+    # Get current version
+    if [ -f /etc/horizonos-release ]; then
+        source /etc/horizonos-release
+        CURRENT_VERSION="${HORIZONOS_VERSION:-unknown}"
+    else
+        CURRENT_VERSION="unknown"
+    fi
+    
+    log "Current version: $CURRENT_VERSION"
+    
+    # Get latest release from GitHub
+    local api_url="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+    local release_info=$(curl -s "$api_url")
+    
+    if [ $? -ne 0 ]; then
+        error "Failed to check GitHub for updates"
+        return 1
+    fi
+    
+    # Parse release information
+    LATEST_VERSION=$(echo "$release_info" | grep -oP '"tag_name":\s*"v?\K[^"]+')
+    LATEST_URL=$(echo "$release_info" | grep -oP '"browser_download_url":\s*"\K[^"]+ostree[^"]+')
+    
+    if [ -z "$LATEST_VERSION" ]; then
+        error "Could not determine latest version"
+        return 1
+    fi
+    
+    log "Latest version: $LATEST_VERSION"
+    
+    # Compare versions
+    if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+        log "System is up to date"
+        return 0
+    fi
+    
+    log "Update available: $CURRENT_VERSION -> $LATEST_VERSION"
+    echo "$LATEST_VERSION" > "$UPDATE_CACHE/available-version"
+    echo "$LATEST_URL" > "$UPDATE_CACHE/download-url"
+    
+    return 0
+}
+
+# Download update bundle
+download_update() {
+    local url="$1"
+    local version="$2"
+    local bundle_file="$UPDATE_CACHE/horizonos-ostree-$version.tar.gz"
+    
+    log "Downloading update bundle..."
+    
+    # Create cache directory
+    mkdir -p "$UPDATE_CACHE"
+    
+    # Download with progress
+    if command -v wget &>/dev/null; then
+        wget -O "$bundle_file" "$url" 2>&1 | tee -a "$LOG_FILE"
+    else
+        curl -L -o "$bundle_file" "$url" 2>&1 | tee -a "$LOG_FILE"
+    fi
+    
+    if [ ! -f "$bundle_file" ]; then
+        error "Failed to download update bundle"
+        return 1
+    fi
+    
+    # Verify download (would check GPG signature in production)
+    log "Verifying update bundle..."
+    if ! tar -tzf "$bundle_file" >/dev/null 2>&1; then
+        error "Downloaded bundle is corrupted"
+        rm -f "$bundle_file"
+        return 1
+    fi
+    
+    echo "$bundle_file"
+}
+
+# Apply OSTree update
+apply_update() {
+    local bundle_file="$1"
+    local version="$2"
+    
+    log "Applying update..."
+    
+    # Extract OSTree repository update
+    local temp_repo="/tmp/horizonos-update-repo"
+    rm -rf "$temp_repo"
+    mkdir -p "$temp_repo"
+    
+    tar -xzf "$bundle_file" -C "$temp_repo"
+    
+    # Pull from temporary repository
+    log "Pulling OSTree commit..."
+    ostree remote add temp-update "file://$temp_repo" --no-gpg-verify 2>/dev/null || true
+    
+    if ! ostree pull temp-update horizonos/test/x86_64; then
+        error "Failed to pull update"
+        ostree remote delete temp-update 2>/dev/null || true
+        rm -rf "$temp_repo"
+        return 1
+    fi
+    
+    # Deploy new version
+    log "Deploying new version..."
+    if ! ostree admin deploy horizonos/test/x86_64; then
+        error "Failed to deploy update"
+        ostree remote delete temp-update 2>/dev/null || true
+        rm -rf "$temp_repo"
+        return 1
+    fi
+    
+    # Cleanup
+    ostree remote delete temp-update 2>/dev/null || true
+    rm -rf "$temp_repo"
+    rm -f "$bundle_file"
+    
+    # Update version file
+    echo "HORIZONOS_VERSION=$version" > /etc/horizonos-release.new
+    
+    log "Update staged successfully. Reboot to apply."
+    
+    # Handle auto-reboot
+    if [ "$AUTO_REBOOT" = "true" ]; then
+        schedule_reboot
+    fi
+    
+    return 0
+}
+
+# Schedule reboot
+schedule_reboot() {
+    log "Scheduling reboot..."
+    
+    # Check if system is idle
+    if [ -f /usr/bin/who ]; then
+        local users=$(who | wc -l)
+        if [ "$users" -gt 0 ]; then
+            log "System has active users, postponing reboot"
+            systemctl --no-wall reboot +30
+            return
+        fi
+    fi
+    
+    # Immediate reboot if idle
+    log "System is idle, rebooting now"
+    systemctl --no-wall reboot
+}
+
+# Main update process
+perform_update() {
+    load_config
+    
+    # Check for updates
+    if ! check_github_updates; then
+        return 1
+    fi
+    
+    # Check if update is available
+    if [ ! -f "$UPDATE_CACHE/available-version" ]; then
+        log "No updates available"
+        return 0
+    fi
+    
+    local new_version=$(cat "$UPDATE_CACHE/available-version")
+    local download_url=$(cat "$UPDATE_CACHE/download-url")
+    
+    # Download update
+    local bundle_file=$(download_update "$download_url" "$new_version")
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
+    
+    # Apply update
+    if apply_update "$bundle_file" "$new_version"; then
+        rm -f "$UPDATE_CACHE/available-version"
+        rm -f "$UPDATE_CACHE/download-url"
+        return 0
+    fi
+    
+    return 1
+}
+
+# Systemd timer check
+timer_check() {
+    log "Running scheduled update check..."
+    perform_update
+}
+
+# Main
+case "${1:-check}" in
+    check)
+        check_github_updates
+        ;;
+    update)
+        perform_update
+        ;;
+    timer)
+        timer_check
+        ;;
+    configure)
+        # Interactive configuration
+        echo "HorizonOS Update Configuration"
+        echo "=============================="
+        echo ""
+        read -p "Update channel (stable/testing/dev) [$UPDATE_CHANNEL]: " channel
+        UPDATE_CHANNEL="${channel:-$UPDATE_CHANNEL}"
+        
+        read -p "Auto-stage updates (true/false) [$AUTO_STAGE]: " stage
+        AUTO_STAGE="${stage:-$AUTO_STAGE}"
+        
+        read -p "Auto-reboot when idle (true/false) [$AUTO_REBOOT]: " reboot
+        AUTO_REBOOT="${reboot:-$AUTO_REBOOT}"
+        
+        # Save configuration
+        mkdir -p "$(dirname "$CONFIG_FILE")"
+        cat > "$CONFIG_FILE" << EOF
+# HorizonOS Update Configuration
+UPDATE_CHANNEL="$UPDATE_CHANNEL"
+AUTO_STAGE="$AUTO_STAGE"
+AUTO_REBOOT="$AUTO_REBOOT"
+CHECK_INTERVAL="$CHECK_INTERVAL"
+EOF
+        
+        echo "Configuration saved to $CONFIG_FILE"
+        ;;
+    *)
+        echo "Usage: $0 {check|update|timer|configure}"
+        exit 1
+        ;;
+esac
+```

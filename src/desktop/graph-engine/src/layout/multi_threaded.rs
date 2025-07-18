@@ -107,10 +107,12 @@ pub struct WorkStealingScheduler {
     /// Global work queue for overflow
     global_queue: Arc<Mutex<Vec<LayoutTask>>>,
     /// Thread pool
+    #[allow(dead_code)]
     thread_pool: Option<rayon::ThreadPool>,
     /// Configuration
     config: MultiThreadedLayoutConfig,
     /// Active workers count
+    #[allow(dead_code)]
     active_workers: Arc<AtomicUsize>,
     /// Shutdown signal
     shutdown: Arc<AtomicBool>,
@@ -184,6 +186,7 @@ impl WorkStealingScheduler {
     }
     
     /// Steal work from another thread
+    #[allow(dead_code)]
     fn steal_work(&self, thread_id: usize) -> Option<LayoutTask> {
         // Try to steal from other threads
         for (i, queue) in self.work_queues.iter().enumerate() {
@@ -218,6 +221,7 @@ pub struct MultiThreadedLayoutManager {
     /// Performance statistics
     stats: Arc<Mutex<LayoutPerformanceStats>>,
     /// Current iteration
+    #[allow(dead_code)]
     current_iteration: Arc<AtomicUsize>,
     /// Convergence tracking
     convergence_tracker: Arc<Mutex<ConvergenceTracker>>,
@@ -488,6 +492,7 @@ impl MultiThreadedLayoutManager {
     }
     
     /// Compute forces for a single node using SIMD optimizations
+    #[allow(dead_code)]
     fn compute_node_forces_simd(&self, node_id: SceneId, nodes: &[ThreadSafeNode], edges: &[SceneEdge]) -> Vector3<f32> {
         let mut total_force = Vector3::new(0.0, 0.0, 0.0);
         
@@ -530,6 +535,7 @@ impl MultiThreadedLayoutManager {
     }
     
     /// Calculate repulsion force between two nodes
+    #[allow(dead_code)]
     fn calculate_repulsion_force(&self, node1: &ThreadSafeNode, node2: &ThreadSafeNode) -> Vector3<f32> {
         let direction = node1.position - node2.position;
         let distance = direction.norm();
@@ -545,6 +551,7 @@ impl MultiThreadedLayoutManager {
     }
     
     /// Calculate attraction force from an edge
+    #[allow(dead_code)]
     fn calculate_attraction_force(&self, node: &ThreadSafeNode, edge: &SceneEdge, nodes: &[ThreadSafeNode]) -> Vector3<f32> {
         let other_node_id = if edge.source == node.id {
             edge.target

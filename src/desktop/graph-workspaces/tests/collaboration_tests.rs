@@ -2,6 +2,7 @@
 
 use horizonos_graph_workspaces::*;
 use horizonos_graph_workspaces::collaboration::*;
+use horizonos_graph_engine::scene::SceneId;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -117,7 +118,7 @@ mod collaboration_manager_tests {
         let workspace_id = manager.create_shared_workspace(workspace, owner_id, permissions).await.unwrap();
         
         // Join workspace
-        let session = manager.join_workspace(&workspace_id, "user2", None).await.unwrap();
+        let _session = manager.join_workspace(&workspace_id, "user2", None).await.unwrap();
         
         // Leave workspace
         let result = manager.leave_workspace(&workspace_id, "user2").await;
@@ -146,7 +147,7 @@ mod workspace_change_tests {
         let workspace_id = manager.create_shared_workspace(workspace, owner_id, permissions).await.unwrap();
         
         // Test adding a node
-        let node_id = SceneId::new();
+        let node_id = 1;
         let change = WorkspaceChange::AddNode { node_id };
         let result = manager.apply_workspace_change(&workspace_id, change, "user1").await;
         assert!(result.is_ok());
@@ -169,13 +170,13 @@ mod workspace_change_tests {
         let workspace_id = manager.create_shared_workspace(workspace, owner_id, permissions).await.unwrap();
         
         // Test that admin can make changes
-        let node_id = SceneId::new();
+        let node_id = 1;
         let change = WorkspaceChange::AddNode { node_id };
         let result = manager.apply_workspace_change(&workspace_id, change, "user1").await;
         assert!(result.is_ok());
         
         // Test that viewer cannot make changes
-        let node_id = SceneId::new();
+        let node_id = 1;
         let change = WorkspaceChange::AddNode { node_id };
         let result = manager.apply_workspace_change(&workspace_id, change, "user2").await;
         assert!(result.is_err());
@@ -193,11 +194,11 @@ mod workspace_change_tests {
         let workspace_id = manager.create_shared_workspace(workspace, owner_id, permissions).await.unwrap();
         
         // Apply multiple changes
-        let node_id1 = SceneId::new();
+        let node_id1 = 1;
         let change1 = WorkspaceChange::AddNode { node_id: node_id1 };
         manager.apply_workspace_change(&workspace_id, change1, "user1").await.unwrap();
         
-        let node_id2 = SceneId::new();
+        let node_id2 = 2;
         let change2 = WorkspaceChange::AddNode { node_id: node_id2 };
         manager.apply_workspace_change(&workspace_id, change2, "user1").await.unwrap();
         
@@ -390,7 +391,7 @@ mod sync_engine_tests {
         sync_engine.initialize().await.unwrap();
         
         // Broadcast a change
-        let change = WorkspaceChange::AddNode { node_id: SceneId::new() };
+        let change = WorkspaceChange::AddNode { node_id: 1 };
         let result = sync_engine.broadcast_change("workspace1", change.clone(), "user1").await;
         assert!(result.is_ok());
         
@@ -449,17 +450,17 @@ mod integration_tests {
         manager.register_user(user2).unwrap();
         
         // User2 joins workspace
-        let session = manager.join_workspace(&workspace_id, "user2", None).await.unwrap();
+        let _session = manager.join_workspace(&workspace_id, "user2", None).await.unwrap();
         assert_eq!(session.user_id, "user2");
         
         // User1 makes changes
-        let node_id = SceneId::new();
+        let node_id = 1;
         let change = WorkspaceChange::AddNode { node_id };
         let result = manager.apply_workspace_change(&workspace_id, change, "user1").await;
         assert!(result.is_ok());
         
         // User2 makes changes
-        let node_id2 = SceneId::new();
+        let node_id2 = 2;
         let change2 = WorkspaceChange::AddNode { node_id: node_id2 };
         let result2 = manager.apply_workspace_change(&workspace_id, change2, "user2").await;
         assert!(result2.is_ok());
@@ -510,7 +511,7 @@ mod integration_tests {
                 
                 // Make multiple changes
                 for j in 0..10 {
-                    let node_id = SceneId::new();
+                    let node_id = 1;
                     let change = WorkspaceChange::AddNode { node_id };
                     let result = manager_clone.apply_workspace_change(&workspace_id_clone, change, &user_id).await;
                     if result.is_err() {
@@ -564,7 +565,7 @@ mod error_handling_tests {
         assert!(result.is_ok()); // Should not error
         
         // Test applying change to non-existent workspace
-        let change = WorkspaceChange::AddNode { node_id: SceneId::new() };
+        let change = WorkspaceChange::AddNode { node_id: 1 };
         let result = manager.apply_workspace_change("nonexistent", change, "user1").await;
         assert!(result.is_err());
     }
@@ -586,7 +587,7 @@ mod error_handling_tests {
         assert!(result.is_err());
         
         // Test unauthorized change
-        let change = WorkspaceChange::AddNode { node_id: SceneId::new() };
+        let change = WorkspaceChange::AddNode { node_id: 1 };
         let result = manager.apply_workspace_change(&workspace_id, change, "user2").await;
         assert!(result.is_err());
     }
@@ -610,7 +611,7 @@ mod performance_tests {
         // Add many nodes
         let start = std::time::Instant::now();
         for i in 0..1000 {
-            let node_id = SceneId::new();
+            let node_id = 1;
             let change = WorkspaceChange::AddNode { node_id };
             let result = manager.apply_workspace_change(&workspace_id, change, "user1").await;
             assert!(result.is_ok());

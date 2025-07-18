@@ -634,6 +634,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_config_manager() {
+        #[allow(unused_mut)]
         let (mut manager, _rx) = ConfigManager::new();
         
         // Test getting and setting values

@@ -5,7 +5,6 @@ use crate::{
 };
 use horizonos_graph_engine::{SceneNode, SceneId, NodeMetadata};
 use horizonos_graph_engine::scene::{NodeType, SettingType, SettingScope};
-use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 

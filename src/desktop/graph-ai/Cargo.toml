@@ -14,7 +14,6 @@ tokio-stream = "0.1"
 thiserror = { workspace = true }
 log = { workspace = true }
 chrono = { workspace = true }
-async-trait = "0.1"
 async-stream = "0.3"
 reqwest = { version = "0.11", features = ["json", "stream"] }
 futures = "0.3"
@@ -25,14 +24,26 @@ regex = "1.10"
 base64 = "0.21"
 
 # AI/LLM specific
-ollama-rs = "0.1"
-langchain-rust = "4.6"
+# ollama-rs = "0.1"  # Currently using custom implementation
+# langchain-rust would go here but doesn't exist as a crate yet
 
 # System monitoring
 sysinfo = "0.30"
 
+# Database and storage
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
+bincode = "1.3"
+rand = "0.8"
+
 # Other dependencies
 uuid = { version = "1.5", features = ["v4", "serde"] }
+url = "2.5"
+cron = "0.12"
+dirs = "5.0"
+sha2 = "0.10"
+
+# Additional dependencies
+async-trait = "0.1"
 
 [dev-dependencies]
 tokio-test = "0.4"

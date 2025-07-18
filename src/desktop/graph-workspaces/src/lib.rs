@@ -270,18 +270,18 @@ impl WorkspaceManager {
     }
     
     /// Get shared workspace information
-    pub fn get_shared_workspace(&self, workspace_id: &str) -> Option<SharedWorkspace> {
-        self.collaboration.get_shared_workspace(workspace_id)
+    pub async fn get_shared_workspace(&self, workspace_id: &str) -> Option<SharedWorkspace> {
+        self.collaboration.get_shared_workspace(workspace_id).await
     }
     
     /// List shared workspaces for a user
-    pub fn list_shared_workspaces(&self, user_id: &str) -> Vec<SharedWorkspace> {
-        self.collaboration.list_shared_workspaces(user_id)
+    pub async fn list_shared_workspaces(&self, user_id: &str) -> Vec<SharedWorkspace> {
+        self.collaboration.list_shared_workspaces(user_id).await
     }
     
     /// Register a user for collaboration
-    pub fn register_user(&self, user: User) -> Result<(), WorkspaceError> {
-        self.collaboration.register_user(user)
+    pub async fn register_user(&self, user: User) -> Result<(), WorkspaceError> {
+        self.collaboration.register_user(user).await
     }
     
     /// Subscribe to collaboration events

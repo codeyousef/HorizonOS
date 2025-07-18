@@ -7,7 +7,8 @@ use crate::{
 };
 use anyhow::{Result, Context};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
 use log::{debug, info, warn, error};
@@ -116,23 +117,23 @@ impl NotificationManager {
         provider.initialize().await
             .context("Failed to initialize notification provider")?;
         
-        self.providers.write().unwrap().push(provider);
+        self.providers.write().await.push(provider);
         Ok(())
     }
     
     /// Add a render target
-    pub fn add_render_target(&self, target: Box<dyn NotificationRenderTarget>) {
-        self.render_targets.write().unwrap().push(target);
+    pub async fn add_render_target(&self, target: Box<dyn NotificationRenderTarget>) {
+        self.render_targets.write().await.push(target);
     }
     
     /// Add a notification channel
-    pub fn add_channel(&self, channel: NotificationChannel) {
-        self.channels.write().unwrap().insert(channel.id.clone(), channel);
+    pub async fn add_channel(&self, channel: NotificationChannel) {
+        self.channels.write().await.insert(channel.id.clone(), channel);
     }
     
     /// Add a notification filter
-    pub fn add_filter(&self, filter: NotificationFilter) {
-        self.filters.write().unwrap().push(filter);
+    pub async fn add_filter(&self, filter: NotificationFilter) {
+        self.filters.write().await.push(filter);
     }
     
     /// Create a new notification
@@ -171,19 +172,19 @@ impl NotificationManager {
     }
     
     /// Get active notifications
-    pub fn get_active(&self) -> Vec<Notification> {
-        self.active.read().unwrap().values().cloned().collect()
+    pub async fn get_active(&self) -> Vec<Notification> {
+        self.active.read().await.values().cloned().collect()
     }
     
     /// Get notification by ID
-    pub fn get_notification(&self, id: Uuid) -> Option<Notification> {
-        self.active.read().unwrap().get(&id).cloned()
+    pub async fn get_notification(&self, id: Uuid) -> Option<Notification> {
+        self.active.read().await.get(&id).cloned()
     }
     
     /// Get notifications for a group
-    pub fn get_group(&self, group: &str) -> Vec<Notification> {
-        let groups = self.groups.read().unwrap();
-        let active = self.active.read().unwrap();
+    pub async fn get_group(&self, group: &str) -> Vec<Notification> {
+        let groups = self.groups.read().await;
+        let active = self.active.read().await;
         
         groups.get(group)
             .map(|ids| {
@@ -205,13 +206,13 @@ impl NotificationManager {
     }
     
     /// Update configuration
-    pub fn update_config(&self, config: NotificationConfig) {
-        *self.config.write().unwrap() = config;
+    pub async fn update_config(&self, config: NotificationConfig) {
+        *self.config.write().await = config;
     }
     
     /// Get current configuration
-    pub fn config(&self) -> NotificationConfig {
-        self.config.read().unwrap().clone()
+    pub async fn config(&self) -> NotificationConfig {
+        self.config.read().await.clone()
     }
 }
 
@@ -260,7 +261,7 @@ impl NotificationManagerInternal {
     
     /// Create a new notification
     async fn create_notification(&self, mut notification: Notification) -> Result<()> {
-        let config = self.config.read().unwrap();
+        let config = self.config.read().await;
         
         // Check do not disturb mode
         if config.do_not_disturb && notification.priority < NotificationPriority::Critical {
@@ -271,7 +272,7 @@ impl NotificationManagerInternal {
         }
         
         // Apply filters
-        let filters = self.filters.read().unwrap();
+        let filters = self.filters.read().await;
         for filter in filters.iter() {
             if !filter.should_show(&notification) {
                 debug!("Notification blocked by filter");
@@ -295,26 +296,26 @@ impl NotificationManagerInternal {
         }
         
         // Check if we need to queue
-        let active_count = self.active.read().unwrap().len();
+        let active_count = self.active.read().await.len();
         if active_count >= config.max_visible {
-            self.queue.write().unwrap().push_back(notification.clone());
+            self.queue.write().await.push_back(notification.clone());
             info!("Notification queued: {}", notification.title);
             return Ok(());
         }
         
         // Add to active notifications
-        self.active.write().unwrap().insert(notification.id, notification.clone());
+        self.active.write().await.insert(notification.id, notification.clone());
         
         // Add to group if specified
         if let Some(group) = &notification.group {
-            self.groups.write().unwrap()
+            self.groups.write().await
                 .entry(group.clone())
                 .or_insert_with(Vec::new)
                 .push(notification.id);
         }
         
         // Send to providers
-        let providers = self.providers.read().unwrap();
+        let providers = self.providers.read().await;
         for provider in providers.iter() {
             if provider.is_available() {
                 if let Err(e) = provider.send(&notification).await {
@@ -337,14 +338,14 @@ impl NotificationManagerInternal {
     
     /// Update an existing notification
     async fn update_notification(&self, notification: Notification) -> Result<()> {
-        let mut active = self.active.write().unwrap();
+        let mut active = self.active.write().await;
         
         if let Some(existing) = active.get_mut(&notification.id) {
             *existing = notification.clone();
             drop(active);
             
             // Update in providers
-            let providers = self.providers.read().unwrap();
+            let providers = self.providers.read().await;
             for provider in providers.iter() {
                 if provider.is_available() {
                     if let Err(e) = provider.update(&notification).await {
@@ -354,7 +355,7 @@ impl NotificationManagerInternal {
             }
             
             // Update render
-            let mut render_targets = self.render_targets.write().unwrap();
+            let mut render_targets = self.render_targets.write().await;
             for target in render_targets.iter_mut() {
                 if let Err(e) = target.update_render(&notification).await {
                     warn!("Failed to update render: {}", e);
@@ -373,17 +374,17 @@ impl NotificationManagerInternal {
     
     /// Dismiss a notification
     async fn dismiss_notification(&self, id: Uuid) -> Result<()> {
-        if let Some(mut notification) = self.active.write().unwrap().remove(&id) {
+        if let Some(mut notification) = self.active.write().await.remove(&id) {
             notification.dismissed = true;
             
             // Remove from groups
-            let mut groups = self.groups.write().unwrap();
+            let mut groups = self.groups.write().await;
             for (_, ids) in groups.iter_mut() {
                 ids.retain(|&nid| nid != id);
             }
             
             // Dismiss in providers
-            let providers = self.providers.read().unwrap();
+            let providers = self.providers.read().await;
             for provider in providers.iter() {
                 if provider.is_available() {
                     if let Err(e) = provider.dismiss(id).await {
@@ -402,7 +403,7 @@ impl NotificationManagerInternal {
             let _ = self.event_tx.send(NotificationEvent::Dismissed(id));
             
             // Process queue if there are waiting notifications
-            if !self.queue.read().unwrap().is_empty() {
+            if !self.queue.read().await.is_empty() {
                 let _ = self.process_notification_queue().await;
             }
         }
@@ -412,21 +413,21 @@ impl NotificationManagerInternal {
     
     /// Dismiss all notifications
     async fn dismiss_all_notifications(&self) -> Result<()> {
-        let ids: Vec<Uuid> = self.active.read().unwrap().keys().cloned().collect();
+        let ids: Vec<Uuid> = self.active.read().await.keys().cloned().collect();
         
         for id in ids {
             self.dismiss_notification(id).await?;
         }
         
         // Clear queue
-        self.queue.write().unwrap().clear();
+        self.queue.write().await.clear();
         
         Ok(())
     }
     
     /// Clear a notification group
     async fn clear_notification_group(&self, group: String) -> Result<()> {
-        let groups = self.groups.read().unwrap();
+        let groups = self.groups.read().await;
         if let Some(ids) = groups.get(&group) {
             let ids = ids.clone();
             drop(groups);
@@ -441,12 +442,12 @@ impl NotificationManagerInternal {
     
     /// Process notification queue
     async fn process_notification_queue(&self) -> Result<()> {
-        let config = self.config.read().unwrap();
+        let config = self.config.read().await;
         let max_visible = config.max_visible;
         drop(config);
         
-        while self.active.read().unwrap().len() < max_visible {
-            if let Some(notification) = self.queue.write().unwrap().pop_front() {
+        while self.active.read().await.len() < max_visible {
+            if let Some(notification) = self.queue.write().await.pop_front() {
                 self.create_notification(notification).await?;
             } else {
                 break;
@@ -458,7 +459,7 @@ impl NotificationManagerInternal {
     
     /// Check for expired notifications
     async fn check_expired_notifications(&self) -> Result<()> {
-        let expired: Vec<Uuid> = self.active.read().unwrap()
+        let expired: Vec<Uuid> = self.active.read().await
             .iter()
             .filter(|(_, n)| n.is_expired())
             .map(|(id, _)| *id)
@@ -475,12 +476,12 @@ impl NotificationManagerInternal {
     
     /// Render a notification
     async fn render_notification(&self, notification: &Notification) -> Result<()> {
-        let config = self.config.read().unwrap();
+        let config = self.config.read().await;
         let position = config.position;
         let animations = config.animations.clone();
         drop(config);
         
-        let mut render_targets = self.render_targets.write().unwrap();
+        let mut render_targets = self.render_targets.write().await;
         for target in render_targets.iter_mut() {
             target.render(notification, position).await?;
             
@@ -518,12 +519,12 @@ impl NotificationManagerInternal {
     
     /// Remove notification render
     async fn remove_render(&self, id: Uuid) -> Result<()> {
-        let config = self.config.read().unwrap();
+        let config = self.config.read().await;
         let animations = config.animations.clone();
         let position = config.position;
         drop(config);
         
-        let mut render_targets = self.render_targets.write().unwrap();
+        let mut render_targets = self.render_targets.write().await;
         for target in render_targets.iter_mut() {
             // Apply exit animations
             if animations.slide_in {
@@ -573,7 +574,7 @@ mod tests {
         let config = NotificationConfig::default();
         let manager = NotificationManager::new(config);
         
-        assert_eq!(manager.get_active().len(), 0);
+        assert_eq!(manager.get_active().await.len(), 0);
     }
     
     #[tokio::test]
@@ -591,7 +592,7 @@ mod tests {
         // Give time for async processing
         tokio::time::sleep(Duration::from_millis(100)).await;
         
-        let active = manager.get_active();
+        let active = manager.get_active().await;
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].title, "Test");
     }
@@ -610,11 +611,11 @@ mod tests {
         manager.notify(notification).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         
-        assert_eq!(manager.get_active().len(), 1);
+        assert_eq!(manager.get_active().await.len(), 1);
         
         manager.dismiss(id).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         
-        assert_eq!(manager.get_active().len(), 0);
+        assert_eq!(manager.get_active().await.len(), 0);
     }
 }

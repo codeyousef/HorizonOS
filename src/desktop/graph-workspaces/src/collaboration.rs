@@ -7,7 +7,8 @@ use crate::{Workspace, WorkspaceError};
 use horizonos_graph_engine::scene::SceneId;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::sync::broadcast;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -62,7 +63,7 @@ impl CollaborationManager {
         let shared_workspace = SharedWorkspace::new(workspace, owner_id, permissions);
         let workspace_id = shared_workspace.workspace.id.clone();
         
-        self.shared_workspaces.write().unwrap()
+        self.shared_workspaces.write().await
             .insert(workspace_id.clone(), shared_workspace.clone());
         
         self.event_sender.send(CollaborationEvent::WorkspaceShared {
@@ -83,7 +84,7 @@ impl CollaborationManager {
         user_id: &str,
         invitation_code: Option<String>,
     ) -> Result<CollaborationSession, WorkspaceError> {
-        let mut shared_workspaces = self.shared_workspaces.write().unwrap();
+        let mut shared_workspaces = self.shared_workspaces.write().await;
         
         let shared_workspace = shared_workspaces.get_mut(workspace_id)
             .ok_or_else(|| WorkspaceError::NotFound(workspace_id.to_string()))?;
@@ -104,7 +105,7 @@ impl CollaborationManager {
         );
         
         let session_id = session.id.clone();
-        self.active_sessions.write().unwrap()
+        self.active_sessions.write().await
             .insert(session_id.clone(), session.clone());
         
         self.event_sender.send(CollaborationEvent::UserJoined {
@@ -122,19 +123,19 @@ impl CollaborationManager {
         workspace_id: &str,
         user_id: &str,
     ) -> Result<(), WorkspaceError> {
-        let mut shared_workspaces = self.shared_workspaces.write().unwrap();
+        let mut shared_workspaces = self.shared_workspaces.write().await;
         
         if let Some(shared_workspace) = shared_workspaces.get_mut(workspace_id) {
             shared_workspace.remove_participant(user_id);
             
             // Remove active session
-            let sessions: Vec<String> = self.active_sessions.read().unwrap()
+            let sessions: Vec<String> = self.active_sessions.read().await
                 .iter()
                 .filter(|(_, session)| session.workspace_id == workspace_id && session.user_id == user_id)
                 .map(|(id, _)| id.clone())
                 .collect();
             
-            let mut active_sessions = self.active_sessions.write().unwrap();
+            let mut active_sessions = self.active_sessions.write().await;
             for session_id in sessions {
                 active_sessions.remove(&session_id);
             }
@@ -155,7 +156,7 @@ impl CollaborationManager {
         change: WorkspaceChange,
         user_id: &str,
     ) -> Result<(), WorkspaceError> {
-        let mut shared_workspaces = self.shared_workspaces.write().unwrap();
+        let mut shared_workspaces = self.shared_workspaces.write().await;
         
         let shared_workspace = shared_workspaces.get_mut(workspace_id)
             .ok_or_else(|| WorkspaceError::NotFound(workspace_id.to_string()))?;
@@ -178,13 +179,13 @@ impl CollaborationManager {
     }
     
     /// Get shared workspace
-    pub fn get_shared_workspace(&self, workspace_id: &str) -> Option<SharedWorkspace> {
-        self.shared_workspaces.read().unwrap().get(workspace_id).cloned()
+    pub async fn get_shared_workspace(&self, workspace_id: &str) -> Option<SharedWorkspace> {
+        self.shared_workspaces.read().await.get(workspace_id).cloned()
     }
     
     /// List shared workspaces for a user
-    pub fn list_shared_workspaces(&self, user_id: &str) -> Vec<SharedWorkspace> {
-        self.shared_workspaces.read().unwrap()
+    pub async fn list_shared_workspaces(&self, user_id: &str) -> Vec<SharedWorkspace> {
+        self.shared_workspaces.read().await
             .values()
             .filter(|ws| ws.can_access(user_id))
             .cloned()
@@ -192,8 +193,8 @@ impl CollaborationManager {
     }
     
     /// Get active sessions for a workspace
-    pub fn get_active_sessions(&self, workspace_id: &str) -> Vec<CollaborationSession> {
-        self.active_sessions.read().unwrap()
+    pub async fn get_active_sessions(&self, workspace_id: &str) -> Vec<CollaborationSession> {
+        self.active_sessions.read().await
             .values()
             .filter(|session| session.workspace_id == workspace_id)
             .cloned()
@@ -201,8 +202,8 @@ impl CollaborationManager {
     }
     
     /// Register a user
-    pub fn register_user(&self, user: User) -> Result<(), WorkspaceError> {
-        self.users.write().unwrap().insert(user.id.clone(), user);
+    pub async fn register_user(&self, user: User) -> Result<(), WorkspaceError> {
+        self.users.write().await.insert(user.id.clone(), user);
         Ok(())
     }
     
@@ -695,7 +696,7 @@ impl SyncEngine {
                 
                 // Process pending changes
                 let changes: Vec<(String, WorkspaceChange, String)> = {
-                    let mut pending = pending_changes.write().unwrap();
+                    let mut pending = pending_changes.write().await;
                     let changes = pending.clone();
                     pending.clear();
                     changes
@@ -722,7 +723,7 @@ impl SyncEngine {
         user_id: &str,
     ) -> Result<(), WorkspaceError> {
         // Queue change for processing
-        self.pending_changes.write().unwrap().push((
+        self.pending_changes.write().await.push((
             workspace_id.to_string(),
             change,
             user_id.to_string(),

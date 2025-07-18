@@ -103,6 +103,7 @@ enum class ApplicationPackageStrategy {
 enum class MigrationStrategy {
     CONTAINER_FIRST,    // Prefer containers for system packages
     FLATPAK_FIRST,      // Prefer Flatpak for applications
+    LEGACY_ONLY,        // Keep legacy packages as-is
     AUTOMATIC,          // Automatically choose best format
     MANUAL              // Manual migration control
 }
@@ -741,6 +742,9 @@ fun migratePackages(
                         unmigrated.add(pkg)
                     }
                 }
+            }
+            MigrationStrategy.LEGACY_ONLY -> {
+                unmigrated.add(pkg)
             }
             MigrationStrategy.AUTOMATIC -> {
                 when (getRecommendedFormat(pkg.name)) {

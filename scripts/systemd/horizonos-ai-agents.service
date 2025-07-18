@@ -1,0 +1,64 @@
+[Unit]
+Description=HorizonOS AI Agent Coordinator
+Documentation=https://github.com/horizonos/horizonos
+After=horizonos-ai.service
+Requires=horizonos-ai.service
+PartOf=horizonos-ai.service
+
+[Service]
+Type=notify
+Environment="RUST_LOG=info"
+Environment="AGENT_CONFIG=/etc/horizonos/ai/agents.toml"
+Environment="OLLAMA_HOST=http://localhost:11434"
+
+# User and group (same as main service)
+User=horizonos-ai
+Group=horizonos-ai
+
+# Working directory
+WorkingDirectory=/var/lib/horizonos-ai
+
+# Main executable
+ExecStart=/usr/bin/horizonos-ai-agents
+ExecReload=/bin/kill -USR1 $MAINPID
+ExecStop=/bin/kill -TERM $MAINPID
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=3
+StartLimitInterval=60
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/horizonos-ai/agents /var/cache/horizonos-ai
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+
+# Resource limits (higher for AI processing)
+LimitNOFILE=65536
+LimitNPROC=2048
+MemoryMax=8G
+CPUQuota=400%
+IOWeight=60
+
+# Network access for Ollama
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=horizonos-ai-agents
+
+[Install]
+WantedBy=horizonos-ai.service

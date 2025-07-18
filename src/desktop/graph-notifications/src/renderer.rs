@@ -9,7 +9,7 @@ use nalgebra::{Point3, Vector3};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
-use horizonos_graph_visual::NodeVisualData;
+use horizonos_graph_nodes::NodeVisualData;
 
 /// Graph-integrated notification renderer
 pub struct NotificationRenderer {
@@ -145,9 +145,8 @@ impl NotificationRenderer {
         
         // Limit stack size
         if self.layout.stack.len() > self.layout.max_stack {
-            if let Some(old_id) = self.layout.stack.remove(0) {
-                self.active_visuals.write().unwrap().remove(&old_id);
-            }
+            let old_id = self.layout.stack.remove(0);
+            self.active_visuals.write().unwrap().remove(&old_id);
         }
     }
     

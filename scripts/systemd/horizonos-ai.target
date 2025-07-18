@@ -1,0 +1,14 @@
+[Unit]
+Description=HorizonOS AI Integration System
+Documentation=https://github.com/horizonos/horizonos
+Requires=multi-user.target
+After=multi-user.target
+AllowIsolate=yes
+
+# This target groups all AI-related services
+Wants=horizonos-ai.service
+Wants=horizonos-ai-monitor.service
+Wants=horizonos-ai-agents.service
+
+[Install]
+WantedBy=graphical.target

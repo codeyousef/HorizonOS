@@ -135,6 +135,7 @@ pub struct EdgeAnalysisStatistics {
 
 /// GPU compute buffer for edge analysis
 #[derive(Debug)]
+#[allow(dead_code)]
 struct EdgeAnalysisBuffer {
     /// Input buffer for edge data
     input_buffer: Buffer,
@@ -153,12 +154,16 @@ pub struct EdgeContentAnalyzer {
     /// Analysis results
     analysis: EdgeContentAnalysis,
     /// GPU device
+    #[allow(dead_code)]
     device: Arc<Device>,
     /// Compute pipeline for GPU analysis
+    #[allow(dead_code)]
     compute_pipeline: Option<ComputePipeline>,
     /// Bind group layout
+    #[allow(dead_code)]
     bind_group_layout: BindGroupLayout,
     /// GPU buffers
+    #[allow(dead_code)]
     gpu_buffers: Option<EdgeAnalysisBuffer>,
     /// Frame counter for paced analysis
     frame_counter: u64,

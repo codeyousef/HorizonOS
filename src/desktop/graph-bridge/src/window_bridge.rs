@@ -206,7 +206,7 @@ impl WindowBridge {
     }
     
     /// Initialize the window bridge
-    pub fn initialize(&mut self, engine: &mut GraphEngine, node_manager: &mut NodeManager) -> Result<(), BridgeError> {
+    pub fn initialize(&mut self, _engine: &mut GraphEngine, _node_manager: &mut NodeManager) -> Result<(), BridgeError> {
         log::info!("Window bridge initialized");
         Ok(())
     }
@@ -290,7 +290,7 @@ impl WindowBridge {
     /// Minimize window
     pub fn minimize_window(&mut self, window_id: u64) -> Result<(), BridgeError> {
         if let Some(window) = self.windows.get_mut(&window_id) {
-            let old_state = window.state;
+            let _old_state = window.state;
             window.state = WindowState::Minimized;
             window.is_visible = false;
             
@@ -304,7 +304,7 @@ impl WindowBridge {
     /// Maximize window
     pub fn maximize_window(&mut self, window_id: u64) -> Result<(), BridgeError> {
         if let Some(window) = self.windows.get_mut(&window_id) {
-            let old_state = window.state;
+            let _old_state = window.state;
             
             if window.state == WindowState::Maximized {
                 // Restore to normal
@@ -463,8 +463,8 @@ impl WindowBridge {
     }
     
     /// Update window bridge
-    pub fn update(&mut self, engine: &mut GraphEngine, node_manager: &mut NodeManager) -> Result<Vec<BridgeEvent>, BridgeError> {
-        let mut events = Vec::new();
+    pub fn update(&mut self, _engine: &mut GraphEngine, _node_manager: &mut NodeManager) -> Result<Vec<BridgeEvent>, BridgeError> {
+        let events = Vec::new();
         
         // Auto-tile windows if enabled
         if self.config.auto_tile {
@@ -485,4 +485,150 @@ impl WindowBridge {
                 
                 if visible_windows.len() > 1 {
                     let screen_width = 1920; // In a real implementation, get from display
-                    let screen_height = 1080;\n                    \n                    let window_width = screen_width / visible_windows.len() as u32;\n                    \n                    for (i, &&window_id) in visible_windows.iter().enumerate() {\n                        if let Some(window) = self.windows.get_mut(&window_id) {\n                            window.geometry.x = (i as u32 * window_width) as i32;\n                            window.geometry.y = 0;\n                            window.geometry.width = window_width;\n                            window.geometry.height = screen_height;\n                        }\n                    }\n                }\n            }\n        }\n        \n        Ok(())\n    }\n    \n    /// Get windows in current workspace\n    pub fn get_current_workspace_windows(&self) -> Vec<&ManagedWindow> {\n        if let Some(workspace) = self.workspaces.get(&self.active_workspace) {\n            workspace.windows.iter()\n                .filter_map(|&id| self.windows.get(&id))\n                .collect()\n        } else {\n            Vec::new()\n        }\n    }\n    \n    /// Get all workspaces\n    pub fn get_workspaces(&self) -> Vec<&Workspace> {\n        self.workspaces.values().collect()\n    }\n    \n    /// Get focused window\n    pub fn get_focused_window(&self) -> Option<&ManagedWindow> {\n        self.windows.values().find(|w| w.is_focused)\n    }\n    \n    /// Set configuration\n    pub fn set_config(&mut self, config: WindowBridgeConfig) {\n        self.config = config;\n        \n        // Apply decoration changes\n        if self.config.enable_decorations {\n            self.show_decorations();\n        } else {\n            self.hide_decorations();\n        }\n    }\n    \n    /// Get configuration\n    pub fn config(&self) -> &WindowBridgeConfig {\n        &self.config\n    }\n    \n    /// Get window by ID\n    pub fn get_window(&self, window_id: u64) -> Option<&ManagedWindow> {\n        self.windows.get(&window_id)\n    }\n    \n    /// Get active workspace\n    pub fn active_workspace(&self) -> &str {\n        &self.active_workspace\n    }\n}\n\nimpl Default for WindowBridge {\n    fn default() -> Self {\n        Self::new()\n    }\n}\n\nimpl Default for WindowGeometry {\n    fn default() -> Self {\n        Self {\n            x: 100,\n            y: 100,\n            width: 800,\n            height: 600,\n            min_width: 200,\n            min_height: 100,\n            max_width: 3840,\n            max_height: 2160,\n        }\n    }\n}\n\nimpl Default for WindowDecorations {\n    fn default() -> Self {\n        Self {\n            title_bar: true,\n            border: true,\n            minimize_button: true,\n            maximize_button: true,\n            close_button: true,\n            resize_handles: true,\n            title_bar_height: 32,\n            border_width: 2,\n        }\n    }\n}\n\nimpl WindowDecorations {\n    /// Minimal decorations\n    pub fn minimal() -> Self {\n        Self {\n            title_bar: false,\n            border: true,\n            minimize_button: false,\n            maximize_button: false,\n            close_button: false,\n            resize_handles: false,\n            title_bar_height: 0,\n            border_width: 1,\n        }\n    }\n    \n    /// Full decorations\n    pub fn full() -> Self {\n        Self {\n            title_bar: true,\n            border: true,\n            minimize_button: true,\n            maximize_button: true,\n            close_button: true,\n            resize_handles: true,\n            title_bar_height: 40,\n            border_width: 3,\n        }\n    }\n}\n\nimpl Default for WindowBridgeConfig {\n    fn default() -> Self {\n        Self {\n            enable_decorations: true,\n            enable_workspaces: true,\n            default_layout_mode: LayoutMode::Floating,\n            auto_tile: false,\n            focus_follows_mouse: false,\n            click_to_focus: true,\n            animation_duration: 200,\n        }\n    }\n}"
+                    let screen_height = 1080;
+                    
+                    let window_width = screen_width / visible_windows.len() as u32;
+                    
+                    for (i, &&window_id) in visible_windows.iter().enumerate() {
+                        if let Some(window) = self.windows.get_mut(&window_id) {
+                            window.geometry.x = (i as u32 * window_width) as i32;
+                            window.geometry.y = 0;
+                            window.geometry.width = window_width;
+                            window.geometry.height = screen_height;
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Get windows in current workspace
+    pub fn get_current_workspace_windows(&self) -> Vec<&ManagedWindow> {
+        if let Some(workspace) = self.workspaces.get(&self.active_workspace) {
+            workspace.windows.iter()
+                .filter_map(|&id| self.windows.get(&id))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+    
+    /// Get all workspaces
+    pub fn get_workspaces(&self) -> Vec<&Workspace> {
+        self.workspaces.values().collect()
+    }
+    
+    /// Get focused window
+    pub fn get_focused_window(&self) -> Option<&ManagedWindow> {
+        self.windows.values().find(|w| w.is_focused)
+    }
+    
+    /// Set configuration
+    pub fn set_config(&mut self, config: WindowBridgeConfig) {
+        self.config = config;
+        
+        // Apply decoration changes
+        if self.config.enable_decorations {
+            self.show_decorations();
+        } else {
+            self.hide_decorations();
+        }
+    }
+    
+    /// Get configuration
+    pub fn config(&self) -> &WindowBridgeConfig {
+        &self.config
+    }
+    
+    /// Get window by ID
+    pub fn get_window(&self, window_id: u64) -> Option<&ManagedWindow> {
+        self.windows.get(&window_id)
+    }
+    
+    /// Get active workspace
+    pub fn active_workspace(&self) -> &str {
+        &self.active_workspace
+    }
+}
+
+impl Default for WindowBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for WindowGeometry {
+    fn default() -> Self {
+        Self {
+            x: 100,
+            y: 100,
+            width: 800,
+            height: 600,
+            min_width: 200,
+            min_height: 100,
+            max_width: 3840,
+            max_height: 2160,
+        }
+    }
+}
+
+impl Default for WindowDecorations {
+    fn default() -> Self {
+        Self {
+            title_bar: true,
+            border: true,
+            minimize_button: true,
+            maximize_button: true,
+            close_button: true,
+            resize_handles: true,
+            title_bar_height: 32,
+            border_width: 2,
+        }
+    }
+}
+
+impl WindowDecorations {
+    /// Minimal decorations
+    pub fn minimal() -> Self {
+        Self {
+            title_bar: false,
+            border: true,
+            minimize_button: false,
+            maximize_button: false,
+            close_button: false,
+            resize_handles: false,
+            title_bar_height: 0,
+            border_width: 1,
+        }
+    }
+    
+    /// Full decorations
+    pub fn full() -> Self {
+        Self {
+            title_bar: true,
+            border: true,
+            minimize_button: true,
+            maximize_button: true,
+            close_button: true,
+            resize_handles: true,
+            title_bar_height: 40,
+            border_width: 3,
+        }
+    }
+}
+
+impl Default for WindowBridgeConfig {
+    fn default() -> Self {
+        Self {
+            enable_decorations: true,
+            enable_workspaces: true,
+            default_layout_mode: LayoutMode::Floating,
+            auto_tile: false,
+            focus_follows_mouse: false,
+            click_to_focus: true,
+            animation_duration: 200,
+        }
+    }
+}

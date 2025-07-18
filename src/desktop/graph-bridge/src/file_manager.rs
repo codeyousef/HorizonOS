@@ -3,7 +3,7 @@
 //! Provides a traditional file manager interface that maps to graph nodes
 
 use horizonos_graph_engine::GraphEngine;
-use horizonos_graph_nodes::{NodeManager, FileNode, NodeType};
+use horizonos_graph_nodes::NodeManager;
 use crate::{BridgeError, BridgeEvent};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
@@ -139,7 +139,7 @@ impl FileManagerBridge {
             return Err(BridgeError::IoError(format!("Path does not exist: {}", path.display())));
         }
         
-        let old_path = self.current_path.clone();
+        let _old_path = self.current_path.clone();
         self.current_path = path.to_path_buf();
         self.selection.clear();
         
@@ -174,7 +174,7 @@ impl FileManagerBridge {
             return Err(BridgeError::IoError(format!("Path does not exist: {}", path.display())));
         }
         
-        let old_path = self.current_path.clone();
+        let _old_path = self.current_path.clone();
         self.current_path = path.to_path_buf();
         self.selection.clear();
         
@@ -184,7 +184,8 @@ impl FileManagerBridge {
     
     /// Navigate up one directory
     pub fn navigate_up(&mut self) -> Result<(), BridgeError> {
-        if let Some(parent) = self.current_path.parent() {
+        let current_path = self.current_path.clone();
+        if let Some(parent) = current_path.parent() {
             self.navigate_to(parent)
         } else {
             Err(BridgeError::IoError("Cannot navigate up from root".to_string()))
@@ -365,7 +366,7 @@ impl FileManagerBridge {
     
     /// Update file manager
     pub fn update(&mut self, engine: &mut GraphEngine, node_manager: &mut NodeManager) -> Result<Vec<BridgeEvent>, BridgeError> {
-        let mut events = Vec::new();
+        let events = Vec::new();
         
         // Update graph nodes for current directory
         if self.state != FileManagerState::Hidden {
@@ -376,16 +377,15 @@ impl FileManagerBridge {
     }
     
     /// Scan directory and create/update graph nodes
-    fn scan_directory(&mut self, path: &Path, engine: &mut GraphEngine, node_manager: &mut NodeManager) -> Result<(), BridgeError> {
+    fn scan_directory(&mut self, path: &Path, _engine: &mut GraphEngine, node_manager: &mut NodeManager) -> Result<(), BridgeError> {
         if let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries {
                 if let Ok(entry) = entry {
                     let path = entry.path();
                     
                     // Create file node if it doesn't exist
-                    if let Some(file_name) = path.file_name() {
-                        let node_id = node_manager.create_file_node(
-                            file_name.to_string_lossy().to_string(),
+                    if let Some(_file_name) = path.file_name() {
+                        let node_id = node_manager.create_file(
                             path.clone(),
                         );
                         

@@ -261,6 +261,7 @@ impl CircularLayout {
     }
     
     /// Group connected nodes together
+    #[allow(dead_code)]
     fn group_connected_nodes(&self, scene: &Scene) -> Vec<Vec<SceneId>> {
         let mut groups = Vec::new();
         let mut visited = std::collections::HashSet::new();
@@ -304,6 +305,7 @@ impl CircularLayout {
     }
     
     /// Calculate optimal spacing for nodes
+    #[allow(dead_code)]
     fn calculate_optimal_spacing(&self, node_count: usize) -> f32 {
         let circumference = 2.0 * PI * self.config.radius;
         let available_space = circumference / node_count as f32;

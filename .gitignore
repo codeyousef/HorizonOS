@@ -66,3 +66,55 @@ scripts/test/*-results.txt
 # Rust build artifacts
 src/desktop/target/
 src/desktop/Cargo.lock
+target/
+Cargo.lock
+
+# AI-specific ignores
+/models/
+*.gguf
+*.bin
+*.pth
+*.onnx
+*.safetensors
+
+# Docker volumes
+/volumes/
+/data/
+/postgres-data/
+/minio-data/
+/grafana-data/
+/n8n-data/
+
+# Development
+.dev-aliases
+*.tmp
+*.temp
+
+# Security
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+
+# Test coverage
+/coverage/
+*.gcov
+*.gcda
+*.gcno
+htmlcov/
+.coverage
+.pytest_cache/
+
+# Package manager files
+*.deb
+*.rpm
+*.tar.gz
+*.tar.xz
+*.zip
+
+# Cache directories
+.cache/
+.cargo/
+.rustup/

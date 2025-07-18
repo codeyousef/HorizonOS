@@ -11,11 +11,11 @@ pub mod error;
 pub mod layout;
 
 pub use renderer::*;
-pub use physics::*;
+pub use physics::{PhysicsEngine, PhysicsBody, PhysicsSettings, LayoutConfig as PhysicsLayoutConfig, ForceDirectedConfig as PhysicsForceDirectedConfig};
 pub use camera::*;
 pub use scene::*;
 pub use error::*;
-pub use layout::*;
+pub use layout::{LayoutManager, LayoutConfig, LayoutAlgorithm, ForceDirectedLayout, CircularLayout, ForceDirectedConfig};
 
 use std::sync::Arc;
 use wgpu::{Device, Queue, Surface};

@@ -1,0 +1,256 @@
+#!/bin/bash
+# HorizonOS AI Service Pre-start Check Script
+# This script verifies all dependencies are ready before starting the AI service
+
+set -euo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Logging function
+log() {
+    echo -e "${2:-}[$(date '+%Y-%m-%d %H:%M:%S')] $1${NC}"
+}
+
+# Check if running as correct user
+check_user() {
+    if [[ $EUID -eq 0 ]]; then
+        log "Error: This script should not be run as root" "$RED"
+        exit 1
+    fi
+    
+    if [[ $(whoami) != "horizonos-ai" ]]; then
+        log "Warning: Running as $(whoami), expected horizonos-ai" "$YELLOW"
+    fi
+}
+
+# Check Docker service
+check_docker() {
+    log "Checking Docker service..."
+    
+    if ! systemctl is-active --quiet docker; then
+        log "Error: Docker service is not running" "$RED"
+        exit 1
+    fi
+    
+    if ! docker info >/dev/null 2>&1; then
+        log "Error: Cannot connect to Docker daemon" "$RED"
+        exit 1
+    fi
+    
+    log "Docker service is running" "$GREEN"
+}
+
+# Check Ollama service
+check_ollama() {
+    log "Checking Ollama service..."
+    
+    local ollama_url="${OLLAMA_HOST:-http://localhost:11434}"
+    
+    if ! curl -sf "${ollama_url}/api/tags" >/dev/null; then
+        log "Warning: Ollama is not accessible at ${ollama_url}" "$YELLOW"
+        log "Starting Ollama container..."
+        
+        # Try to start Ollama container
+        if docker ps -a | grep -q horizonos-ollama; then
+            docker start horizonos-ollama || true
+        else
+            docker run -d --name horizonos-ollama \
+                -p 11434:11434 \
+                -v ollama:/root/.ollama \
+                --restart unless-stopped \
+                ollama/ollama:latest || true
+        fi
+        
+        # Wait for Ollama to be ready
+        local retries=30
+        while ((retries > 0)); do
+            if curl -sf "${ollama_url}/api/tags" >/dev/null; then
+                log "Ollama is now accessible" "$GREEN"
+                break
+            fi
+            sleep 1
+            ((retries--))
+        done
+        
+        if ((retries == 0)); then
+            log "Error: Ollama failed to start" "$RED"
+            exit 1
+        fi
+    else
+        log "Ollama is accessible" "$GREEN"
+    fi
+    
+    # Check if at least one model is available
+    local models=$(curl -sf "${ollama_url}/api/tags" | jq -r '.models[].name' 2>/dev/null || echo "")
+    if [[ -z "$models" ]]; then
+        log "Warning: No models found in Ollama" "$YELLOW"
+        log "Pulling default model (llama3.2:latest)..."
+        
+        curl -X POST "${ollama_url}/api/pull" \
+            -H "Content-Type: application/json" \
+            -d '{"name": "llama3.2:latest"}' || true
+    else
+        log "Found models: $(echo $models | tr '\n' ' ')" "$GREEN"
+    fi
+}
+
+# Check TimescaleDB
+check_timescaledb() {
+    log "Checking TimescaleDB..."
+    
+    if ! docker ps | grep -q horizonos-timescaledb; then
+        log "Warning: TimescaleDB container is not running" "$YELLOW"
+        
+        # Try to start TimescaleDB
+        if docker ps -a | grep -q horizonos-timescaledb; then
+            docker start horizonos-timescaledb || true
+        fi
+        
+        # Wait a moment for container to start
+        sleep 2
+        
+        if ! docker ps | grep -q horizonos-timescaledb; then
+            log "Error: Failed to start TimescaleDB" "$RED"
+            exit 1
+        fi
+    fi
+    
+    log "TimescaleDB is running" "$GREEN"
+}
+
+# Check required directories
+check_directories() {
+    log "Checking required directories..."
+    
+    local dirs=(
+        "/var/lib/horizonos-ai"
+        "/var/lib/horizonos-ai/monitoring"
+        "/var/lib/horizonos-ai/agents"
+        "/var/cache/horizonos-ai"
+        "/var/log/horizonos-ai"
+        "/etc/horizonos/ai"
+    )
+    
+    for dir in "${dirs[@]}"; do
+        if [[ ! -d "$dir" ]]; then
+            log "Creating directory: $dir"
+            sudo mkdir -p "$dir"
+            sudo chown horizonos-ai:horizonos-ai "$dir"
+            sudo chmod 750 "$dir"
+        fi
+    done
+    
+    log "All directories are ready" "$GREEN"
+}
+
+# Check configuration files
+check_configs() {
+    log "Checking configuration files..."
+    
+    local configs=(
+        "/etc/horizonos/ai/config.toml"
+        "/etc/horizonos/ai/monitor.toml"
+        "/etc/horizonos/ai/agents.toml"
+    )
+    
+    for config in "${configs[@]}"; do
+        if [[ ! -f "$config" ]]; then
+            log "Warning: Configuration file missing: $config" "$YELLOW"
+            
+            # Create default configuration
+            local basename=$(basename "$config")
+            case "$basename" in
+                "config.toml")
+                    cat > "$config" <<EOF
+# HorizonOS AI Main Configuration
+[ai]
+enabled = true
+ollama_endpoint = "http://localhost:11434"
+default_model = "llama3.2:latest"
+
+[privacy]
+local_only = true
+telemetry_enabled = false
+encrypt_storage = true
+EOF
+                    ;;
+                "monitor.toml")
+                    cat > "$config" <<EOF
+# HorizonOS AI Monitor Configuration
+[monitor]
+enabled = true
+sample_interval = 5
+idle_threshold = 300
+
+[privacy]
+filter_enabled = true
+anonymize_data = true
+EOF
+                    ;;
+                "agents.toml")
+                    cat > "$config" <<EOF
+# HorizonOS AI Agents Configuration
+[coordinator]
+max_concurrent_agents = 5
+default_timeout = 300
+
+[agents]
+enabled = true
+EOF
+                    ;;
+            esac
+            
+            sudo chown horizonos-ai:horizonos-ai "$config"
+            sudo chmod 640 "$config"
+        fi
+    done
+    
+    log "Configuration files are ready" "$GREEN"
+}
+
+# Check system resources
+check_resources() {
+    log "Checking system resources..."
+    
+    # Check available memory
+    local total_mem=$(free -m | awk '/^Mem:/{print $2}')
+    local avail_mem=$(free -m | awk '/^Mem:/{print $7}')
+    
+    if ((avail_mem < 2048)); then
+        log "Warning: Low available memory: ${avail_mem}MB (recommended: 2048MB+)" "$YELLOW"
+    else
+        log "Available memory: ${avail_mem}MB" "$GREEN"
+    fi
+    
+    # Check disk space
+    local avail_disk=$(df -BG /var/lib/horizonos-ai | awk 'NR==2 {print $4}' | sed 's/G//')
+    
+    if ((avail_disk < 10)); then
+        log "Warning: Low disk space: ${avail_disk}GB (recommended: 10GB+)" "$YELLOW"
+    else
+        log "Available disk space: ${avail_disk}GB" "$GREEN"
+    fi
+}
+
+# Main execution
+main() {
+    log "Starting HorizonOS AI pre-start checks..."
+    
+    check_user
+    check_docker
+    check_ollama
+    check_timescaledb
+    check_directories
+    check_configs
+    check_resources
+    
+    log "All checks passed! AI service is ready to start." "$GREEN"
+    exit 0
+}
+
+# Run main function
+main "$@"

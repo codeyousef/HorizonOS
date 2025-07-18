@@ -480,7 +480,6 @@ impl LodLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nalgebra::Point3;
     
     #[test]
     fn test_lod_level_min() {

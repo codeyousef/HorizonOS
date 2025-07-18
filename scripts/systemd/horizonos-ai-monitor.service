@@ -1,0 +1,63 @@
+[Unit]
+Description=HorizonOS AI Event Monitor
+Documentation=https://github.com/horizonos/horizonos
+After=horizonos-ai.service
+Requires=horizonos-ai.service
+PartOf=horizonos-ai.service
+
+[Service]
+Type=simple
+Environment="RUST_LOG=info"
+Environment="MONITOR_CONFIG=/etc/horizonos/ai/monitor.toml"
+
+# User and group (same as main service)
+User=horizonos-ai
+Group=horizonos-ai
+
+# Working directory
+WorkingDirectory=/var/lib/horizonos-ai
+
+# Main executable
+ExecStart=/usr/bin/horizonos-ai-monitor
+ExecStop=/bin/kill -TERM $MAINPID
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/horizonos-ai/monitoring
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+
+# Resource limits (lighter than main service)
+LimitNOFILE=32768
+LimitNPROC=1024
+MemoryMax=1G
+CPUQuota=50%
+IOWeight=30
+
+# Capabilities for monitoring
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+AmbientCapabilities=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+
+# Access to user sessions for monitoring
+PrivateUsers=false
+SupplementaryGroups=systemd-journal
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=horizonos-ai-monitor
+
+[Install]
+WantedBy=horizonos-ai.service

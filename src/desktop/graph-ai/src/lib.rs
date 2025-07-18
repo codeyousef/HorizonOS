@@ -12,6 +12,10 @@ pub mod agents;
 pub mod services;
 pub mod patterns;
 pub mod suggestions;
+pub mod storage;
+pub mod monitoring;
+pub mod automation;
+pub mod privacy;
 
 use std::sync::Arc;
 use dashmap::DashMap;
@@ -213,6 +217,10 @@ pub struct AIService {
     patterns: Arc<patterns::PatternStorage>,
     /// Suggestion engine
     suggestions: Arc<suggestions::SuggestionEngine>,
+    /// Storage manager
+    storage: Arc<storage::StorageManager>,
+    /// Hardware monitor
+    hardware_monitor: Arc<hardware::HardwareMonitor>,
 }
 
 impl AIService {
@@ -223,6 +231,8 @@ impl AIService {
             sessions: DashMap::new(),
             patterns: Arc::new(patterns::PatternStorage::new()),
             suggestions: Arc::new(suggestions::SuggestionEngine::new()),
+            storage: Arc::new(storage::StorageManager::new_default()),
+            hardware_monitor: Arc::new(hardware::HardwareMonitor::new()),
         }
     }
 
