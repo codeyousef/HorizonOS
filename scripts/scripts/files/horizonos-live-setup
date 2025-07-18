@@ -1,0 +1,45 @@
+#!/bin/bash
+# HorizonOS Live Environment Setup
+# This runs on boot in the live ISO to ensure proper configuration
+
+set -e
+
+echo "HorizonOS Live Environment Setup"
+echo "================================"
+
+# Ensure getty@tty1 is properly configured
+systemctl stop getty@tty1.service 2>/dev/null || true
+systemctl disable getty@tty1.service 2>/dev/null || true
+
+# Start a proper shell on tty1
+if [ ! -f /tmp/horizonos-live-started ]; then
+    touch /tmp/horizonos-live-started
+    
+    # Clear the screen
+    clear > /dev/tty1
+    
+    # Display welcome message
+    cat > /dev/tty1 << 'EOF'
+
+===============================================
+     Welcome to HorizonOS Live Environment     
+===============================================
+
+You are now logged in as root.
+
+To install HorizonOS to your system:
+  # horizonos-install
+
+To test the system without installing:
+  # You can use all features directly
+
+For help and documentation:
+  # https://github.com/codeyousef/HorizonOS
+
+===============================================
+
+EOF
+    
+    # Start shell on tty1
+    exec /bin/bash --login < /dev/tty1 > /dev/tty1 2>&1
+fi
