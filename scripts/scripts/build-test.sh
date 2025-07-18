@@ -30,17 +30,43 @@ fi
 # Clean previous build
 echo "Cleaning previous build directory..."
 if [ -d "$ROOTFS_DIR" ]; then
-    sudo rm -rf "$ROOTFS_DIR" || true
+    echo "Removing existing rootfs directory: $ROOTFS_DIR"
+    sudo rm -rf "$ROOTFS_DIR" || {
+        echo "Warning: Could not remove $ROOTFS_DIR, trying alternative cleanup"
+        sudo find "$ROOTFS_DIR" -type f -delete 2>/dev/null || true
+        sudo find "$ROOTFS_DIR" -type d -empty -delete 2>/dev/null || true
+        sudo rm -rf "$ROOTFS_DIR" || true
+    }
 fi
-sudo mkdir -p "$ROOTFS_DIR"
+
+# Ensure parent directory exists
+echo "Creating build directory structure..."
+sudo mkdir -p "$(dirname "$ROOTFS_DIR")"
 
 # Extract base image from OSTree
 echo "Extracting base image from OSTree..."
 BASE_COMMIT=$(ostree --repo="$PROJECT_ROOT/repo" rev-parse horizonos/base/x86_64)
 echo "Using base commit: $BASE_COMMIT"
 
-# Use --force-copy to avoid hardlink issues in containers
-sudo ostree --repo="$PROJECT_ROOT/repo" checkout --force-copy "$BASE_COMMIT" "$ROOTFS_DIR"
+# Create target directory just before checkout
+echo "Creating target directory: $ROOTFS_DIR"
+sudo mkdir -p "$ROOTFS_DIR"
+
+# Use --force-copy and --user-mode to avoid permission issues
+echo "Checking out OSTree commit..."
+sudo ostree --repo="$PROJECT_ROOT/repo" checkout \
+    --force-copy \
+    --user-mode \
+    "$BASE_COMMIT" \
+    "$ROOTFS_DIR" || {
+    echo "OSTree checkout failed. Trying alternative approach..."
+    # Alternative: checkout to temp dir and move
+    TEMP_DIR="$BUILD_DIR/temp_checkout_$$"
+    sudo rm -rf "$TEMP_DIR" 2>/dev/null || true
+    sudo ostree --repo="$PROJECT_ROOT/repo" checkout --force-copy "$BASE_COMMIT" "$TEMP_DIR"
+    sudo rm -rf "$ROOTFS_DIR"
+    sudo mv "$TEMP_DIR" "$ROOTFS_DIR"
+}
 
 # Container-specific configuration
 echo "Configuring container-based system..."
