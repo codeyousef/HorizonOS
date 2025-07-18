@@ -66,7 +66,6 @@ MINIMAL_PACKAGES=(
     
     # Package managers for user applications
     "flatpak"
-    "snapd"
     
     # Essential tools
     "fish"
