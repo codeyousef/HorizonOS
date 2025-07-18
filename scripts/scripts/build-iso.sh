@@ -341,15 +341,39 @@ menuentry "HorizonOS Live (x86_64, UEFI) with speech" {
 }
 EOF
 
-# ABSOLUTE MINIMUM customization - only what's essential
-echo "Applying minimal HorizonOS branding..."
+# Apply essential fixes and minimal branding
+echo "Applying HorizonOS customizations..."
 
-# Only set hostname - nothing else
+# Set hostname
 echo "horizonos" > airootfs/etc/hostname
 
-# That's it! Let archiso handle EVERYTHING else
-# No getty config, no os-release, no MOTD with ASCII art
-# The ASCII art in MOTD might be causing the flashing issue
+# Fix the agetty path in the existing autologin.conf from releng profile
+# The releng profile uses /sbin/agetty but modern Arch has it at /usr/bin/agetty
+if [ -f airootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf ]; then
+    echo "Fixing agetty path in autologin configuration..."
+    sed -i 's|/sbin/agetty|/usr/bin/agetty|g' airootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf
+    
+    # Also ensure the file has proper line endings and format
+    # The correct format based on archiso releng is:
+    # ExecStart=-/usr/bin/agetty -o '-p -f -- \\u' --noclear --autologin root - $TERM
+fi
+
+# Minimal branding - no ASCII art that could interfere
+cat > airootfs/etc/motd << 'EOF'
+Welcome to HorizonOS Live
+To install: horizonos-install
+EOF
+
+# Basic os-release for identification
+cat > airootfs/etc/os-release << 'EOF'
+NAME="HorizonOS"
+PRETTY_NAME="HorizonOS Live"
+ID=horizonos
+ID_LIKE=arch
+VERSION_ID="0.1.0"
+ANSI_COLOR="0;36"
+HOME_URL="https://github.com/codeyousef/HorizonOS"
+EOF
 
 # Customize profiledef.sh
 sed -i 's/iso_name=.*/iso_name="horizonos"/' profiledef.sh
