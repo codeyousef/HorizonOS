@@ -217,30 +217,15 @@ arch-chroot "$BASE_DIR" systemctl enable sshd
 arch-chroot "$BASE_DIR" systemctl enable podman.socket
 arch-chroot "$BASE_DIR" systemctl enable flatpak-system-helper
 
-# Fix getty service configuration to prevent loops
+# Boot configuration for installed system (not live ISO)
 echo "Configuring boot services..."
-mkdir -p "$BASE_DIR/etc/systemd/system/getty@tty1.service.d"
-cat > "$BASE_DIR/etc/systemd/system/getty@tty1.service.d/override.conf" << 'EOF'
-[Service]
-Type=idle
-ExecStart=
-ExecStart=-/usr/bin/agetty --autologin root --noclear %I $TERM
-RestartSec=0
-Restart=no
-StandardInput=tty
-StandardOutput=tty
-EOF
-
-# Disable automatic VT allocation which can cause loops
-mkdir -p "$BASE_DIR/etc/systemd/logind.conf.d"
-cat > "$BASE_DIR/etc/systemd/logind.conf.d/horizonos.conf" << 'EOF'
-[Login]
-NAutoVTs=1
-ReserveVT=1
-EOF
 
 # Set default target to multi-user (no graphical)
 arch-chroot "$BASE_DIR" systemctl set-default multi-user.target
+
+# Note: Getty configuration is handled differently for:
+# - Live ISO: Uses archiso defaults (configured in build-iso.sh)
+# - Installed system: Will be configured by horizonos-install script
 
 # Create container management directories
 mkdir -p "$BASE_DIR/var/lib/containers"

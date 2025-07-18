@@ -341,8 +341,14 @@ menuentry "HorizonOS Live (x86_64, UEFI) with speech" {
 }
 EOF
 
-# MINIMAL CHANGES - Keep it simple to ensure boot works
-echo "Applying minimal branding..."
+# Configure autologin for live environment (archiso standard way)
+echo "Configuring live environment..."
+mkdir -p airootfs/etc/systemd/system/getty@tty1.service.d
+cat > airootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf << 'EOF'
+[Service]
+ExecStart=
+ExecStart=-/usr/bin/agetty --autologin root --noclear %I $TERM
+EOF
 
 # Just set hostname
 echo "horizonos" > airootfs/etc/hostname
