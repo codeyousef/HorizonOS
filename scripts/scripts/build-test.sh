@@ -97,6 +97,42 @@ sudo tee "$ROOTFS_DIR/etc/containers/system/gaming.json" > /dev/null << 'EOF'
 }
 EOF
 
+# Install HorizonOS tools
+echo "Installing HorizonOS tools..."
+sudo mkdir -p "$ROOTFS_DIR/usr/local/bin"
+sudo cp "$PROJECT_ROOT/scripts/tools/horizon-container" "$ROOTFS_DIR/usr/local/bin/"
+sudo cp "$PROJECT_ROOT/scripts/tools/horizon-container-startup" "$ROOTFS_DIR/usr/local/bin/"
+sudo cp "$PROJECT_ROOT/scripts/tools/horizon-container-shutdown" "$ROOTFS_DIR/usr/local/bin/"
+sudo cp "$PROJECT_ROOT/scripts/tools/horizonos-autoupdate" "$ROOTFS_DIR/usr/local/bin/"
+sudo cp "$PROJECT_ROOT/scripts/tools/horizonos-update-notify" "$ROOTFS_DIR/usr/local/bin/"
+sudo chmod +x "$ROOTFS_DIR"/usr/local/bin/*
+
+# Install systemd units for auto-update system
+echo "Installing auto-update system..."
+sudo mkdir -p "$ROOTFS_DIR/etc/systemd/system"
+sudo cp "$PROJECT_ROOT/scripts/systemd-units/horizonos-update.service" "$ROOTFS_DIR/etc/systemd/system/"
+sudo cp "$PROJECT_ROOT/scripts/systemd-units/horizonos-update.timer" "$ROOTFS_DIR/etc/systemd/system/"
+sudo cp "$PROJECT_ROOT/scripts/systemd-units/horizonos-update-notify.service" "$ROOTFS_DIR/etc/systemd/system/"
+
+# Create update configuration
+sudo mkdir -p "$ROOTFS_DIR/etc/horizonos"
+sudo tee "$ROOTFS_DIR/etc/horizonos/update.conf" > /dev/null << 'EOF'
+# HorizonOS Update Configuration
+UPDATE_CHANNEL="stable"
+AUTO_STAGE="true"
+AUTO_REBOOT="false"
+CHECK_INTERVAL="86400"
+GITHUB_REPO="codeyousef/HorizonOS"
+EOF
+
+# Enable update timer by default
+sudo mkdir -p "$ROOTFS_DIR/etc/systemd/system/timers.target.wants"
+sudo ln -sf /etc/systemd/system/horizonos-update.timer \
+    "$ROOTFS_DIR/etc/systemd/system/timers.target.wants/horizonos-update.timer"
+
+# Create update cache directory
+sudo mkdir -p "$ROOTFS_DIR/var/cache/horizonos/updates"
+
 # Update version information
 sudo tee "$ROOTFS_DIR/etc/horizonos-release" > /dev/null << EOF
 HORIZONOS_VERSION="$HORIZONOS_VERSION"

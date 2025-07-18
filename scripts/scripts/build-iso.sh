@@ -311,7 +311,9 @@ chmod +x airootfs/usr/local/bin/horizonos-install
 echo "Including HorizonOS container management tools..."
 mkdir -p airootfs/usr/local/bin
 cp "$PROJECT_ROOT/scripts/tools/horizon-container" airootfs/usr/local/bin/
-chmod +x airootfs/usr/local/bin/horizon-container
+cp "$PROJECT_ROOT/scripts/tools/horizonos-autoupdate" airootfs/usr/local/bin/
+cp "$PROJECT_ROOT/scripts/tools/horizonos-update-notify" airootfs/usr/local/bin/
+chmod +x airootfs/usr/local/bin/*
 
 # Copy OSTree repository to ISO (if it exists and is small enough)
 if [ -d "$PROJECT_ROOT/repo" ]; then

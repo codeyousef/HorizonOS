@@ -1,0 +1,14 @@
+[Unit]
+Description=HorizonOS Update Notification Service
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/horizonos-update-notify
+# Run as the logged-in user
+User=%i
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

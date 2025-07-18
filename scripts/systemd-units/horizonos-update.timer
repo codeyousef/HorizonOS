@@ -1,0 +1,16 @@
+[Unit]
+Description=HorizonOS Automatic Update Timer
+After=network-online.target
+Wants=network-online.target
+
+[Timer]
+# Run daily at 2 AM
+OnCalendar=daily
+OnCalendar=*-*-* 02:00:00
+# Run on boot if missed
+Persistent=true
+# Randomize by up to 1 hour to avoid thundering herd
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

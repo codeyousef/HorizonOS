@@ -1,0 +1,18 @@
+[Unit]
+Description=HorizonOS Automatic Update Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/horizonos-autoupdate timer
+StandardOutput=journal
+StandardError=journal
+# Run as root to manage OSTree
+User=root
+# Restart on failure with delay
+Restart=on-failure
+RestartSec=1h
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+#!/bin/bash
+# Desktop notification for updates
+
+if [ -f /var/cache/horizonos/updates/available-version ]; then
+    VERSION=$(cat /var/cache/horizonos/updates/available-version)
+    
+    # Try different notification methods
+    if command -v notify-send &>/dev/null; then
+        notify-send -i system-software-update \
+            "HorizonOS Update Available" \
+            "Version $VERSION is ready to install. Run 'horizonos-autoupdate update' or reboot to apply."
+    elif command -v kdialog &>/dev/null; then
+        kdialog --title "HorizonOS Update" \
+            --passivepopup "Version $VERSION is available" 10
+    fi
+fi

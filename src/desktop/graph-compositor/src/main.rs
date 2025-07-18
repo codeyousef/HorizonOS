@@ -11,8 +11,41 @@ fn main() -> Result<()> {
     
     log::info!("Starting HorizonOS Graph Desktop Compositor");
     
-    // For development, use winit backend
-    run_winit_compositor()
+    // Check for command line arguments
+    let args: Vec<String> = std::env::args().collect();
+    
+    if args.contains(&"--software-render".to_string()) {
+        std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+        std::env::set_var("WGPU_BACKEND", "gl");
+        log::info!("Software rendering enabled");
+    }
+    
+    if args.contains(&"--help".to_string()) {
+        println!("HorizonOS Graph Desktop Compositor");
+        println!("");
+        println!("Options:");
+        println!("  --software-render  Use software rendering (no GPU required)");
+        println!("  --help            Show this help message");
+        return Ok(());
+    }
+    
+    // For development, use winit backend with error handling
+    match run_winit_compositor() {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            log::error!("Compositor error: {}", e);
+            
+            // Check for common EGL errors
+            if e.to_string().contains("EGL") || e.to_string().contains("BAD_ALLOC") {
+                log::error!("EGL initialization failed. Try running with --software-render");
+                log::error!("Or set environment variables:");
+                log::error!("  export LIBGL_ALWAYS_SOFTWARE=1");
+                log::error!("  export WLR_RENDERER=pixman");
+            }
+            
+            Err(e)
+        }
+    }
 }
 
 fn run_winit_compositor() -> Result<()> {
