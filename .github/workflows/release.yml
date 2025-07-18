@@ -86,9 +86,27 @@ jobs:
       run: |
         # Export the latest commit as a bundle for distribution
         COMMIT=$(ostree log --repo=repo horizonos/test/x86_64 | head -1 | cut -d' ' -f2)
-        ostree --repo=repo static-delta generate horizonos/test/x86_64
+        echo "Latest commit: $COMMIT"
+        
+        # Check if this is the first commit (no parent)
+        COMMIT_COUNT=$(ostree --repo=repo log horizonos/test/x86_64 | grep -c "^commit" || echo "1")
+        echo "Number of commits: $COMMIT_COUNT"
+        
+        if [ "$COMMIT_COUNT" -gt 1 ]; then
+          echo "Generating static delta from previous commit..."
+          ostree --repo=repo static-delta generate horizonos/test/x86_64
+        else
+          echo "First commit detected, skipping static delta generation"
+        fi
+        
+        # Create full bundle for distribution
+        echo "Creating OSTree bundle..."
         tar czf horizonos-ostree-${{ env.VERSION }}.tar.gz -C repo .
         mv horizonos-ostree-${{ env.VERSION }}.tar.gz build/out/
+        
+        # Also create a commit object for easier imports
+        echo "Exporting commit object..."
+        ostree --repo=repo export horizonos/test/x86_64 > build/out/horizonos-commit-${{ env.VERSION }}.tar || true
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
