@@ -341,50 +341,15 @@ menuentry "HorizonOS Live (x86_64, UEFI) with speech" {
 }
 EOF
 
-# Configure autologin for live environment (archiso standard way)
-echo "Configuring live environment..."
-mkdir -p airootfs/etc/systemd/system/getty@tty1.service.d
-cat > airootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf << 'EOF'
-[Service]
-ExecStart=
-ExecStart=-/usr/bin/agetty --autologin root --noclear %I $TERM
-EOF
+# ABSOLUTE MINIMUM customization - only what's essential
+echo "Applying minimal HorizonOS branding..."
 
-# Just set hostname
+# Only set hostname - nothing else
 echo "horizonos" > airootfs/etc/hostname
 
-# Basic os-release for branding
-cat > airootfs/etc/os-release << 'EOF'
-NAME="HorizonOS"
-PRETTY_NAME="HorizonOS Live"
-ID=horizonos
-ID_LIKE=arch
-ANSI_COLOR="0;36"
-HOME_URL="https://github.com/codeyousef/HorizonOS"
-EOF
-
-# Create custom welcome message
-cat > airootfs/etc/motd << 'EOF'
-
-     _   _            _               ___  ____  
-    | | | | ___  _ __(_)_______  _ __ / _ \/ ___| 
-    | |_| |/ _ \| '__| |_  / _ \| '_ \ | | \___ \ 
-    |  _  | (_) | |  | |/ / (_) | | | | |_| |___) |
-    |_| |_|\___/|_|  |_/___\___/|_| |_|\___/|____/ 
-                                                   
-    Welcome to HorizonOS Live Environment
-    
-    To install HorizonOS, run: horizonos-install
-    
-    For help, visit: https://github.com/codeyousef/HorizonOS
-
-EOF
-
-# Let archiso handle the boot process - don't interfere
-# The system will boot normally with autologin to root
-
-# Skip custom mkinitcpio hooks - they can cause boot issues
-# Let archiso use its default boot process
+# That's it! Let archiso handle EVERYTHING else
+# No getty config, no os-release, no MOTD with ASCII art
+# The ASCII art in MOTD might be causing the flashing issue
 
 # Customize profiledef.sh
 sed -i 's/iso_name=.*/iso_name="horizonos"/' profiledef.sh
