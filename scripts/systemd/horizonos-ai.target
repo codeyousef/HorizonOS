@@ -11,4 +11,4 @@ Wants=horizonos-ai-monitor.service
 Wants=horizonos-ai-agents.service
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
