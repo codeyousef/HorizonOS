@@ -315,6 +315,28 @@ cp "$PROJECT_ROOT/scripts/tools/horizonos-autoupdate" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/horizonos-update-notify" airootfs/usr/local/bin/
 chmod +x airootfs/usr/local/bin/*
 
+# Add boot debug service for troubleshooting getty issues
+cat > airootfs/etc/systemd/system/horizonos-boot-debug.service << 'EOF'
+[Unit]
+Description=HorizonOS Boot Debug Logger
+DefaultDependencies=no
+Before=getty.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -c 'echo "=== HorizonOS Boot Debug ===" > /dev/tty1; systemctl status getty@tty1.service > /dev/tty1 2>&1; sleep 2'
+RemainAfterExit=yes
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+mkdir -p airootfs/etc/systemd/system/multi-user.target.wants
+ln -sf /etc/systemd/system/horizonos-boot-debug.service airootfs/etc/systemd/system/multi-user.target.wants/
+
 # Copy OSTree repository to ISO (if it exists and is small enough)
 if [ -d "$PROJECT_ROOT/repo" ]; then
     REPO_SIZE=$(du -sm "$PROJECT_ROOT/repo" | cut -f1)
@@ -341,27 +363,23 @@ menuentry "HorizonOS Live (x86_64, UEFI) with speech" {
 }
 EOF
 
-# Apply essential fixes and minimal branding
+# Apply comprehensive getty fix and minimal branding
 echo "Applying HorizonOS customizations..."
 
 # Set hostname
 echo "horizonos" > airootfs/etc/hostname
 
-# Fix the agetty path in the existing autologin.conf from releng profile
-# The releng profile uses /sbin/agetty but modern Arch has it at /usr/bin/agetty
-if [ -f airootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf ]; then
-    echo "Fixing agetty path in autologin configuration..."
-    sed -i 's|/sbin/agetty|/usr/bin/agetty|g' airootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf
-    
-    # Also ensure the file has proper line endings and format
-    # The correct format based on archiso releng is:
-    # ExecStart=-/usr/bin/agetty -o '-p -f -- \\u' --noclear --autologin root - $TERM
-fi
+# Apply comprehensive getty fix
+# This removes conflicting configs and creates a working autologin setup
+source "$PROJECT_ROOT/scripts/scripts/fixes/fix-getty-comprehensive.sh"
+fix_getty_in_iso "airootfs"
 
 # Minimal branding - no ASCII art that could interfere
 cat > airootfs/etc/motd << 'EOF'
 Welcome to HorizonOS Live
 To install: horizonos-install
+
+If you see getty errors, run: debug-getty
 EOF
 
 # Basic os-release for identification
