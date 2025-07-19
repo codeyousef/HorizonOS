@@ -25,7 +25,7 @@ StartLimitBurst=3
 # Clear any existing ExecStart
 ExecStart=
 # Use the correct path and parameters
-ExecStart=-/usr/bin/agetty --autologin root --noclear %I 38400 linux
+ExecStart=-/sbin/agetty --autologin root --noclear %I 38400 linux
 # Ensure service type is correct
 Type=idle
 # Add restart protection
@@ -75,16 +75,16 @@ EOF
     # 7. Create a verification script
     cat > "$AIROOTFS/usr/local/bin/verify-getty" << 'EOF'
 #!/bin/bash
-if [ -f /usr/bin/agetty ]; then
-    echo "✓ agetty found at /usr/bin/agetty"
+if [ -f /sbin/agetty ]; then
+    echo "✓ agetty found at /sbin/agetty"
 else
-    echo "✗ agetty NOT found at /usr/bin/agetty"
+    echo "✗ agetty NOT found at /sbin/agetty"
     which agetty || echo "agetty not in PATH"
 fi
 
 if [ -f /etc/systemd/system/getty@tty1.service.d/autologin.conf ]; then
     echo "✓ autologin.conf exists"
-    grep -q "/usr/bin/agetty" /etc/systemd/system/getty@tty1.service.d/autologin.conf && \
+    grep -q "/sbin/agetty" /etc/systemd/system/getty@tty1.service.d/autologin.conf && \
         echo "✓ Using correct agetty path" || \
         echo "✗ Wrong agetty path"
 else

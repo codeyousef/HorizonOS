@@ -397,10 +397,10 @@ echo "Applying HorizonOS customizations..."
 # Set hostname
 echo "horizonos" > airootfs/etc/hostname
 
-# Apply comprehensive getty fix
-# This removes conflicting configs and creates a working autologin setup
-source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-autologin.sh"
-fix_getty_in_iso "airootfs"
+# Apply standard archiso getty configuration
+# This uses the EXACT same approach as EndeavourOS, Manjaro, ArcoLinux, etc.
+source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-archiso-standard.sh"
+apply_archiso_getty_fix "airootfs"
 
 # CRITICAL: Set default systemd target to multi-user (text mode) to prevent hanging at graphical.target
 # This prevents the ISO from trying to start a graphical interface
@@ -408,61 +408,8 @@ echo "Setting default systemd target to multi-user.target..."
 mkdir -p airootfs/etc/systemd/system
 ln -sf /usr/lib/systemd/system/multi-user.target airootfs/etc/systemd/system/default.target
 
-# Ensure getty.target is properly configured and pulled in by multi-user.target
-# This fixes the hang at "Reached target Multi-User System"
-echo "Configuring getty.target dependencies..."
-
-# Create drop-in to ensure getty.target is properly pulled in
-mkdir -p airootfs/etc/systemd/system/getty.target.d
-cat > airootfs/etc/systemd/system/getty.target.d/horizonos-enable.conf << 'EOF'
-[Unit]
-# Ensure getty.target starts with multi-user.target
-WantedBy=multi-user.target
-RequiredBy=multi-user.target
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Properly enable getty.target (mimicking systemctl enable)
-mkdir -p airootfs/etc/systemd/system/multi-user.target.wants
-ln -sf /usr/lib/systemd/system/getty.target airootfs/etc/systemd/system/multi-user.target.wants/getty.target
-
-# Enable getty@tty1.service using proper instantiation from template
-# This mimics what 'systemctl enable getty@tty1.service' would do
-mkdir -p airootfs/etc/systemd/system/getty.target.wants
-ln -sf /usr/lib/systemd/system/getty@.service airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service
-
-# Also add to multi-user.target as a failsafe
-ln -sf /usr/lib/systemd/system/getty@.service airootfs/etc/systemd/system/multi-user.target.wants/getty@tty1.service
-
-# Create a rescue getty service as an absolute failsafe
-cat > airootfs/etc/systemd/system/horizonos-rescue-getty.service << 'EOF'
-[Unit]
-Description=HorizonOS Rescue Getty on tty2
-Documentation=man:agetty(8)
-After=systemd-user-sessions.service
-After=multi-user.target
-ConditionPathExists=/dev/tty2
-
-[Service]
-Type=idle
-ExecStart=-/usr/bin/agetty --noclear tty2 38400 linux
-Restart=always
-RestartSec=5s
-StandardInput=tty
-StandardOutput=tty
-StandardError=journal
-TTYPath=/dev/tty2
-TTYReset=yes
-TTYVHangup=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Enable the rescue getty service
-ln -sf /etc/systemd/system/horizonos-rescue-getty.service airootfs/etc/systemd/system/multi-user.target.wants/
+# Note: Getty configuration is handled by getty-archiso-standard.sh above
+# No additional getty configuration is needed - standard systemd handles everything
 
 # Minimal branding - no ASCII art that could interfere
 cat > airootfs/etc/motd << 'EOF'

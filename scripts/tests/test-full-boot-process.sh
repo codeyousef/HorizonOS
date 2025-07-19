@@ -23,19 +23,12 @@ echo -e "${YELLOW}Test 1: Verifying systemd target configuration${NC}"
 TEST_DIR="/tmp/horizonos-boot-test-$$"
 mkdir -p "$TEST_DIR/airootfs/etc/systemd/system"
 
-# Simulate the build process
-source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-autologin.sh"
-fix_getty_in_iso "$TEST_DIR/airootfs"
+# Simulate the build process using standard archiso approach
+source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-archiso-standard.sh"
+apply_archiso_getty_fix "$TEST_DIR/airootfs"
 
 # Apply the same systemd target configuration as build-iso.sh
 ln -sf /usr/lib/systemd/system/multi-user.target "$TEST_DIR/airootfs/etc/systemd/system/default.target"
-
-# Apply getty.target dependencies (matching build-iso.sh)
-mkdir -p "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants"
-ln -sf /usr/lib/systemd/system/getty.target "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants/getty.target"
-mkdir -p "$TEST_DIR/airootfs/etc/systemd/system/getty.target.wants"
-ln -sf /usr/lib/systemd/system/getty@.service "$TEST_DIR/airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service"
-ln -sf /usr/lib/systemd/system/getty@.service "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants/getty@tty1.service"
 
 # Verify default target
 echo -n "   - Checking default.target: "
@@ -50,30 +43,16 @@ else
     echo -e "${RED}✗ default.target not found${NC}"
 fi
 
-# Verify getty.target dependency
-echo -n "   - Checking getty.target in multi-user.target.wants: "
-if [ -L "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants/getty.target" ]; then
-    echo -e "${GREEN}✓ getty.target will be started by multi-user.target${NC}"
+# Verify getty service enablement (standard archiso approach)
+echo -n "   - Checking getty@tty1.service enablement: "
+if [ -L "$TEST_DIR/airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service" ]; then
+    echo -e "${GREEN}✓ getty@tty1 properly enabled${NC}"
 else
-    echo -e "${RED}✗ getty.target NOT linked to multi-user.target${NC}"
+    echo -e "${RED}✗ getty@tty1 not enabled${NC}"
 fi
 
-# Verify getty@tty1 dependency
-echo -n "   - Checking getty@tty1.service dependencies: "
-GETTY_LINKS=0
-if [ -L "$TEST_DIR/airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service" ]; then
-    GETTY_LINKS=$((GETTY_LINKS + 1))
-fi
-if [ -L "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants/getty@tty1.service" ]; then
-    GETTY_LINKS=$((GETTY_LINKS + 1))
-fi
-if [ $GETTY_LINKS -eq 2 ]; then
-    echo -e "${GREEN}✓ getty@tty1 linked to both targets${NC}"
-elif [ $GETTY_LINKS -eq 1 ]; then
-    echo -e "${YELLOW}⚠ getty@tty1 only linked to one target${NC}"
-else
-    echo -e "${RED}✗ getty@tty1 not properly linked${NC}"
-fi
+# Note: In standard archiso, getty.target is automatically pulled in by multi-user.target
+# through systemd's built-in dependencies, so we don't need to check for explicit links
 
 # Test 2: Verify boot parameters
 echo -e "\n${YELLOW}Test 2: Checking boot parameters${NC}"
@@ -126,10 +105,10 @@ if [ -f "$AUTOLOGIN" ]; then
     echo -e "${GREEN}✓ Found${NC}"
     
     echo -n "   - Checking for correct agetty path: "
-    if grep -q "/usr/bin/agetty" "$AUTOLOGIN"; then
-        echo -e "${GREEN}✓ Using /usr/bin/agetty${NC}"
+    if grep -q "/sbin/agetty" "$AUTOLOGIN"; then
+        echo -e "${GREEN}✓ Using /sbin/agetty (correct for archiso)${NC}"
     else
-        echo -e "${RED}✗ Not using /usr/bin/agetty${NC}"
+        echo -e "${RED}✗ Not using /sbin/agetty${NC}"
     fi
     
     echo -n "   - Checking for autologin root: "
@@ -174,7 +153,7 @@ else
 fi
 
 echo -n "   - Getty autologin: "
-if [ -f "$AUTOLOGIN" ] && grep -q "/usr/bin/agetty" "$AUTOLOGIN"; then
+if [ -f "$AUTOLOGIN" ] && grep -q "/sbin/agetty" "$AUTOLOGIN"; then
     echo -e "${GREEN}✓${NC}"
 else
     echo -e "${RED}✗${NC}"
