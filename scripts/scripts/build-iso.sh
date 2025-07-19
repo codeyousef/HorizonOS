@@ -370,14 +370,15 @@ echo "Configuring boot parameters..."
 
 # Update GRUB configuration for UEFI
 if [ -f grub/grub.cfg ]; then
-    sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target/g' grub/grub.cfg
+    # Add systemd.unit and debug parameters
+    sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target console=tty0 console=ttyS0,115200/g' grub/grub.cfg
 fi
 
 # Update syslinux configuration for BIOS
 if [ -d syslinux ]; then
     for cfg in syslinux/*.cfg; do
         if [ -f "$cfg" ]; then
-            sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target/g' "$cfg"
+            sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target console=tty0 console=ttyS0,115200/g' "$cfg"
         fi
     done
 fi
@@ -386,9 +387,21 @@ fi
 if [ -d efiboot/loader/entries ]; then
     for entry in efiboot/loader/entries/*.conf; do
         if [ -f "$entry" ]; then
-            sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target/g' "$entry"
+            sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target console=tty0 console=ttyS0,115200/g' "$entry"
         fi
     done
+fi
+
+# Add a debug boot entry for troubleshooting
+if [ -f grub/grub.cfg ]; then
+    cat >> grub/grub.cfg << 'EOF'
+
+menuentry "HorizonOS (Debug Mode)" {
+    set gfxpayload=keep
+    linux /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL% systemd.unit=multi-user.target systemd.log_level=debug systemd.log_target=console console=tty0
+    initrd /%INSTALL_DIR%/boot/intel-ucode.img /%INSTALL_DIR%/boot/amd-ucode.img /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
+}
+EOF
 fi
 
 # Apply comprehensive getty fix and minimal branding
@@ -397,10 +410,10 @@ echo "Applying HorizonOS customizations..."
 # Set hostname
 echo "horizonos" > airootfs/etc/hostname
 
-# Apply standard archiso getty configuration
-# This uses the EXACT same approach as EndeavourOS, Manjaro, ArcoLinux, etc.
-source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-archiso-standard.sh"
-apply_archiso_getty_fix "airootfs"
+# Apply complete getty fix with multiple failsafes
+# This ensures getty services start even in problematic environments
+source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-complete-fix.sh"
+apply_complete_getty_fix "airootfs"
 
 # CRITICAL: Set default systemd target to multi-user (text mode) to prevent hanging at graphical.target
 # This prevents the ISO from trying to start a graphical interface
