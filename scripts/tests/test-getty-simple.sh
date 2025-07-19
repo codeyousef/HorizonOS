@@ -58,6 +58,30 @@ else
     exit 1
 fi
 
+echo -n "5. Restart disabled: "
+if grep -q "^Restart=no" "$AUTOLOGIN"; then
+    echo -e "${GREEN}✓ Yes (prevents loops)${NC}"
+else
+    echo -e "${RED}✗ No${NC}"
+    exit 1
+fi
+
+echo -n "6. getty@tty1.service enabled: "
+if [ -L "$TEST_DIR/airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service" ]; then
+    echo -e "${GREEN}✓ Yes (symlink exists)${NC}"
+else
+    echo -e "${RED}✗ No${NC}"
+    exit 1
+fi
+
+echo -n "7. getty.target linked to multi-user: "
+if [ -L "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants/getty.target" ]; then
+    echo -e "${GREEN}✓ Yes${NC}"
+else
+    echo -e "${RED}✗ No${NC}"
+    exit 1
+fi
+
 echo -e "\n${YELLOW}Configuration content:${NC}"
 cat "$AUTOLOGIN"
 

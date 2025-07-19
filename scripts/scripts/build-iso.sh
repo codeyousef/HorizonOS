@@ -375,10 +375,10 @@ echo "Applying HorizonOS customizations..."
 # Set hostname
 echo "horizonos" > airootfs/etc/hostname
 
-# Apply standard archiso getty configuration
-# This uses the same approach as official Arch Linux ISO
-source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-archiso-standard.sh"
-apply_standard_getty_fix "airootfs"
+# Apply comprehensive getty configuration with multiple failsafes
+# This includes detection of agetty path, restart protection, and proper symlinks
+source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-comprehensive-fix.sh"
+apply_comprehensive_getty_fix "airootfs"
 
 # CRITICAL: Set default systemd target to multi-user (text mode) to prevent hanging at graphical.target
 # This prevents the ISO from trying to start a graphical interface
