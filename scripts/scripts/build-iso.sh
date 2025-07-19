@@ -313,46 +313,11 @@ mkdir -p airootfs/usr/local/bin
 cp "$PROJECT_ROOT/scripts/tools/horizon-container" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/horizonos-autoupdate" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/horizonos-update-notify" airootfs/usr/local/bin/
+cp "$PROJECT_ROOT/scripts/tools/debug-getty" airootfs/usr/local/bin/
 chmod +x airootfs/usr/local/bin/*
 
-# Add boot debug service for troubleshooting getty issues
-cat > airootfs/etc/systemd/system/horizonos-boot-debug.service << 'EOF'
-[Unit]
-Description=HorizonOS Boot Debug Logger
-DefaultDependencies=no
-After=multi-user.target
-Before=getty.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/bash -c '
-    echo "=== HorizonOS Boot Debug ===" > /dev/tty1
-    echo "Current target: $(systemctl get-default)" > /dev/tty1
-    echo "" > /dev/tty1
-    echo "getty.target status:" > /dev/tty1
-    systemctl status getty.target --no-pager > /dev/tty1 2>&1
-    echo "" > /dev/tty1
-    echo "getty@tty1.service status:" > /dev/tty1
-    systemctl status getty@tty1.service --no-pager > /dev/tty1 2>&1
-    echo "" > /dev/tty1
-    echo "Active targets:" > /dev/tty1
-    systemctl list-units --type=target --state=active --no-pager > /dev/tty1 2>&1
-    echo "" > /dev/tty1
-    echo "Failed services:" > /dev/tty1
-    systemctl list-units --failed --no-pager > /dev/tty1 2>&1
-    sleep 5
-'
-RemainAfterExit=yes
-StandardOutput=tty
-StandardError=tty
-TTYPath=/dev/tty1
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-mkdir -p airootfs/etc/systemd/system/multi-user.target.wants
-ln -sf /etc/systemd/system/horizonos-boot-debug.service airootfs/etc/systemd/system/multi-user.target.wants/
+# Note: Boot debugging is now handled by the debug-getty tool
+# which can be run manually if needed
 
 # Copy OSTree repository to ISO (if it exists and is small enough)
 if [ -d "$PROJECT_ROOT/repo" ]; then
@@ -410,10 +375,10 @@ echo "Applying HorizonOS customizations..."
 # Set hostname
 echo "horizonos" > airootfs/etc/hostname
 
-# Apply complete getty fix with multiple failsafes
-# This ensures getty services start even in problematic environments
-source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-complete-fix.sh"
-apply_complete_getty_fix "airootfs"
+# Apply standard archiso getty configuration
+# This uses the same approach as official Arch Linux ISO
+source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-archiso-standard.sh"
+apply_standard_getty_fix "airootfs"
 
 # CRITICAL: Set default systemd target to multi-user (text mode) to prevent hanging at graphical.target
 # This prevents the ISO from trying to start a graphical interface
