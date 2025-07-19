@@ -42,7 +42,7 @@ TEST_DIR="/tmp/getty-flash-test-$$"
 mkdir -p "$TEST_DIR"
 
 # Apply our fix
-source "$PROJECT_ROOT/scripts/scripts/fixes/fix-getty-comprehensive.sh"
+source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-autologin.sh"
 fix_getty_in_iso "$TEST_DIR" >/dev/null 2>&1
 
 AUTOLOGIN="$TEST_DIR/etc/systemd/system/getty@tty1.service.d/autologin.conf"

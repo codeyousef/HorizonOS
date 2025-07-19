@@ -371,7 +371,7 @@ echo "horizonos" > airootfs/etc/hostname
 
 # Apply comprehensive getty fix
 # This removes conflicting configs and creates a working autologin setup
-source "$PROJECT_ROOT/scripts/scripts/fixes/fix-getty-comprehensive.sh"
+source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-autologin.sh"
 fix_getty_in_iso "airootfs"
 
 # Minimal branding - no ASCII art that could interfere

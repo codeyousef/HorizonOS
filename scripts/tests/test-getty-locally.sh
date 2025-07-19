@@ -36,7 +36,7 @@ cat "$AIROOTFS/etc/systemd/system/getty@tty1.service.d/autologin.conf"
 
 # Apply our fix
 echo -e "\n${YELLOW}Applying HorizonOS getty fix...${NC}"
-source "$PROJECT_ROOT/scripts/scripts/fixes/fix-getty-comprehensive.sh"
+source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-autologin.sh"
 fix_getty_in_iso "$AIROOTFS"
 
 echo -e "\nAfter fix:"

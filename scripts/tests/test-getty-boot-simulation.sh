@@ -45,7 +45,7 @@ if command -v systemd-nspawn >/dev/null 2>&1 && [ "$EUID" -eq 0 ]; then
     done
     
     # Apply our getty fix
-    source "$PROJECT_ROOT/scripts/scripts/fixes/fix-getty-comprehensive.sh"
+    source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-autologin.sh"
     fix_getty_in_iso "$TEST_ROOT"
     
     # Create basic files
@@ -82,7 +82,7 @@ else
     mkdir -p "$TEST_DIR/etc/systemd/system"
     
     # Apply our fix
-    source "$PROJECT_ROOT/scripts/scripts/fixes/fix-getty-comprehensive.sh"
+    source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-autologin.sh"
     fix_getty_in_iso "$TEST_DIR"
     
     # 2. Simulate systemd parsing the unit
