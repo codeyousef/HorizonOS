@@ -30,6 +30,13 @@ fix_getty_in_iso "$TEST_DIR/airootfs"
 # Apply the same systemd target configuration as build-iso.sh
 ln -sf /usr/lib/systemd/system/multi-user.target "$TEST_DIR/airootfs/etc/systemd/system/default.target"
 
+# Apply getty.target dependencies (matching build-iso.sh)
+mkdir -p "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants"
+ln -sf /usr/lib/systemd/system/getty.target "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants/getty.target"
+mkdir -p "$TEST_DIR/airootfs/etc/systemd/system/getty.target.wants"
+ln -sf /usr/lib/systemd/system/getty@.service "$TEST_DIR/airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service"
+ln -sf /usr/lib/systemd/system/getty@.service "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants/getty@tty1.service"
+
 # Verify default target
 echo -n "   - Checking default.target: "
 if [ -L "$TEST_DIR/airootfs/etc/systemd/system/default.target" ]; then
@@ -41,6 +48,31 @@ if [ -L "$TEST_DIR/airootfs/etc/systemd/system/default.target" ]; then
     fi
 else
     echo -e "${RED}✗ default.target not found${NC}"
+fi
+
+# Verify getty.target dependency
+echo -n "   - Checking getty.target in multi-user.target.wants: "
+if [ -L "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants/getty.target" ]; then
+    echo -e "${GREEN}✓ getty.target will be started by multi-user.target${NC}"
+else
+    echo -e "${RED}✗ getty.target NOT linked to multi-user.target${NC}"
+fi
+
+# Verify getty@tty1 dependency
+echo -n "   - Checking getty@tty1.service dependencies: "
+GETTY_LINKS=0
+if [ -L "$TEST_DIR/airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service" ]; then
+    GETTY_LINKS=$((GETTY_LINKS + 1))
+fi
+if [ -L "$TEST_DIR/airootfs/etc/systemd/system/multi-user.target.wants/getty@tty1.service" ]; then
+    GETTY_LINKS=$((GETTY_LINKS + 1))
+fi
+if [ $GETTY_LINKS -eq 2 ]; then
+    echo -e "${GREEN}✓ getty@tty1 linked to both targets${NC}"
+elif [ $GETTY_LINKS -eq 1 ]; then
+    echo -e "${YELLOW}⚠ getty@tty1 only linked to one target${NC}"
+else
+    echo -e "${RED}✗ getty@tty1 not properly linked${NC}"
 fi
 
 # Test 2: Verify boot parameters
@@ -116,9 +148,10 @@ echo -e "\n${YELLOW}Test 5: Simulating boot sequence${NC}"
 echo "   Boot sequence should be:"
 echo "   1. Kernel boots with systemd.unit=multi-user.target"
 echo "   2. systemd starts and targets multi-user.target"
-echo "   3. getty@tty1.service starts with autologin"
-echo "   4. Root shell appears automatically"
-echo "   5. MOTD displays 'Welcome to HorizonOS Live'"
+echo "   3. multi-user.target pulls in getty.target"
+echo "   4. getty.target starts getty@tty1.service"
+echo "   5. getty@tty1.service autologins root"
+echo "   6. Root shell appears with MOTD 'Welcome to HorizonOS Live'"
 echo ""
 
 # Check if all components are in place

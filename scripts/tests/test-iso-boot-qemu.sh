@@ -44,6 +44,7 @@ SERIAL_LOG="$TEMP_DIR/serial.log"
 declare -a BOOT_MARKERS=(
     "Welcome to Arch Linux!"
     "Reached target Multi-User System"
+    "Reached target Login Prompts"
     "Started Getty on tty1"
     "Welcome to HorizonOS Live"
 )
@@ -163,10 +164,19 @@ if grep -q "getty.*tty1.*failed" "$SERIAL_LOG"; then
 elif grep -q "Started Getty on tty1" "$SERIAL_LOG"; then
     echo -e "${GREEN}✓ Getty started successfully${NC}"
 else
-    echo -e "${YELLOW}⚠ Getty status unclear${NC}"
+    echo -e "${RED}✗ Getty never started (dependency issue)${NC}"
+    BOOT_SUCCESS=false
 fi
 
-echo -n "3. Boot completion: "
+echo -n "3. Getty target: "
+if grep -q "Reached target Login Prompts" "$SERIAL_LOG"; then
+    echo -e "${GREEN}✓ Login Prompts target reached${NC}"
+else
+    echo -e "${RED}✗ Login Prompts target not reached (getty.target issue)${NC}"
+    BOOT_SUCCESS=false
+fi
+
+echo -n "4. Boot completion: "
 if [ "$BOOT_COMPLETE" = true ]; then
     echo -e "${GREEN}✓ Boot completed to live environment${NC}"
 else

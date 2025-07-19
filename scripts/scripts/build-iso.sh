@@ -391,9 +391,18 @@ echo "Setting default systemd target to multi-user.target..."
 mkdir -p airootfs/etc/systemd/system
 ln -sf /usr/lib/systemd/system/multi-user.target airootfs/etc/systemd/system/default.target
 
-# Ensure getty.target is properly configured
+# Ensure getty.target is properly configured and pulled in by multi-user.target
+# This fixes the hang at "Reached target Multi-User System"
+echo "Configuring getty.target dependencies..."
+
+# Method 1: Ensure getty.target is wanted by multi-user.target
+mkdir -p airootfs/etc/systemd/system/multi-user.target.wants
+ln -sf /usr/lib/systemd/system/getty.target airootfs/etc/systemd/system/multi-user.target.wants/getty.target
+
+# Method 2: Also ensure getty@tty1 is wanted by both targets (belt and suspenders)
 mkdir -p airootfs/etc/systemd/system/getty.target.wants
 ln -sf /usr/lib/systemd/system/getty@.service airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service
+ln -sf /usr/lib/systemd/system/getty@.service airootfs/etc/systemd/system/multi-user.target.wants/getty@tty1.service
 
 # Minimal branding - no ASCII art that could interfere
 cat > airootfs/etc/motd << 'EOF'
