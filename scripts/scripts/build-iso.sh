@@ -320,11 +320,28 @@ cat > airootfs/etc/systemd/system/horizonos-boot-debug.service << 'EOF'
 [Unit]
 Description=HorizonOS Boot Debug Logger
 DefaultDependencies=no
+After=multi-user.target
 Before=getty.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/bash -c 'echo "=== HorizonOS Boot Debug ===" > /dev/tty1; systemctl status getty@tty1.service > /dev/tty1 2>&1; sleep 2'
+ExecStart=/usr/bin/bash -c '
+    echo "=== HorizonOS Boot Debug ===" > /dev/tty1
+    echo "Current target: $(systemctl get-default)" > /dev/tty1
+    echo "" > /dev/tty1
+    echo "getty.target status:" > /dev/tty1
+    systemctl status getty.target --no-pager > /dev/tty1 2>&1
+    echo "" > /dev/tty1
+    echo "getty@tty1.service status:" > /dev/tty1
+    systemctl status getty@tty1.service --no-pager > /dev/tty1 2>&1
+    echo "" > /dev/tty1
+    echo "Active targets:" > /dev/tty1
+    systemctl list-units --type=target --state=active --no-pager > /dev/tty1 2>&1
+    echo "" > /dev/tty1
+    echo "Failed services:" > /dev/tty1
+    systemctl list-units --failed --no-pager > /dev/tty1 2>&1
+    sleep 5
+'
 RemainAfterExit=yes
 StandardOutput=tty
 StandardError=tty
@@ -395,14 +412,57 @@ ln -sf /usr/lib/systemd/system/multi-user.target airootfs/etc/systemd/system/def
 # This fixes the hang at "Reached target Multi-User System"
 echo "Configuring getty.target dependencies..."
 
-# Method 1: Ensure getty.target is wanted by multi-user.target
+# Create drop-in to ensure getty.target is properly pulled in
+mkdir -p airootfs/etc/systemd/system/getty.target.d
+cat > airootfs/etc/systemd/system/getty.target.d/horizonos-enable.conf << 'EOF'
+[Unit]
+# Ensure getty.target starts with multi-user.target
+WantedBy=multi-user.target
+RequiredBy=multi-user.target
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Properly enable getty.target (mimicking systemctl enable)
 mkdir -p airootfs/etc/systemd/system/multi-user.target.wants
 ln -sf /usr/lib/systemd/system/getty.target airootfs/etc/systemd/system/multi-user.target.wants/getty.target
 
-# Method 2: Also ensure getty@tty1 is wanted by both targets (belt and suspenders)
+# Enable getty@tty1.service using proper instantiation from template
+# This mimics what 'systemctl enable getty@tty1.service' would do
 mkdir -p airootfs/etc/systemd/system/getty.target.wants
 ln -sf /usr/lib/systemd/system/getty@.service airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service
+
+# Also add to multi-user.target as a failsafe
 ln -sf /usr/lib/systemd/system/getty@.service airootfs/etc/systemd/system/multi-user.target.wants/getty@tty1.service
+
+# Create a rescue getty service as an absolute failsafe
+cat > airootfs/etc/systemd/system/horizonos-rescue-getty.service << 'EOF'
+[Unit]
+Description=HorizonOS Rescue Getty on tty2
+Documentation=man:agetty(8)
+After=systemd-user-sessions.service
+After=multi-user.target
+ConditionPathExists=/dev/tty2
+
+[Service]
+Type=idle
+ExecStart=-/usr/bin/agetty --noclear tty2 38400 linux
+Restart=always
+RestartSec=5s
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty2
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable the rescue getty service
+ln -sf /etc/systemd/system/horizonos-rescue-getty.service airootfs/etc/systemd/system/multi-user.target.wants/
 
 # Minimal branding - no ASCII art that could interfere
 cat > airootfs/etc/motd << 'EOF'

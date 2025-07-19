@@ -90,8 +90,31 @@ if [ -f /etc/systemd/system/getty@tty1.service.d/autologin.conf ]; then
 else
     echo "✗ autologin.conf missing"
 fi
+
+# Check if getty services are properly enabled
+echo ""
+echo "Getty service enablement:"
+if [ -L /etc/systemd/system/getty.target.wants/getty@tty1.service ]; then
+    echo "✓ getty@tty1.service is enabled in getty.target"
+else
+    echo "✗ getty@tty1.service is NOT enabled in getty.target"
+fi
+
+if [ -L /etc/systemd/system/multi-user.target.wants/getty.target ]; then
+    echo "✓ getty.target is wanted by multi-user.target"
+else
+    echo "✗ getty.target is NOT wanted by multi-user.target"
+fi
 EOF
     chmod +x "$AIROOTFS/usr/local/bin/verify-getty"
+    
+    # 8. Ensure getty@tty1.service has proper [Install] section handling
+    # Create a drop-in that ensures the service can be properly enabled
+    cat > "$AIROOTFS/etc/systemd/system/getty@tty1.service.d/install.conf" << 'EOF'
+[Install]
+WantedBy=getty.target
+Alias=getty@tty1.service
+EOF
     
     echo "Getty fixes applied successfully"
 }

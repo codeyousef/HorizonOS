@@ -27,6 +27,18 @@
   - systemd-boot entries
 - Ensured all systemd services use multi-user.target instead of graphical.target
 
+### 3. Hanging at "Reached target Multi-User System"
+**Problem**: System would hang after reaching multi-user.target with no getty services starting.
+
+**Root Cause**: getty.target was not properly pulled in by multi-user.target due to missing dependency chain.
+
+**Fix**:
+- Created getty.target drop-in configuration to ensure it's wanted by multi-user.target
+- Properly enabled getty@tty1.service using systemd-style service instantiation
+- Added failsafe getty@tty1.service link directly to multi-user.target
+- Created rescue getty service (horizonos-rescue-getty.service) on tty2 as absolute failsafe
+- Enhanced boot debug service to show getty and target status
+
 ## Testing Infrastructure
 
 ### Local Tests Created
@@ -35,6 +47,7 @@
 3. **test-getty-flashing.sh** - Specifically tests for conditions causing flashing
 4. **test-full-boot-process.sh** - Comprehensive boot configuration verification
 5. **test-iso-boot-qemu.sh** - Automated QEMU boot test with timeout
+6. **test-getty-enablement.sh** - Verifies proper systemd service enablement and dependency chains
 
 ### What the Tests Verify
 - Correct agetty path configuration
@@ -44,14 +57,20 @@
 - Boot parameters include systemd.unit=multi-user.target
 - No graphical packages that might trigger graphical.target
 - Complete boot sequence to live environment
+- getty.target is properly pulled in by multi-user.target
+- getty@tty1.service is properly instantiated and enabled
+- Failsafe mechanisms are in place
 
 ## Boot Sequence
 The fixed boot sequence is now:
 1. Kernel boots with `systemd.unit=multi-user.target` parameter
 2. systemd starts and targets multi-user.target (text mode)
-3. getty@tty1.service starts with autologin for root
-4. Root shell appears automatically
-5. MOTD displays "Welcome to HorizonOS Live"
+3. multi-user.target pulls in getty.target (via wants dependency)
+4. getty.target starts getty@tty1.service
+5. getty@tty1.service starts with autologin for root
+6. Root shell appears automatically
+7. MOTD displays "Welcome to HorizonOS Live"
+8. If primary getty fails, rescue getty on tty2 provides fallback
 
 ## File Locations
 - Getty fix: `scripts/scripts/boot-fixes/getty-autologin.sh`
