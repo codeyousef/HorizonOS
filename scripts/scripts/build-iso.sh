@@ -348,20 +348,31 @@ if [ -d "$PROJECT_ROOT/repo" ]; then
     fi
 fi
 
-# Configure boot menu
-cat > airootfs/usr/share/horizonos/grub.cfg << 'EOF'
-menuentry "HorizonOS Live (x86_64, UEFI)" {
-    set gfxpayload=keep
-    linux /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL% systemd.unit=multi-user.target
-    initrd /%INSTALL_DIR%/boot/intel-ucode.img /%INSTALL_DIR%/boot/amd-ucode.img /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-}
+# Configure boot parameters for all boot methods
+echo "Configuring boot parameters..."
 
-menuentry "HorizonOS Live (x86_64, UEFI) with speech" {
-    set gfxpayload=keep
-    linux /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL% accessibility=on systemd.unit=multi-user.target
-    initrd /%INSTALL_DIR%/boot/intel-ucode.img /%INSTALL_DIR%/boot/amd-ucode.img /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-}
-EOF
+# Update GRUB configuration for UEFI
+if [ -f grub/grub.cfg ]; then
+    sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target/g' grub/grub.cfg
+fi
+
+# Update syslinux configuration for BIOS
+if [ -d syslinux ]; then
+    for cfg in syslinux/*.cfg; do
+        if [ -f "$cfg" ]; then
+            sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target/g' "$cfg"
+        fi
+    done
+fi
+
+# Update systemd-boot entries for UEFI
+if [ -d efiboot/loader/entries ]; then
+    for entry in efiboot/loader/entries/*.conf; do
+        if [ -f "$entry" ]; then
+            sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target/g' "$entry"
+        fi
+    done
+fi
 
 # Apply comprehensive getty fix and minimal branding
 echo "Applying HorizonOS customizations..."
@@ -369,15 +380,20 @@ echo "Applying HorizonOS customizations..."
 # Set hostname
 echo "horizonos" > airootfs/etc/hostname
 
-# CRITICAL: Set default systemd target to multi-user (text mode) to prevent hanging at graphical.target
-echo "Setting default systemd target to multi-user.target..."
-mkdir -p airootfs/etc/systemd/system
-ln -sf /usr/lib/systemd/system/multi-user.target airootfs/etc/systemd/system/default.target
-
 # Apply comprehensive getty fix
 # This removes conflicting configs and creates a working autologin setup
 source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-autologin.sh"
 fix_getty_in_iso "airootfs"
+
+# CRITICAL: Set default systemd target to multi-user (text mode) to prevent hanging at graphical.target
+# This prevents the ISO from trying to start a graphical interface
+echo "Setting default systemd target to multi-user.target..."
+mkdir -p airootfs/etc/systemd/system
+ln -sf /usr/lib/systemd/system/multi-user.target airootfs/etc/systemd/system/default.target
+
+# Ensure getty.target is properly configured
+mkdir -p airootfs/etc/systemd/system/getty.target.wants
+ln -sf /usr/lib/systemd/system/getty@.service airootfs/etc/systemd/system/getty.target.wants/getty@tty1.service
 
 # Minimal branding - no ASCII art that could interfere
 cat > airootfs/etc/motd << 'EOF'
@@ -398,49 +414,6 @@ ANSI_COLOR="0;36"
 HOME_URL="https://github.com/codeyousef/HorizonOS"
 EOF
 
-# Create syslinux configuration for BIOS boot
-mkdir -p airootfs/syslinux
-cat > airootfs/syslinux/archiso_sys-linux.cfg << 'EOF'
-LABEL arch64
-TEXT HELP
-Boot the HorizonOS Live (x86_64) install medium.
-ENDTEXT
-MENU LABEL HorizonOS Live (x86_64)
-LINUX /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
-INITRD /%INSTALL_DIR%/boot/intel-ucode.img,/%INSTALL_DIR%/boot/amd-ucode.img,/%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-APPEND archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL% systemd.unit=multi-user.target
-
-LABEL arch64speech
-TEXT HELP
-Boot the HorizonOS Live (x86_64) install medium with speech support.
-ENDTEXT
-MENU LABEL HorizonOS Live (x86_64) with ^speech
-LINUX /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
-INITRD /%INSTALL_DIR%/boot/intel-ucode.img,/%INSTALL_DIR%/boot/amd-ucode.img,/%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-APPEND archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL% accessibility=on systemd.unit=multi-user.target
-EOF
-
-# Create systemd-boot entries for UEFI
-mkdir -p airootfs/loader/entries
-cat > airootfs/loader/entries/01-horizonos-x86_64.conf << 'EOF'
-title    HorizonOS Live (x86_64, UEFI)
-sort-key 01
-linux    /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
-initrd   /%INSTALL_DIR%/boot/intel-ucode.img
-initrd   /%INSTALL_DIR%/boot/amd-ucode.img
-initrd   /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-options  archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% systemd.unit=multi-user.target
-EOF
-
-cat > airootfs/loader/entries/02-horizonos-x86_64-speech.conf << 'EOF'
-title    HorizonOS Live (x86_64, UEFI) with speech
-sort-key 02
-linux    /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
-initrd   /%INSTALL_DIR%/boot/intel-ucode.img
-initrd   /%INSTALL_DIR%/boot/amd-ucode.img
-initrd   /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-options  archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% accessibility=on systemd.unit=multi-user.target
-EOF
 
 # Customize profiledef.sh
 sed -i 's/iso_name=.*/iso_name="horizonos"/' profiledef.sh
