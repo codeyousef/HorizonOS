@@ -115,7 +115,9 @@ waybar
 wofi
 kitty
 nautilus
+dolphin
 gedit
+kate
 
 # Audio
 pipewire
@@ -128,13 +130,54 @@ grim
 slurp
 wl-clipboard
 swaylock
+swayidle
 polkit-gnome
 pavucontrol
+playerctl
+brightnessctl
+
+# Notification daemon
+dunst
+libnotify
+
+# Theming and appearance
+breeze
+breeze-gtk
+breeze-icons
+papirus-icon-theme
+kvantum
+lxappearance
+gsettings-desktop-schemas
 
 # Fonts for better desktop experience
 ttf-jetbrains-mono
 noto-fonts
 noto-fonts-emoji
+ttf-liberation
+ttf-dejavu
+
+# Additional utilities
+cliphist
+wl-paste
+wl-clipboard
+xdg-desktop-portal-hyprland
+qt5-wayland
+qt6-wayland
+
+# Network utilities
+network-manager-applet
+blueman
+
+# System utilities
+swaybg
+wlsunset
+
+# Development libraries for graph desktop
+vulkan-icd-loader
+vulkan-tools
+mesa
+libgl
+rust
 
 # Live environment
 archinstall
@@ -378,6 +421,15 @@ cp "$PROJECT_ROOT/scripts/tools/horizonos-autoupdate" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/horizonos-update-notify" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/debug-getty" airootfs/usr/local/bin/
 chmod +x airootfs/usr/local/bin/*
+
+# Build and include graph compositor
+echo "Building graph desktop compositor..."
+"$PROJECT_ROOT/scripts/scripts/build-graph-compositor.sh"
+
+# Make switch-mode.sh accessible
+mkdir -p airootfs/usr/local/bin
+ln -sf /usr/share/horizonos/desktop/hyprland/scripts/switch-mode.sh airootfs/usr/local/bin/horizonos-switch-mode
+chmod +x airootfs/usr/local/bin/horizonos-switch-mode
 
 # Note: Boot debugging is now handled by the debug-getty tool
 # which can be run manually if needed

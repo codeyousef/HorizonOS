@@ -1,0 +1,225 @@
+/* HorizonOS KDE-Style Waybar Theme */
+
+* {
+    border: none;
+    border-radius: 0;
+    font-family: "Noto Sans", "Font Awesome 6 Free";
+    font-size: 13px;
+    min-height: 0;
+}
+
+window#waybar {
+    background: rgba(49, 54, 59, 0.95);
+    border-top: 1px solid rgba(61, 174, 233, 0.3);
+    color: #eff0f1;
+    transition-property: background-color;
+    transition-duration: .5s;
+}
+
+window#waybar.hidden {
+    opacity: 0.2;
+}
+
+/* Workspace indicator */
+#workspaces {
+    margin: 0 4px;
+}
+
+#workspaces button {
+    background: transparent;
+    color: #7f8c8d;
+    padding: 0 8px;
+    margin: 4px 2px;
+    border-radius: 4px;
+    transition: all 0.3s ease;
+}
+
+#workspaces button:hover {
+    background: rgba(61, 174, 233, 0.2);
+    color: #eff0f1;
+}
+
+#workspaces button.active {
+    background: #3daee9;
+    color: #31363b;
+}
+
+#workspaces button.urgent {
+    background: #ed1515;
+    color: #ffffff;
+}
+
+/* Window title */
+#window {
+    margin: 0 8px;
+    color: #bdc3c7;
+}
+
+/* Mode indicator */
+#mode {
+    background: #f67400;
+    color: #31363b;
+    padding: 0 10px;
+    margin: 4px;
+    border-radius: 4px;
+}
+
+/* Common module styling */
+#clock,
+#battery,
+#cpu,
+#memory,
+#disk,
+#temperature,
+#backlight,
+#network,
+#pulseaudio,
+#custom-media,
+#tray,
+#idle_inhibitor,
+#mpd,
+#bluetooth,
+#custom-clipboard,
+#custom-power,
+#custom-launcher {
+    padding: 0 10px;
+    margin: 4px 2px;
+    color: #eff0f1;
+    background: rgba(61, 174, 233, 0.1);
+    border-radius: 4px;
+}
+
+/* Module backgrounds */
+#custom-launcher {
+    background: #3daee9;
+    color: #31363b;
+    font-size: 18px;
+    padding: 0 12px;
+}
+
+#clock {
+    background: rgba(61, 174, 233, 0.15);
+}
+
+#battery {
+    background: rgba(87, 227, 137, 0.15);
+}
+
+#battery.charging {
+    background: rgba(87, 227, 137, 0.25);
+}
+
+#battery.warning:not(.charging) {
+    background: rgba(246, 116, 0, 0.2);
+    color: #f67400;
+}
+
+#battery.critical:not(.charging) {
+    background: rgba(237, 21, 21, 0.2);
+    color: #ed1515;
+    animation-name: blink;
+    animation-duration: 0.5s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+}
+
+@keyframes blink {
+    to {
+        background: rgba(237, 21, 21, 0.4);
+    }
+}
+
+#network {
+    background: rgba(61, 174, 233, 0.15);
+}
+
+#network.disconnected {
+    background: rgba(237, 21, 21, 0.15);
+    color: #ed1515;
+}
+
+#bluetooth {
+    background: rgba(61, 174, 233, 0.15);
+}
+
+#bluetooth.connected {
+    background: rgba(87, 227, 137, 0.15);
+}
+
+#pulseaudio {
+    background: rgba(246, 116, 0, 0.15);
+}
+
+#pulseaudio.muted {
+    background: rgba(122, 122, 122, 0.15);
+    color: #7a7a7a;
+}
+
+#custom-media {
+    background: rgba(102, 217, 239, 0.15);
+}
+
+#custom-media.custom-spotify {
+    background: rgba(30, 215, 96, 0.15);
+}
+
+#tray {
+    background: transparent;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+}
+
+#idle_inhibitor {
+    background: rgba(122, 122, 122, 0.15);
+}
+
+#idle_inhibitor.activated {
+    background: rgba(246, 116, 0, 0.15);
+    color: #f67400;
+}
+
+#custom-clipboard {
+    background: rgba(61, 174, 233, 0.15);
+}
+
+#custom-power {
+    background: rgba(237, 21, 21, 0.15);
+    color: #ed1515;
+    font-size: 16px;
+    padding: 0 8px;
+}
+
+/* Tooltip styling */
+tooltip {
+    background: rgba(49, 54, 59, 0.95);
+    border: 1px solid rgba(61, 174, 233, 0.5);
+    border-radius: 4px;
+}
+
+tooltip label {
+    color: #eff0f1;
+}
+
+/* Custom media player */
+#custom-media.custom-vlc {
+    background: rgba(255, 140, 0, 0.15);
+}
+
+/* System tray */
+#tray menu {
+    background: rgba(49, 54, 59, 0.95);
+    border: 1px solid rgba(61, 174, 233, 0.3);
+    border-radius: 4px;
+    color: #eff0f1;
+}
+
+#tray menu menuitem:hover {
+    background: rgba(61, 174, 233, 0.2);
+}
