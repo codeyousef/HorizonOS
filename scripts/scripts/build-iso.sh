@@ -101,20 +101,40 @@ usbutils
 libarchive
 squashfs-tools
 
-# X11 and Display (for GUI)
-xorg-server
-xorg-xinit
-xorg-xrandr
-xorg-xsetroot
+# Wayland and Display (for GUI)
+wayland
+xorg-xwayland
+xdg-desktop-portal-hyprland
+qt5-wayland
+qt6-wayland
 
-# Display Manager and Desktop Environment
+# Display Manager and Hyprland Desktop Environment
 sddm
-plasma-desktop
-plasma-nm
-plasma-pa
-konsole
-dolphin
-kate
+hyprland
+waybar
+wofi
+kitty
+nautilus
+gedit
+
+# Audio
+pipewire
+pipewire-pulse
+pipewire-alsa
+wireplumber
+
+# Additional Hyprland utilities
+grim
+slurp
+wl-clipboard
+swaylock
+polkit-gnome
+pavucontrol
+
+# Fonts for better desktop experience
+ttf-jetbrains-mono
+noto-fonts
+noto-fonts-emoji
 
 # Live environment
 archinstall
