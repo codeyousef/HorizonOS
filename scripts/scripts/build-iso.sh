@@ -135,17 +135,8 @@ mkdir -p airootfs/etc/mkinitcpio.d
 cp /usr/share/archiso/configs/releng/airootfs/etc/mkinitcpio.conf.d/archiso.conf airootfs/etc/mkinitcpio.conf.d/
 cp /usr/share/archiso/configs/releng/airootfs/etc/mkinitcpio.d/linux.preset airootfs/etc/mkinitcpio.d/
 
-# Fix boot parameters to suppress hardware warnings
-echo "Configuring boot parameters..."
-# Update syslinux configuration
-if [ -f syslinux/archiso_sys-linux.cfg ]; then
-    sed -i 's/archisolabel=HORIZONOS_%Y%m%d%H%M%S/archisolabel=HORIZONOS_'"$(date +%Y%m)"' quiet loglevel=3/g' syslinux/archiso_sys-linux.cfg
-fi
-
-# Update grub configuration
-if [ -f grub/grub.cfg ]; then
-    sed -i 's/archisolabel=HORIZONOS_%Y%m%d%H%M%S/archisolabel=HORIZONOS_'"$(date +%Y%m)"' quiet loglevel=3/g' grub/grub.cfg
-fi
+# Boot parameters will be handled by archiso - DO NOT modify boot configs here
+# The boot configuration files use template variables that mkarchiso will replace
 
 # Create HorizonOS installer script
 cat > airootfs/usr/local/bin/horizonos-install << 'INSTALLER'
@@ -367,44 +358,11 @@ if [ -d "$PROJECT_ROOT/repo" ]; then
     fi
 fi
 
-# Configure boot parameters for all boot methods
-echo "Configuring boot parameters..."
+# DO NOT modify boot configurations - archiso handles this correctly
+# Any boot parameter changes break the critical archiso boot chain
+# The template variables like %INSTALL_DIR% are replaced by mkarchiso
 
-# Update GRUB configuration for UEFI
-if [ -f grub/grub.cfg ]; then
-    # Add systemd.unit and debug parameters
-    sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target console=tty0 console=ttyS0,115200/g' grub/grub.cfg
-fi
-
-# Update syslinux configuration for BIOS
-if [ -d syslinux ]; then
-    for cfg in syslinux/*.cfg; do
-        if [ -f "$cfg" ]; then
-            sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target console=tty0 console=ttyS0,115200/g' "$cfg"
-        fi
-    done
-fi
-
-# Update systemd-boot entries for UEFI
-if [ -d efiboot/loader/entries ]; then
-    for entry in efiboot/loader/entries/*.conf; do
-        if [ -f "$entry" ]; then
-            sed -i 's/archisobasedir=%INSTALL_DIR%/archisobasedir=%INSTALL_DIR% systemd.unit=multi-user.target console=tty0 console=ttyS0,115200/g' "$entry"
-        fi
-    done
-fi
-
-# Add a debug boot entry for troubleshooting
-if [ -f grub/grub.cfg ]; then
-    cat >> grub/grub.cfg << 'EOF'
-
-menuentry "HorizonOS (Debug Mode)" {
-    set gfxpayload=keep
-    linux /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL% systemd.unit=multi-user.target systemd.log_level=debug systemd.log_target=console console=tty0
-    initrd /%INSTALL_DIR%/boot/intel-ucode.img /%INSTALL_DIR%/boot/amd-ucode.img /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-}
-EOF
-fi
+# DO NOT add custom boot entries - let archiso handle boot configuration
 
 # Apply comprehensive getty fix and minimal branding
 echo "Applying HorizonOS customizations..."
@@ -453,12 +411,15 @@ HOME_URL="https://github.com/codeyousef/HorizonOS"
 EOF
 
 
-# Customize profiledef.sh
+# Customize profiledef.sh - ONLY branding, not functional parameters
 sed -i 's/iso_name=.*/iso_name="horizonos"/' profiledef.sh
 sed -i 's/iso_label=.*/iso_label="HORIZONOS_'"$(date +%Y%m)"'"/' profiledef.sh
 sed -i 's/iso_publisher=.*/iso_publisher="HorizonOS Project"/' profiledef.sh
 sed -i 's/iso_application=.*/iso_application="HorizonOS Live\/Installation Medium"/' profiledef.sh
 sed -i 's/iso_version=.*/iso_version="'"$HORIZONOS_VERSION"'"/' profiledef.sh
+
+# CRITICAL: Keep install_dir as "arch" - changing this breaks boot
+# The boot configs expect %INSTALL_DIR% to be "arch"
 
 # Build the ISO
 echo "Building ISO..."
