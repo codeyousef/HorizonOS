@@ -1,0 +1,59 @@
+#!/bin/bash
+# debug-boot - Boot Debug Information tool for HorizonOS Live ISO
+# Based on Boot Process and Troubleshooting guide
+
+echo "=== HorizonOS Boot Debug Information ==="
+echo "Current runlevel:"
+systemctl get-default
+
+echo -e "\nDisplay Manager Status:"
+systemctl status display-manager.service 2>/dev/null || echo "No display manager service"
+
+echo -e "\nGetty@tty1 Status:"
+systemctl status getty@tty1.service
+
+echo -e "\nGraphical Target:"
+systemctl status graphical.target
+
+echo -e "\nMulti-User Target:"
+systemctl status multi-user.target
+
+echo -e "\nFailed Services:"
+systemctl --failed
+
+echo -e "\nActive Getty Services:"
+systemctl list-units 'getty@*' --all
+
+echo -e "\nSystemd Boot Messages:"
+journalctl -b -p err | grep -v audit | tail -20
+
+echo -e "\nGetty Configuration:"
+if [ -f /etc/systemd/system/getty@tty1.service.d/autologin.conf ]; then
+    echo "Getty@tty1 autologin.conf:"
+    cat /etc/systemd/system/getty@tty1.service.d/autologin.conf
+else
+    echo "No getty@tty1 autologin configuration found"
+fi
+
+echo -e "\nAgetty Binary Location:"
+which agetty || echo "agetty not found in PATH"
+ls -la /sbin/agetty 2>/dev/null || echo "/sbin/agetty not found"
+ls -la /usr/bin/agetty 2>/dev/null || echo "/usr/bin/agetty not found"
+
+echo -e "\nCurrent TTY:"
+tty
+
+echo -e "\nMemory Usage:"
+free -h
+
+echo -e "\nDisk Usage:"
+df -h /
+
+echo -e "\n=== Quick Fixes ==="
+echo "If stuck at 'Started Getty on tty1':"
+echo "1. Try: systemctl restart getty@tty1"
+echo "2. Try: systemctl mask getty@tty1"
+echo "3. Switch to tty2: Ctrl+Alt+F2"
+echo ""
+echo "To check logs: journalctl -xe"
+echo "To check specific service: systemctl status <service-name>"

@@ -375,10 +375,10 @@ echo "Applying HorizonOS customizations..."
 # Set hostname
 echo "horizonos" > airootfs/etc/hostname
 
-# Apply comprehensive getty configuration with multiple failsafes
-# This includes detection of agetty path, restart protection, and proper symlinks
-source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-comprehensive-fix.sh"
-apply_comprehensive_getty_fix "airootfs"
+# Apply standard archiso getty configuration (like EndeavourOS/BlendOS)
+# This includes Restart=no to prevent autologin loops
+source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-archiso-standard.sh"
+apply_standard_getty_fix "airootfs"
 
 # CRITICAL: Set default systemd target to multi-user (text mode) to prevent hanging at graphical.target
 # This prevents the ISO from trying to start a graphical interface
@@ -388,6 +388,13 @@ ln -sf /usr/lib/systemd/system/multi-user.target airootfs/etc/systemd/system/def
 
 # Note: Getty configuration is handled by getty-archiso-standard.sh above
 # No additional getty configuration is needed - standard systemd handles everything
+
+# Add debug tools for troubleshooting boot issues
+echo "Adding debug tools..."
+mkdir -p airootfs/usr/local/bin
+cp "$PROJECT_ROOT/scripts/tools/debug-boot" airootfs/usr/local/bin/
+cp "$PROJECT_ROOT/scripts/tools/debug-getty" airootfs/usr/local/bin/ 2>/dev/null || true
+chmod +x airootfs/usr/local/bin/debug-*
 
 # Minimal branding - no ASCII art that could interfere
 cat > airootfs/etc/motd << 'EOF'
