@@ -434,10 +434,9 @@ chmod +x airootfs/usr/local/bin/*
 echo "Building graph desktop compositor..."
 "$PROJECT_ROOT/scripts/scripts/build-graph-compositor.sh"
 
-# Make switch-mode.sh accessible
+# Make switch-mode.sh accessible (create symlink, don't chmod it)
 mkdir -p airootfs/usr/local/bin
 ln -sf /usr/share/horizonos/desktop/hyprland/scripts/switch-mode.sh airootfs/usr/local/bin/horizonos-switch-mode
-chmod +x airootfs/usr/local/bin/horizonos-switch-mode
 
 # Note: Boot debugging is now handled by the debug-getty tool
 # which can be run manually if needed
