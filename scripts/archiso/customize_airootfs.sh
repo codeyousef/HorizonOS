@@ -26,13 +26,22 @@ ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 # Enable essential services
 echo "Enabling services..."
 systemctl enable NetworkManager.service
+systemctl enable sddm.service
 
-# Since we're text-only, set multi-user target
-systemctl set-default multi-user.target
+# Set default target to graphical for GUI
+systemctl set-default graphical.target
 
-# CRITICAL: Handle getty@tty1 to prevent issues
-# Option 1 from guide: Mask getty@tty1 completely (simplest, most reliable)
-echo "Masking getty@tty1 to prevent conflicts..."
+# Configure SDDM for autologin
+echo "Configuring SDDM autologin..."
+mkdir -p /etc/sddm.conf.d
+cat > /etc/sddm.conf.d/autologin.conf << 'EOF'
+[Autologin]
+User=liveuser
+Session=plasma.desktop
+EOF
+
+# CRITICAL: Disable getty@tty1 to prevent conflicts with SDDM
+echo "Masking getty@tty1 to prevent conflicts with display manager..."
 systemctl mask getty@tty1.service
 
 # Create .bashrc for liveuser with helpful aliases
@@ -46,6 +55,19 @@ echo "Welcome to HorizonOS Live Environment"
 echo "To install HorizonOS, run: horizonos-install"
 echo ""
 EOF
+
+# Create desktop shortcuts for easy access
+mkdir -p /home/liveuser/Desktop
+cat > /home/liveuser/Desktop/Install\ HorizonOS.desktop << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Install HorizonOS
+Exec=konsole -e horizonos-install
+Icon=applications-system
+Categories=System;
+EOF
+
+chmod +x /home/liveuser/Desktop/Install\ HorizonOS.desktop
 
 # Fix permissions
 chown -R liveuser:liveuser /home/liveuser

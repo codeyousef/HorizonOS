@@ -101,6 +101,21 @@ usbutils
 libarchive
 squashfs-tools
 
+# X11 and Display (for GUI)
+xorg-server
+xorg-xinit
+xorg-xrandr
+xorg-xsetroot
+
+# Display Manager and Desktop Environment
+sddm
+plasma-desktop
+plasma-nm
+plasma-pa
+konsole
+dolphin
+kate
+
 # Live environment
 archinstall
 arch-install-scripts
@@ -373,14 +388,8 @@ echo "horizonos" > airootfs/etc/hostname
 # Getty configuration is now handled by customize_airootfs.sh
 # Following the guide's recommendation to mask getty@tty1
 
-# CRITICAL: Set default systemd target to multi-user (text mode) to prevent hanging at graphical.target
-# This prevents the ISO from trying to start a graphical interface
-echo "Setting default systemd target to multi-user.target..."
-mkdir -p airootfs/etc/systemd/system
-ln -sf /usr/lib/systemd/system/multi-user.target airootfs/etc/systemd/system/default.target
-
-# Note: Getty configuration is handled by customize_airootfs.sh
-# Following the guide's recommendation to mask getty@tty1 for text-only mode
+# Note: Default target configuration is handled by customize_airootfs.sh
+# The script sets graphical.target for GUI mode and configures SDDM for autologin
 
 # Add debug tools for troubleshooting boot issues
 echo "Adding debug tools..."
