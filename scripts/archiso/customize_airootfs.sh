@@ -106,12 +106,15 @@ decoration {
         enabled = true
         size = 3
         passes = 1
+        new_optimizations = true
     }
 
-    drop_shadow = yes
-    shadow_range = 4
-    shadow_render_power = 3
-    col.shadow = rgba(1a1a1aee)
+    shadow {
+        enabled = true
+        range = 4
+        render_power = 3
+        color = rgba(1a1a1aee)
+    }
 }
 
 # Animations for smooth experience
@@ -135,14 +138,17 @@ dwindle {
 }
 
 # Window rules for traditional behavior
-windowrule = float, file_progress
-windowrule = float, confirm
-windowrule = float, dialog
-windowrule = float, download
-windowrule = float, notification
-windowrule = float, error
-windowrule = float, splash
-windowrule = float, confirmreset
+windowrulev2 = float, class:(file_progress)
+windowrulev2 = float, class:(confirm)
+windowrulev2 = float, class:(dialog)
+windowrulev2 = float, class:(download)
+windowrulev2 = float, class:(notification)
+windowrulev2 = float, class:(error)
+windowrulev2 = float, class:(splash)
+windowrulev2 = float, class:(confirmreset)
+windowrulev2 = float, title:(Open File)
+windowrulev2 = float, title:(Save File)
+windowrulev2 = float, title:(File Upload)
 
 # Key bindings for traditional desktop
 $mainMod = SUPER
