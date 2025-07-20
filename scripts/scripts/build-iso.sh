@@ -58,7 +58,7 @@ cd "$ISO_DIR/horizonos-profile"
 
 # Update packages.x86_64
 cat > packages.x86_64 << 'EOF'
-# Base system
+# Base system (following guide's working example)
 base
 base-devel
 linux
@@ -67,6 +67,7 @@ mkinitcpio
 mkinitcpio-archiso
 syslinux
 efibootmgr
+systemd
 
 # Filesystem
 btrfs-progs
@@ -81,7 +82,7 @@ openssh
 grub
 os-prober
 ostree
-fish
+bash
 sudo
 
 # Archive tools
@@ -109,6 +110,11 @@ mkdir -p airootfs/etc/systemd/system
 mkdir -p airootfs/etc/skel
 mkdir -p airootfs/usr/local/bin
 mkdir -p airootfs/usr/share/horizonos
+mkdir -p airootfs/root
+
+# Copy customize_airootfs.sh (CRITICAL - as per guide)
+cp "$PROJECT_ROOT/scripts/archiso/customize_airootfs.sh" airootfs/root/
+chmod +x airootfs/root/customize_airootfs.sh
 
 # Create HorizonOS installer script
 cat > airootfs/usr/local/bin/horizonos-install << 'INSTALLER'
@@ -375,10 +381,8 @@ echo "Applying HorizonOS customizations..."
 # Set hostname
 echo "horizonos" > airootfs/etc/hostname
 
-# Apply standard archiso getty configuration (like EndeavourOS/BlendOS)
-# This includes Restart=no to prevent autologin loops
-source "$PROJECT_ROOT/scripts/scripts/boot-fixes/getty-archiso-standard.sh"
-apply_standard_getty_fix "airootfs"
+# Getty configuration is now handled by customize_airootfs.sh
+# Following the guide's recommendation to mask getty@tty1
 
 # CRITICAL: Set default systemd target to multi-user (text mode) to prevent hanging at graphical.target
 # This prevents the ISO from trying to start a graphical interface
@@ -386,8 +390,8 @@ echo "Setting default systemd target to multi-user.target..."
 mkdir -p airootfs/etc/systemd/system
 ln -sf /usr/lib/systemd/system/multi-user.target airootfs/etc/systemd/system/default.target
 
-# Note: Getty configuration is handled by getty-archiso-standard.sh above
-# No additional getty configuration is needed - standard systemd handles everything
+# Note: Getty configuration is handled by customize_airootfs.sh
+# Following the guide's recommendation to mask getty@tty1 for text-only mode
 
 # Add debug tools for troubleshooting boot issues
 echo "Adding debug tools..."
