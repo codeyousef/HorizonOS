@@ -204,6 +204,9 @@ mkdir -p airootfs/usr/local/bin
 mkdir -p airootfs/usr/share/horizonos
 mkdir -p airootfs/root
 
+# Copy VM setup service file
+cp "$PROJECT_ROOT/scripts/archiso/airootfs/etc/systemd/system/horizonos-vm-setup.service" airootfs/etc/systemd/system/
+
 # Copy customize_airootfs.sh (CRITICAL - as per guide)
 cp "$PROJECT_ROOT/scripts/archiso/customize_airootfs.sh" airootfs/root/
 chmod +x airootfs/root/customize_airootfs.sh
