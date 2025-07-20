@@ -1,0 +1,104 @@
+#!/bin/bash
+# /usr/local/bin/live-diagnostic
+# Live Environment Diagnostic Tool from Boot Process guide
+# Include this in your ISO for quick troubleshooting
+
+echo "=== Live Environment Diagnostic Tool ==="
+echo "Running automated checks..."
+
+ERRORS=0
+WARNINGS=0
+
+# Function to check and report
+check() {
+    local TEST_NAME=$1
+    local COMMAND=$2
+    local EXPECTED=$3
+    
+    echo -n "Checking $TEST_NAME... "
+    
+    if eval "$COMMAND"; then
+        echo "✓ OK"
+    else
+        echo "✗ FAILED"
+        ((ERRORS++))
+    fi
+}
+
+# System checks for TEXT-ONLY mode (adapted from guide)
+check "Default target" "systemctl get-default | grep -q multi-user"
+check "No display manager" "! systemctl list-unit-files | grep -qE '(gdm|sddm|lightdm|lxdm)\.service.*enabled'"
+check "No failed services" "! systemctl --failed | grep -q failed"
+check "Live user exists" "id liveuser &>/dev/null"
+check "Home directory exists" "test -d /home/liveuser"
+check "Network manager running" "systemctl is-active NetworkManager -q"
+
+# Check for getty masking (our approach)
+echo -n "Checking getty@tty1 masked... "
+if systemctl is-masked getty@tty1 -q; then
+    echo "✓ OK (masked as intended)"
+else
+    echo "⚠ WARNING: Not masked"
+    ((WARNINGS++))
+fi
+
+# Memory check
+echo -n "Checking available memory... "
+AVAILABLE_MB=$(free -m | awk '/^Mem:/ {print $7}')
+if [[ $AVAILABLE_MB -lt 500 ]]; then
+    echo "✗ Low memory: ${AVAILABLE_MB}MB"
+    ((ERRORS++))
+else
+    echo "✓ OK: ${AVAILABLE_MB}MB available"
+fi
+
+# Check essential kernel modules
+echo -n "Checking squashfs module... "
+if lsmod | grep -q squashfs; then
+    echo "✓ OK"
+else
+    echo "✗ FAILED"
+    ((ERRORS++))
+fi
+
+echo -n "Checking overlay module... "
+if lsmod | grep -q overlay; then
+    echo "✓ OK"
+else
+    echo "✗ FAILED"
+    ((ERRORS++))
+fi
+
+# Check for OSTree repository
+echo -n "Checking OSTree repository... "
+if [ -d /usr/share/horizonos/repo ]; then
+    echo "✓ OK"
+else
+    echo "✗ FAILED"
+    ((ERRORS++))
+fi
+
+# Boot stage check
+echo -n "Checking current runlevel... "
+RUNLEVEL=$(systemctl get-default)
+echo "$RUNLEVEL"
+
+echo -e "\n=== Summary ==="
+echo "Errors: $ERRORS"
+echo "Warnings: $WARNINGS"
+
+if [[ $ERRORS -gt 0 ]]; then
+    echo -e "\nRun 'journalctl -xe' for detailed error logs"
+    echo "Run 'dmesg | tail -50' to check kernel messages"
+    echo "Run 'systemctl list-units --failed' to see failed units"
+fi
+
+echo -e "\n=== Boot Process Debug Info ==="
+echo "Kernel command line:"
+cat /proc/cmdline
+
+echo -e "\nLoaded modules:"
+lsmod | head -10
+
+echo -e "\nLast boot messages:"
+dmesg | tail -20

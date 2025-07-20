@@ -63,11 +63,17 @@ base
 base-devel
 linux
 linux-firmware
+linux-firmware-marvell
 mkinitcpio
 mkinitcpio-archiso
+mkinitcpio-nfs-utils
 syslinux
 efibootmgr
 systemd
+
+# Microcode (CRITICAL - missing this causes boot issues)
+amd-ucode
+intel-ucode
 
 # Filesystem
 btrfs-progs
@@ -77,6 +83,8 @@ e2fsprogs
 # Networking
 networkmanager
 openssh
+dhcpcd
+iwd
 
 # System
 grub
@@ -84,6 +92,10 @@ os-prober
 ostree
 bash
 sudo
+
+# Hardware detection
+pciutils
+usbutils
 
 # Archive tools
 libarchive
@@ -115,6 +127,25 @@ mkdir -p airootfs/root
 # Copy customize_airootfs.sh (CRITICAL - as per guide)
 cp "$PROJECT_ROOT/scripts/archiso/customize_airootfs.sh" airootfs/root/
 chmod +x airootfs/root/customize_airootfs.sh
+
+# Copy critical mkinitcpio configuration from archiso (ESSENTIAL for boot)
+echo "Copying mkinitcpio configuration..."
+mkdir -p airootfs/etc/mkinitcpio.conf.d
+mkdir -p airootfs/etc/mkinitcpio.d
+cp /usr/share/archiso/configs/releng/airootfs/etc/mkinitcpio.conf.d/archiso.conf airootfs/etc/mkinitcpio.conf.d/
+cp /usr/share/archiso/configs/releng/airootfs/etc/mkinitcpio.d/linux.preset airootfs/etc/mkinitcpio.d/
+
+# Fix boot parameters to suppress hardware warnings
+echo "Configuring boot parameters..."
+# Update syslinux configuration
+if [ -f syslinux/archiso_sys-linux.cfg ]; then
+    sed -i 's/archisolabel=HORIZONOS_%Y%m%d%H%M%S/archisolabel=HORIZONOS_'"$(date +%Y%m)"' quiet loglevel=3/g' syslinux/archiso_sys-linux.cfg
+fi
+
+# Update grub configuration
+if [ -f grub/grub.cfg ]; then
+    sed -i 's/archisolabel=HORIZONOS_%Y%m%d%H%M%S/archisolabel=HORIZONOS_'"$(date +%Y%m)"' quiet loglevel=3/g' grub/grub.cfg
+fi
 
 # Create HorizonOS installer script
 cat > airootfs/usr/local/bin/horizonos-install << 'INSTALLER'
@@ -398,7 +429,9 @@ echo "Adding debug tools..."
 mkdir -p airootfs/usr/local/bin
 cp "$PROJECT_ROOT/scripts/tools/debug-boot" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/debug-getty" airootfs/usr/local/bin/ 2>/dev/null || true
+cp "$PROJECT_ROOT/scripts/tools/live-diagnostic" airootfs/usr/local/bin/
 chmod +x airootfs/usr/local/bin/debug-*
+chmod +x airootfs/usr/local/bin/live-diagnostic
 
 # Minimal branding - no ASCII art that could interfere
 cat > airootfs/etc/motd << 'EOF'

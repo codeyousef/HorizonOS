@@ -43,13 +43,20 @@ echo -e "\n2. Checking critical files..."
 if [[ -f "$PROFILE_DIR/packages.x86_64" ]]; then
     success "Package list found"
     # Check for essential packages
-    for pkg in base linux linux-firmware mkinitcpio; do
+    for pkg in base linux linux-firmware mkinitcpio mkinitcpio-archiso; do
         if grep -q "^$pkg$" "$PROFILE_DIR/packages.x86_64"; then
             success "Essential package '$pkg' present"
         else
             error "Missing essential package: $pkg"
         fi
     done
+    
+    # Check for microcode (CRITICAL)
+    if grep -q "^amd-ucode$" "$PROFILE_DIR/packages.x86_64" && grep -q "^intel-ucode$" "$PROFILE_DIR/packages.x86_64"; then
+        success "Microcode packages found"
+    else
+        error "Missing microcode packages (amd-ucode/intel-ucode)"
+    fi
     
     # Check for xorg-server (not required for text-only)
     if grep -q "^xorg-server$" "$PROFILE_DIR/packages.x86_64"; then
@@ -59,6 +66,19 @@ if [[ -f "$PROFILE_DIR/packages.x86_64" ]]; then
     fi
 else
     error "packages.x86_64 not found"
+fi
+
+# Check 2b: mkinitcpio configuration
+echo -e "\n2b. Checking mkinitcpio configuration..."
+if [[ -f "$PROFILE_DIR/airootfs/etc/mkinitcpio.conf.d/archiso.conf" ]]; then
+    success "archiso.conf found"
+    if grep -q "archiso archiso_loop_mnt" "$PROFILE_DIR/airootfs/etc/mkinitcpio.conf.d/archiso.conf"; then
+        success "Archiso hooks configured"
+    else
+        error "Archiso hooks missing in mkinitcpio"
+    fi
+else
+    error "mkinitcpio archiso.conf not found (CRITICAL for boot!)"
 fi
 
 # Check 3: Display manager configuration
