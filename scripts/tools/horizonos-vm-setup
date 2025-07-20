@@ -1,0 +1,199 @@
+#!/bin/bash
+# HorizonOS VM Detection and Setup
+# Automatically detects VM environment and configures appropriate guest tools
+
+set -e
+
+# Colors for output
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Detect virtualization
+detect_vm() {
+    if command -v systemd-detect-virt &> /dev/null; then
+        VM_TYPE=$(systemd-detect-virt)
+    else
+        # Fallback detection
+        if [ -f /sys/class/dmi/id/product_name ]; then
+            PRODUCT=$(cat /sys/class/dmi/id/product_name)
+            case "$PRODUCT" in
+                *"VirtualBox"*) VM_TYPE="oracle" ;;
+                *"VMware"*) VM_TYPE="vmware" ;;
+                *"Microsoft Corporation"*) VM_TYPE="microsoft" ;;
+                *) VM_TYPE="none" ;;
+            esac
+        else
+            VM_TYPE="none"
+        fi
+    fi
+    
+    print_info "Detected virtualization: $VM_TYPE"
+}
+
+# Configure VMware tools
+setup_vmware() {
+    print_info "Configuring VMware guest tools..."
+    
+    # Enable VMware services
+    systemctl enable vmtoolsd.service --now 2>/dev/null || true
+    systemctl enable vmware-vmblock-fuse.service --now 2>/dev/null || true
+    
+    # Set up automatic resolution adjustment
+    if [ "$DISPLAY" ]; then
+        vmware-user-suid-wrapper 2>/dev/null || true
+    fi
+    
+    print_success "VMware tools configured"
+}
+
+# Configure VirtualBox tools
+setup_virtualbox() {
+    print_info "Configuring VirtualBox guest tools..."
+    
+    # Enable VirtualBox service
+    systemctl enable vboxservice.service --now 2>/dev/null || true
+    
+    # Load VirtualBox kernel modules
+    modprobe vboxguest 2>/dev/null || true
+    modprobe vboxsf 2>/dev/null || true
+    modprobe vboxvideo 2>/dev/null || true
+    
+    print_success "VirtualBox tools configured"
+}
+
+# Configure QEMU/KVM tools
+setup_qemu() {
+    print_info "Configuring QEMU/KVM guest tools..."
+    
+    # Enable QEMU guest agent
+    systemctl enable qemu-guest-agent.service --now 2>/dev/null || true
+    
+    # Enable SPICE services for better graphics
+    systemctl enable spice-vdagentd.service --now 2>/dev/null || true
+    
+    # Set up clipboard sharing
+    if [ "$DISPLAY" ]; then
+        spice-vdagent 2>/dev/null || true
+    fi
+    
+    print_success "QEMU/KVM tools configured"
+}
+
+# Configure Hyper-V tools
+setup_hyperv() {
+    print_info "Configuring Hyper-V guest tools..."
+    
+    # Enable Hyper-V services
+    systemctl enable hv_fcopy_daemon.service --now 2>/dev/null || true
+    systemctl enable hv_kvp_daemon.service --now 2>/dev/null || true
+    systemctl enable hv_vss_daemon.service --now 2>/dev/null || true
+    
+    # Load Hyper-V modules
+    modprobe hv_vmbus 2>/dev/null || true
+    modprobe hv_storvsc 2>/dev/null || true
+    modprobe hv_netvsc 2>/dev/null || true
+    modprobe hv_utils 2>/dev/null || true
+    
+    print_success "Hyper-V tools configured"
+}
+
+# Configure display for VM
+configure_vm_display() {
+    print_info "Configuring display settings for VM..."
+    
+    # For Hyprland/Wayland
+    if [ -f /home/liveuser/.config/hypr/hyprland.conf ]; then
+        # Add VM-specific monitor configuration
+        mkdir -p /home/liveuser/.config/hypr/conf.d
+        cat > /home/liveuser/.config/hypr/conf.d/vm-display.conf << 'EOF'
+# VM Display Configuration
+monitor=Virtual-1,preferred,auto,1
+monitor=Virtual-2,preferred,auto,1
+monitor=VGA-1,preferred,auto,1
+monitor=,preferred,auto,1
+
+# Disable VRR for VMs
+misc {
+    vrr = 0
+}
+
+# Lighter effects for better VM performance
+decoration {
+    blur {
+        enabled = true
+        size = 3
+        passes = 1
+    }
+}
+EOF
+        chown -R liveuser:liveuser /home/liveuser/.config/hypr/conf.d
+    fi
+    
+    print_success "Display configured for VM"
+}
+
+# Main setup function
+main() {
+    print_info "Starting HorizonOS VM detection and setup..."
+    
+    # Detect VM type
+    detect_vm
+    
+    case "$VM_TYPE" in
+        "vmware")
+            setup_vmware
+            ;;
+        "oracle")
+            setup_virtualbox
+            ;;
+        "qemu"|"kvm")
+            setup_qemu
+            ;;
+        "microsoft")
+            setup_hyperv
+            ;;
+        "none")
+            print_info "No virtualization detected - running on bare metal"
+            exit 0
+            ;;
+        *)
+            print_warning "Unknown virtualization type: $VM_TYPE"
+            # Try to set up common services anyway
+            systemctl enable qemu-guest-agent.service --now 2>/dev/null || true
+            systemctl enable spice-vdagentd.service --now 2>/dev/null || true
+            ;;
+    esac
+    
+    # Configure display for any VM
+    if [ "$VM_TYPE" != "none" ]; then
+        configure_vm_display
+        
+        # Create marker file
+        touch /var/lib/horizonos/vm-configured
+        
+        print_success "VM guest tools setup complete!"
+        print_info "Clipboard sharing and dynamic resolution should now work"
+    fi
+}
+
+# Run main function
+main "$@"

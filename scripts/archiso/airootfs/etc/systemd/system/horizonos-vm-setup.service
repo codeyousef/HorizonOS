@@ -1,0 +1,15 @@
+[Unit]
+Description=HorizonOS VM Guest Tools Setup
+After=multi-user.target
+ConditionPathExists=!/var/lib/horizonos/vm-configured
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/mkdir -p /var/lib/horizonos
+ExecStart=/usr/local/bin/horizonos-vm-setup
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

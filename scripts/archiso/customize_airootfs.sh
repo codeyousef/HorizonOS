@@ -33,6 +33,9 @@ systemctl --user enable pipewire.service
 systemctl --user enable pipewire-pulse.service
 systemctl --user enable wireplumber.service
 
+# Enable VM detection and setup service
+systemctl enable horizonos-vm-setup.service
+
 # Set default target to graphical for GUI
 systemctl set-default graphical.target
 

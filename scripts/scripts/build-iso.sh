@@ -179,6 +179,13 @@ mesa
 libgl
 rust
 
+# VM guest tools for automatic detection and optimization
+hyperv
+open-vm-tools
+qemu-guest-agent
+virtualbox-guest-utils-nox
+spice-vdagent
+
 # Live environment
 archinstall
 arch-install-scripts
@@ -420,6 +427,7 @@ cp "$PROJECT_ROOT/scripts/tools/horizon-container" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/horizonos-autoupdate" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/horizonos-update-notify" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/debug-getty" airootfs/usr/local/bin/
+cp "$PROJECT_ROOT/scripts/tools/horizonos-vm-setup" airootfs/usr/local/bin/
 chmod +x airootfs/usr/local/bin/*
 
 # Build and include graph compositor
