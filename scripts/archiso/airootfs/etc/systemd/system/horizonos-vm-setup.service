@@ -1,15 +1,17 @@
 [Unit]
 Description=HorizonOS VM Guest Tools Setup
-After=graphical.target
+After=network.target
+Before=display-manager.service
 ConditionPathExists=!/var/lib/horizonos/vm-configured
+ConditionVirtualization=yes
 
 [Service]
 Type=oneshot
 ExecStartPre=/bin/mkdir -p /var/lib/horizonos
 ExecStart=/usr/local/bin/horizonos-vm-setup
 RemainAfterExit=yes
-StandardOutput=journal
-StandardError=journal
+StandardOutput=journal+console
+StandardError=journal+console
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target

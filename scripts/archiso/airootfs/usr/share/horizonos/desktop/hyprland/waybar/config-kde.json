@@ -9,8 +9,8 @@
     
     "custom/launcher": {
         "format": " ",
-        "on-click": "wofi --show drun",
-        "on-click-right": "/usr/share/horizonos/desktop/hyprland/scripts/launcher.sh",
+        "on-click": "pkill wofi || wofi --show drun --allow-images --hide-scroll",
+        "on-click-right": "pkill wofi || wofi --show run",
         "tooltip-format": "Application Menu"
     },
     

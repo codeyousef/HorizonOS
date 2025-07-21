@@ -155,6 +155,8 @@ noto-fonts
 noto-fonts-emoji
 ttf-liberation
 ttf-dejavu
+ttf-font-awesome
+otf-font-awesome
 
 # Additional utilities
 cliphist
