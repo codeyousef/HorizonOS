@@ -29,9 +29,9 @@
             "8": "8",
             "9": "9",
             "10": "10",
-            "urgent": "",
-            "focused": "",
-            "default": ""
+            "urgent": "🔥",
+            "focused": "●",
+            "default": "○"
         },
         "persistent-workspaces": {
             "*": 4
@@ -66,7 +66,7 @@
         "format-charging": "{capacity}% ",
         "format-plugged": "{capacity}% ",
         "format-alt": "{time} {icon}",
-        "format-icons": ["", "", "", "", ""]
+        "format-icons": ["🪫", "🔋", "🔋", "🔋", "🔋"]
     },
     
     "network": {
@@ -98,13 +98,13 @@
         "format-source": "{volume}% ",
         "format-source-muted": "",
         "format-icons": {
-            "headphone": "",
-            "hands-free": "",
-            "headset": "",
-            "phone": "",
-            "portable": "",
-            "car": "",
-            "default": ["", "", ""]
+            "headphone": "🎧",
+            "hands-free": "🎙️",
+            "headset": "🎧",
+            "phone": "📱",
+            "portable": "🔊",
+            "car": "🚗",
+            "default": ["🔈", "🔉", "🔊"]
         },
         "on-click": "pavucontrol"
     },
@@ -124,9 +124,10 @@
     "idle_inhibitor": {
         "format": "{icon}",
         "format-icons": {
-            "activated": "",
-            "deactivated": ""
-        }
+            "activated": "🔒",
+            "deactivated": "💤"
+        },
+        "tooltip-format": "Toggle idle inhibitor"
     },
     
     "custom/clipboard": {

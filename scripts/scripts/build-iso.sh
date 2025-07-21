@@ -216,6 +216,10 @@ echo "Copying HorizonOS desktop configurations..."
 mkdir -p airootfs/usr/share/horizonos/desktop
 cp -r "$PROJECT_ROOT/scripts/archiso/airootfs/usr/share/horizonos/desktop/"* airootfs/usr/share/horizonos/desktop/ 2>/dev/null || true
 
+# Ensure all scripts are executable
+echo "Setting script permissions..."
+find airootfs/usr/share/horizonos/desktop/ -name "*.sh" -type f -exec chmod +x {} \; 2>/dev/null || true
+
 # Copy wofi configurations from src directory
 if [ -d "$PROJECT_ROOT/src/desktop/hyprland/wofi" ]; then
     echo "Copying wofi configurations..."
@@ -443,7 +447,14 @@ cp "$PROJECT_ROOT/scripts/tools/horizonos-update-notify" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/debug-getty" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/horizonos-vm-setup" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/wofi-toggle" airootfs/usr/local/bin/
+cp "$PROJECT_ROOT/scripts/tools/powermenu.sh" airootfs/usr/local/bin/
 chmod +x airootfs/usr/local/bin/*
+
+# Copy powermenu.sh to the expected location in the desktop directory structure
+echo "Copying powermenu script to desktop directory..."
+mkdir -p airootfs/usr/share/horizonos/desktop/hyprland/scripts
+cp "$PROJECT_ROOT/scripts/tools/powermenu.sh" airootfs/usr/share/horizonos/desktop/hyprland/scripts/
+chmod +x airootfs/usr/share/horizonos/desktop/hyprland/scripts/powermenu.sh
 
 # Build and include graph compositor
 echo "Building graph desktop compositor..."

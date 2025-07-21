@@ -169,8 +169,25 @@ main() {
     # Log to journal
     logger -t horizonos-vm-setup "Starting VM detection and setup"
     
+    # Create log directory
+    mkdir -p /var/lib/horizonos
+    LOG_FILE="/var/lib/horizonos/vm-setup.log"
+    
+    # Enhanced logging
+    echo "=== HorizonOS VM Setup Log $(date) ===" >> "$LOG_FILE"
+    echo "Environment variables:" >> "$LOG_FILE"
+    env | grep -E "(DISPLAY|WAYLAND|XDG)" >> "$LOG_FILE" || true
+    echo "System info:" >> "$LOG_FILE"
+    uname -a >> "$LOG_FILE"
+    echo "DMI info:" >> "$LOG_FILE"
+    [ -f /sys/class/dmi/id/product_name ] && cat /sys/class/dmi/id/product_name >> "$LOG_FILE" || echo "No DMI info" >> "$LOG_FILE"
+    [ -f /sys/class/dmi/id/sys_vendor ] && cat /sys/class/dmi/id/sys_vendor >> "$LOG_FILE" || echo "No vendor info" >> "$LOG_FILE"
+    echo "Available packages:" >> "$LOG_FILE"
+    pacman -Qq | grep -E "(vmware|virtualbox|qemu|spice)" >> "$LOG_FILE" || echo "No VM packages found" >> "$LOG_FILE"
+    
     # Detect VM type
     detect_vm
+    echo "Detected VM type: $VM_TYPE" >> "$LOG_FILE"
     
     logger -t horizonos-vm-setup "Detected VM type: $VM_TYPE"
     
@@ -203,11 +220,15 @@ main() {
     if [ "$VM_TYPE" != "none" ]; then
         configure_vm_display
         
-        # Create marker file
+        # Create marker file and log final status
         touch /var/lib/horizonos/vm-configured
+        echo "VM setup completed successfully at $(date)" >> "$LOG_FILE"
+        echo "Services status:" >> "$LOG_FILE"
+        systemctl list-units --type=service --state=active | grep -E "(vm|qemu|vbox|spice)" >> "$LOG_FILE" || echo "No VM services active" >> "$LOG_FILE"
         
         print_success "VM guest tools setup complete!"
         print_info "Clipboard sharing and dynamic resolution should now work"
+        print_info "Check log file at: $LOG_FILE"
     fi
 }
 
