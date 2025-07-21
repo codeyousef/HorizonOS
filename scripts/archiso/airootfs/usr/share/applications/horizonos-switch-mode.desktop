@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=Switch Desktop Mode
-Comment=Switch between KDE, Windows 11, and macOS desktop modes
-Exec=kitty -e /usr/share/horizonos/desktop/hyprland/scripts/switch-mode.sh
-Icon=preferences-desktop-theme
-Terminal=false
-Type=Application
-Categories=System;Settings;
-Keywords=desktop;mode;theme;kde;windows;macos;

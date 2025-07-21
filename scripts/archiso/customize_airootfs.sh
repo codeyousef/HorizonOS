@@ -136,7 +136,18 @@ Icon=system-software-install
 Categories=System;
 EOF
 
-# Switch Desktop Mode - already exists in /usr/share/applications from ISO build
+# Switch Desktop Mode
+cat > /usr/share/applications/horizonos-switch-mode.desktop << 'EOF'
+[Desktop Entry]
+Name=Switch Desktop Mode
+Comment=Switch between KDE, Windows 11, and macOS desktop modes
+Exec=kitty -e /usr/share/horizonos/desktop/hyprland/scripts/switch-mode.sh
+Icon=preferences-desktop-theme
+Terminal=false
+Type=Application
+Categories=System;Settings;
+Keywords=desktop;mode;theme;kde;windows;macos;
+EOF
 
 # Try Graph Desktop
 cat > /usr/share/applications/horizonos-graph-desktop.desktop << 'EOF'
