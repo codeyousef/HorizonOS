@@ -220,11 +220,28 @@ cp -r "$PROJECT_ROOT/scripts/archiso/airootfs/usr/share/horizonos/desktop/"* air
 echo "Setting script permissions..."
 find airootfs/usr/share/horizonos/desktop/ -name "*.sh" -type f -exec chmod +x {} \; 2>/dev/null || true
 
-# Copy wofi configurations from src directory
+# Copy wofi configurations from src directory with proper structure
 if [ -d "$PROJECT_ROOT/src/desktop/hyprland/wofi" ]; then
     echo "Copying wofi configurations..."
-    mkdir -p airootfs/usr/share/horizonos/desktop/hyprland/wofi
-    cp -r "$PROJECT_ROOT/src/desktop/hyprland/wofi/"* airootfs/usr/share/horizonos/desktop/hyprland/wofi/ 2>/dev/null || true
+    mkdir -p airootfs/usr/share/horizonos/desktop/hyprland/wofi/kde
+    mkdir -p airootfs/usr/share/horizonos/desktop/hyprland/wofi/windows11
+    mkdir -p airootfs/usr/share/horizonos/desktop/hyprland/wofi/macos
+    
+    # Copy KDE style (default)
+    cp "$PROJECT_ROOT/src/desktop/hyprland/wofi/config" airootfs/usr/share/horizonos/desktop/hyprland/wofi/kde/
+    cp "$PROJECT_ROOT/src/desktop/hyprland/wofi/style.css" airootfs/usr/share/horizonos/desktop/hyprland/wofi/kde/
+    
+    # Copy Windows 11 style
+    if [ -d "$PROJECT_ROOT/src/desktop/hyprland/wofi/windows11" ]; then
+        cp -r "$PROJECT_ROOT/src/desktop/hyprland/wofi/windows11/"* airootfs/usr/share/horizonos/desktop/hyprland/wofi/windows11/
+    fi
+    
+    # Copy macOS style
+    if [ -d "$PROJECT_ROOT/src/desktop/hyprland/wofi/macos" ]; then
+        cp -r "$PROJECT_ROOT/src/desktop/hyprland/wofi/macos/"* airootfs/usr/share/horizonos/desktop/hyprland/wofi/macos/
+    fi
+    
+    echo "Wofi configurations copied with proper directory structure"
 fi
 
 # Copy customize_airootfs.sh (CRITICAL - as per guide)

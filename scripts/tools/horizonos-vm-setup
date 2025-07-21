@@ -52,42 +52,58 @@ detect_vm() {
 # Configure VMware tools
 setup_vmware() {
     print_info "Configuring VMware guest tools..."
+    echo "Setting up VMware tools at $(date)" >> "$LOG_FILE"
     
     # Check if open-vm-tools is installed
     if ! pacman -Qq open-vm-tools &>/dev/null; then
-        print_warning "open-vm-tools not installed, installing..."
-        pacman -S --noconfirm open-vm-tools || print_error "Failed to install open-vm-tools"
+        print_warning "open-vm-tools not installed but should be pre-installed"
+        echo "WARNING: open-vm-tools not found in packages" >> "$LOG_FILE"
+        return 1
     fi
     
     # Enable VMware services
     print_info "Enabling VMware services..."
-    systemctl enable vmtoolsd.service 2>/dev/null || print_warning "vmtoolsd.service not found"
-    systemctl start vmtoolsd.service 2>/dev/null || print_warning "Failed to start vmtoolsd"
+    echo "Enabling VMware services..." >> "$LOG_FILE"
+    systemctl enable vmtoolsd.service 2>/dev/null || { print_warning "vmtoolsd.service not found"; echo "vmtoolsd.service not found" >> "$LOG_FILE"; }
+    systemctl start vmtoolsd.service 2>/dev/null || { print_warning "Failed to start vmtoolsd"; echo "Failed to start vmtoolsd" >> "$LOG_FILE"; }
     
     systemctl enable vmware-vmblock-fuse.service 2>/dev/null || true
     systemctl start vmware-vmblock-fuse.service 2>/dev/null || true
     
     # Set up automatic resolution adjustment
-    if [ "$DISPLAY" ]; then
+    if [ "$DISPLAY" ] || [ "$WAYLAND_DISPLAY" ]; then
         print_info "Setting up display auto-resize..."
-        vmware-user-suid-wrapper 2>/dev/null || true
+        echo "Setting up VMware display tools..." >> "$LOG_FILE"
+        vmware-user-suid-wrapper 2>/dev/null || echo "vmware-user-suid-wrapper failed" >> "$LOG_FILE"
     fi
     
+    echo "VMware tools setup completed" >> "$LOG_FILE"
     print_success "VMware tools configured"
 }
 
 # Configure VirtualBox tools
 setup_virtualbox() {
     print_info "Configuring VirtualBox guest tools..."
+    echo "Setting up VirtualBox tools at $(date)" >> "$LOG_FILE"
+    
+    # Check if guest utils are installed
+    if ! pacman -Qq virtualbox-guest-utils-nox &>/dev/null; then
+        print_warning "virtualbox-guest-utils-nox not installed but should be pre-installed"
+        echo "WARNING: virtualbox-guest-utils-nox not found in packages" >> "$LOG_FILE"
+        return 1
+    fi
     
     # Enable VirtualBox service
-    systemctl enable vboxservice.service --now 2>/dev/null || true
+    echo "Enabling VirtualBox services..." >> "$LOG_FILE"
+    systemctl enable vboxservice.service --now 2>/dev/null || { echo "vboxservice.service failed" >> "$LOG_FILE"; }
     
     # Load VirtualBox kernel modules
-    modprobe vboxguest 2>/dev/null || true
-    modprobe vboxsf 2>/dev/null || true
-    modprobe vboxvideo 2>/dev/null || true
+    echo "Loading VirtualBox kernel modules..." >> "$LOG_FILE"
+    modprobe vboxguest 2>/dev/null || echo "vboxguest module failed to load" >> "$LOG_FILE"
+    modprobe vboxsf 2>/dev/null || echo "vboxsf module failed to load" >> "$LOG_FILE"
+    modprobe vboxvideo 2>/dev/null || echo "vboxvideo module failed to load" >> "$LOG_FILE"
     
+    echo "VirtualBox tools setup completed" >> "$LOG_FILE"
     print_success "VirtualBox tools configured"
 }
 

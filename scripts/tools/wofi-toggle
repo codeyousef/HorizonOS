@@ -5,17 +5,23 @@ if pgrep -x wofi >/dev/null; then
     pkill wofi
 else
     # Use HorizonOS wofi config if available
-    CONFIG_DIR="/usr/share/horizonos/desktop/hyprland/wofi"
-    if [ -d "$CONFIG_DIR" ]; then
+    CONFIG_DIR="/usr/share/horizonos/desktop/hyprland/wofi/kde"
+    if [ -f "$CONFIG_DIR/config" ]; then
         wofi --show drun \
              --conf="$CONFIG_DIR/config" \
              --style="$CONFIG_DIR/style.css" \
              --allow-images \
              --hide-scroll \
-             --no-actions \
              --insensitive
     else
-        # Fallback to default
-        wofi --show drun --allow-images --hide-scroll --insensitive
+        # Fallback to default with better settings for finding desktop entries
+        wofi --show drun \
+             --allow-images \
+             --hide-scroll \
+             --insensitive \
+             --prompt="Applications" \
+             --width=600 \
+             --height=400 \
+             --location=center
     fi
 fi

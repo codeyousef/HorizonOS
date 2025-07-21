@@ -63,6 +63,13 @@ PS1='[\u@horizonos \W]\$ '
 alias ll='ls -la'
 alias horizonos-install='/usr/local/bin/horizonos-install'
 
+# Ensure XDG directories are set for proper desktop entry discovery
+export XDG_DATA_DIRS="/usr/local/share:/usr/share:$HOME/.local/share"
+export XDG_CONFIG_DIRS="/etc/xdg"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+
 echo "Welcome to HorizonOS Live Environment"
 echo "To install HorizonOS, run: horizonos-install"
 echo ""
@@ -252,6 +259,23 @@ gtk_dark=true
 EOF
 
 echo "DEBUG: Wofi configuration created"
+
+# Set up proper XDG environment for desktop entry discovery
+cat > /home/liveuser/.profile << 'EOF'
+# XDG Base Directory Specification
+export XDG_DATA_DIRS="/usr/local/share:/usr/share:$HOME/.local/share"
+export XDG_CONFIG_DIRS="/etc/xdg"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+EOF
+
+# Also add to system-wide environment
+cat > /etc/environment << 'EOF'
+XDG_DATA_DIRS="/usr/local/share:/usr/share"
+XDG_CONFIG_DIRS="/etc/xdg"
+PATH="/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/lib/jvm/default/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl"
+EOF
 
 # Fix permissions
 chown -R liveuser:liveuser /home/liveuser

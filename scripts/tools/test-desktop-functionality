@@ -1,0 +1,187 @@
+#!/bin/bash
+# HorizonOS Desktop Functionality Test
+# Tests all the issues mentioned by the user
+
+set -e
+
+# Colors for output
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+ERRORS=0
+WARNINGS=0
+
+check_pass() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+check_fail() {
+    echo -e "${RED}✗${NC} $1"
+    ((ERRORS++))
+}
+
+check_warn() {
+    echo -e "${YELLOW}⚠${NC} $1" 
+    ((WARNINGS++))
+}
+
+echo -e "${BLUE}=== HorizonOS Desktop Functionality Test ===${NC}"
+echo "Testing fixes for all reported issues..."
+echo ""
+
+# Detect if we're in development environment
+DEV_MODE=false
+if [ -f "$(dirname "$0")/wofi-toggle" ]; then
+    DEV_MODE=true
+    echo -e "${YELLOW}Running in development mode${NC}"
+    SCRIPT_DIR="$(dirname "$0")"
+    AIROOTFS_DIR="$(dirname "$0")/../archiso/airootfs"
+else
+    echo "Running in live environment mode"
+    SCRIPT_DIR="/usr/local/bin"
+    AIROOTFS_DIR=""
+fi
+echo ""
+
+# Test 1: Application launcher button functionality
+echo -e "${BLUE}1. Testing application launcher button${NC}"
+WOFI_TOGGLE_PATH="$SCRIPT_DIR/wofi-toggle"
+if $DEV_MODE; then
+    WOFI_TOGGLE_PATH="$SCRIPT_DIR/wofi-toggle"
+else
+    WOFI_TOGGLE_PATH="/usr/local/bin/wofi-toggle"
+fi
+
+if [ -x "$WOFI_TOGGLE_PATH" ]; then
+    check_pass "wofi-toggle script exists and is executable"
+    
+    # Check if wofi config exists
+    WOFI_CONFIG_PATH="/usr/share/horizonos/desktop/hyprland/wofi/kde/config"
+    if $DEV_MODE; then
+        WOFI_CONFIG_PATH="$AIROOTFS_DIR/usr/share/horizonos/desktop/hyprland/wofi/kde/config"
+    fi
+    
+    if [ -f "$WOFI_CONFIG_PATH" ]; then
+        check_pass "Wofi KDE configuration exists"
+    else
+        check_fail "Wofi KDE configuration missing"
+    fi
+    
+    WOFI_STYLE_PATH="/usr/share/horizonos/desktop/hyprland/wofi/kde/style.css"
+    if $DEV_MODE; then
+        WOFI_STYLE_PATH="$AIROOTFS_DIR/usr/share/horizonos/desktop/hyprland/wofi/kde/style.css"
+    fi
+    
+    if [ -f "$WOFI_STYLE_PATH" ]; then
+        check_pass "Wofi KDE style exists"
+    else
+        check_fail "Wofi KDE style missing"
+    fi
+else
+    check_fail "wofi-toggle script missing or not executable"
+fi
+
+# Test 2: Power button functionality  
+echo ""
+echo -e "${BLUE}2. Testing power button${NC}"
+if [ -x "/usr/share/horizonos/desktop/hyprland/scripts/powermenu.sh" ]; then
+    check_pass "Power menu script exists and is executable"
+else
+    check_fail "Power menu script missing or not executable"
+fi
+
+# Test 3: Desktop environment switching
+echo ""
+echo -e "${BLUE}3. Testing desktop environment switching${NC}"
+if [ -f "/usr/share/applications/horizonos-switch-mode.desktop" ]; then
+    check_pass "Switch mode desktop entry exists"
+else
+    check_fail "Switch mode desktop entry missing"
+fi
+
+if [ -x "/usr/share/horizonos/desktop/hyprland/scripts/switch-mode.sh" ]; then
+    check_pass "Switch mode script exists and is executable"
+else
+    check_fail "Switch mode script missing or not executable"
+fi
+
+# Test 4: Install HorizonOS desktop icon
+echo ""
+echo -e "${BLUE}4. Testing install HorizonOS desktop icon${NC}"
+if [ -f "/usr/share/applications/horizonos-install.desktop" ]; then
+    check_pass "Install HorizonOS desktop entry exists"
+else
+    check_fail "Install HorizonOS desktop entry missing"
+fi
+
+if [ -f "/home/liveuser/Desktop/horizonos-install.desktop" ]; then
+    check_pass "Install HorizonOS desktop shortcut exists"
+else
+    check_fail "Install HorizonOS desktop shortcut missing"
+fi
+
+# Test 5: VM tools functionality
+echo ""
+echo -e "${BLUE}5. Testing VM tools${NC}"
+if [ -x "/usr/local/bin/horizonos-vm-setup" ]; then
+    check_pass "VM setup script exists and is executable"
+else
+    check_fail "VM setup script missing or not executable"
+fi
+
+if [ -f "/etc/systemd/system/horizonos-vm-setup.service" ]; then
+    check_pass "VM setup service exists"
+else
+    check_fail "VM setup service missing"
+fi
+
+# Test 6: Waybar configuration
+echo ""
+echo -e "${BLUE}6. Testing waybar configuration${NC}"
+if [ -f "/usr/share/horizonos/desktop/hyprland/waybar/config-kde.json" ]; then
+    check_pass "Waybar KDE configuration exists"
+    
+    # Check for common waybar button configurations
+    if grep -q "custom/launcher" "/usr/share/horizonos/desktop/hyprland/waybar/config-kde.json"; then
+        check_pass "Launcher button configured in waybar"
+    else
+        check_fail "Launcher button not configured in waybar"
+    fi
+    
+    if grep -q "custom/power" "/usr/share/horizonos/desktop/hyprland/waybar/config-kde.json"; then
+        check_pass "Power button configured in waybar"
+    else
+        check_fail "Power button not configured in waybar"
+    fi
+else
+    check_fail "Waybar KDE configuration missing"
+fi
+
+# Test 7: XDG environment setup
+echo ""
+echo -e "${BLUE}7. Testing XDG environment setup${NC}"
+if [ -f "/home/liveuser/.profile" ]; then
+    if grep -q "XDG_DATA_DIRS" "/home/liveuser/.profile"; then
+        check_pass "XDG environment variables configured"
+    else
+        check_warn "XDG environment variables not found in profile"
+    fi
+else
+    check_warn "User profile not created"
+fi
+
+# Summary
+echo ""
+echo -e "${BLUE}=== Test Summary ===${NC}"
+if [ $ERRORS -eq 0 ]; then
+    echo -e "${GREEN}All tests passed!${NC} $WARNINGS warnings."
+    echo "Desktop functionality should work correctly."
+else
+    echo -e "${RED}$ERRORS test(s) failed.${NC} $WARNINGS warnings."
+    echo "Some desktop functionality may not work as expected."
+fi
+
+exit $ERRORS
