@@ -160,6 +160,8 @@ otf-font-awesome
 
 # Additional utilities
 cliphist
+desktop-file-utils
+xdg-utils
 
 # Network utilities
 network-manager-applet
@@ -213,6 +215,13 @@ cp "$PROJECT_ROOT/scripts/archiso/airootfs/etc/systemd/system/horizonos-vm-setup
 echo "Copying HorizonOS desktop configurations..."
 mkdir -p airootfs/usr/share/horizonos/desktop
 cp -r "$PROJECT_ROOT/scripts/archiso/airootfs/usr/share/horizonos/desktop/"* airootfs/usr/share/horizonos/desktop/ 2>/dev/null || true
+
+# Copy wofi configurations from src directory
+if [ -d "$PROJECT_ROOT/src/desktop/hyprland/wofi" ]; then
+    echo "Copying wofi configurations..."
+    mkdir -p airootfs/usr/share/horizonos/desktop/hyprland/wofi
+    cp -r "$PROJECT_ROOT/src/desktop/hyprland/wofi/"* airootfs/usr/share/horizonos/desktop/hyprland/wofi/ 2>/dev/null || true
+fi
 
 # Copy customize_airootfs.sh (CRITICAL - as per guide)
 cp "$PROJECT_ROOT/scripts/archiso/customize_airootfs.sh" airootfs/root/
@@ -433,6 +442,7 @@ cp "$PROJECT_ROOT/scripts/tools/horizonos-autoupdate" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/horizonos-update-notify" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/debug-getty" airootfs/usr/local/bin/
 cp "$PROJECT_ROOT/scripts/tools/horizonos-vm-setup" airootfs/usr/local/bin/
+cp "$PROJECT_ROOT/scripts/tools/wofi-toggle" airootfs/usr/local/bin/
 chmod +x airootfs/usr/local/bin/*
 
 # Build and include graph compositor

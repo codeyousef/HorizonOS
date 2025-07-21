@@ -122,28 +122,24 @@ ln -sf /usr/share/horizonos/desktop/hyprland/waybar/style-kde.css /home/liveuser
 mkdir -p /home/liveuser/.config/horizonos
 echo "kde" > /home/liveuser/.config/horizonos/current-mode
 
-# Create desktop shortcuts for easy access
+# Create desktop shortcuts - both on Desktop and in applications menu
 mkdir -p /home/liveuser/Desktop
-cat > /home/liveuser/Desktop/Install\ HorizonOS.desktop << 'EOF'
+mkdir -p /usr/share/applications
+
+# Install HorizonOS
+cat > /usr/share/applications/horizonos-install.desktop << 'EOF'
 [Desktop Entry]
 Type=Application
 Name=Install HorizonOS
 Exec=kitty -e horizonos-install
-Icon=applications-system
+Icon=system-software-install
 Categories=System;
 EOF
 
-cat > /home/liveuser/Desktop/Switch\ Desktop\ Mode.desktop << 'EOF'
-[Desktop Entry]
-Type=Application
-Name=Switch Desktop Mode
-Comment=Switch between KDE, Windows 11, and macOS desktop modes
-Exec=kitty -e /usr/share/horizonos/desktop/hyprland/scripts/switch-mode.sh
-Icon=preferences-desktop-theme
-Categories=System;Settings;
-EOF
+# Switch Desktop Mode - already exists in /usr/share/applications from ISO build
 
-cat > /home/liveuser/Desktop/Try\ Graph\ Desktop.desktop << 'EOF'
+# Try Graph Desktop
+cat > /usr/share/applications/horizonos-graph-desktop.desktop << 'EOF'
 [Desktop Entry]
 Type=Application
 Name=Try Graph Desktop
@@ -153,7 +149,14 @@ Icon=applications-graphics
 Categories=System;
 EOF
 
+# Copy to Desktop for easy access
+cp /usr/share/applications/horizonos-install.desktop /home/liveuser/Desktop/
+cp /usr/share/applications/horizonos-switch-mode.desktop /home/liveuser/Desktop/
+cp /usr/share/applications/horizonos-graph-desktop.desktop /home/liveuser/Desktop/
 chmod +x /home/liveuser/Desktop/*.desktop
+
+# Update desktop database
+update-desktop-database /usr/share/applications/
 
 # Fix permissions
 chown -R liveuser:liveuser /home/liveuser

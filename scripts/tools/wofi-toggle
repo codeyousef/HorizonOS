@@ -1,0 +1,21 @@
+#!/bin/bash
+# Wofi toggle wrapper - kills if running, launches if not
+
+if pgrep -x wofi >/dev/null; then
+    pkill wofi
+else
+    # Use HorizonOS wofi config if available
+    CONFIG_DIR="/usr/share/horizonos/desktop/hyprland/wofi"
+    if [ -d "$CONFIG_DIR" ]; then
+        wofi --show drun \
+             --conf="$CONFIG_DIR/config" \
+             --style="$CONFIG_DIR/style.css" \
+             --allow-images \
+             --hide-scroll \
+             --no-actions \
+             --insensitive
+    else
+        # Fallback to default
+        wofi --show drun --allow-images --hide-scroll --insensitive
+    fi
+fi

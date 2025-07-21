@@ -8,8 +8,8 @@
     "modules-right": ["tray", "custom/clipboard", "network", "bluetooth", "pulseaudio", "battery", "clock", "custom/power"],
     
     "custom/launcher": {
-        "format": " ",
-        "on-click": "pkill wofi || wofi --show drun --allow-images --hide-scroll",
+        "format": "Apps",
+        "on-click": "/usr/local/bin/wofi-toggle",
         "on-click-right": "pkill wofi || wofi --show run",
         "tooltip-format": "Application Menu"
     },
@@ -130,13 +130,13 @@
     },
     
     "custom/clipboard": {
-        "format": "",
+        "format": "📋",
         "on-click": "cliphist list | wofi --dmenu | cliphist decode | wl-copy",
         "tooltip-format": "Clipboard History"
     },
     
     "custom/power": {
-        "format": "",
+        "format": "⏻",
         "on-click": "/usr/share/horizonos/desktop/hyprland/scripts/powermenu.sh",
         "tooltip-format": "Power Menu"
     }

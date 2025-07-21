@@ -53,12 +53,23 @@ detect_vm() {
 setup_vmware() {
     print_info "Configuring VMware guest tools..."
     
+    # Check if open-vm-tools is installed
+    if ! pacman -Qq open-vm-tools &>/dev/null; then
+        print_warning "open-vm-tools not installed, installing..."
+        pacman -S --noconfirm open-vm-tools || print_error "Failed to install open-vm-tools"
+    fi
+    
     # Enable VMware services
-    systemctl enable vmtoolsd.service --now 2>/dev/null || true
-    systemctl enable vmware-vmblock-fuse.service --now 2>/dev/null || true
+    print_info "Enabling VMware services..."
+    systemctl enable vmtoolsd.service 2>/dev/null || print_warning "vmtoolsd.service not found"
+    systemctl start vmtoolsd.service 2>/dev/null || print_warning "Failed to start vmtoolsd"
+    
+    systemctl enable vmware-vmblock-fuse.service 2>/dev/null || true
+    systemctl start vmware-vmblock-fuse.service 2>/dev/null || true
     
     # Set up automatic resolution adjustment
     if [ "$DISPLAY" ]; then
+        print_info "Setting up display auto-resize..."
         vmware-user-suid-wrapper 2>/dev/null || true
     fi
     
@@ -155,8 +166,13 @@ EOF
 main() {
     print_info "Starting HorizonOS VM detection and setup..."
     
+    # Log to journal
+    logger -t horizonos-vm-setup "Starting VM detection and setup"
+    
     # Detect VM type
     detect_vm
+    
+    logger -t horizonos-vm-setup "Detected VM type: $VM_TYPE"
     
     case "$VM_TYPE" in
         "vmware")
