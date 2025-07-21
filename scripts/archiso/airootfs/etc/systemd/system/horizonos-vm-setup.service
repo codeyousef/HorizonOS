@@ -1,6 +1,6 @@
 [Unit]
 Description=HorizonOS VM Guest Tools Setup
-After=multi-user.target
+After=graphical.target
 ConditionPathExists=!/var/lib/horizonos/vm-configured
 
 [Service]
@@ -12,4 +12,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=graphical.target
