@@ -67,13 +67,51 @@ EOF
 # Set up HorizonOS desktop configurations
 echo "Setting up HorizonOS desktop modes..."
 
-# Create symlinks to KDE mode as default
+# Create Hyprland config directory
 mkdir -p /home/liveuser/.config/hypr
-ln -sf /usr/share/horizonos/desktop/hyprland/configs/hyprland.conf /home/liveuser/.config/hypr/hyprland.conf
-ln -sf /usr/share/horizonos/desktop/hyprland/configs/appearance.conf /home/liveuser/.config/hypr/appearance.conf
-ln -sf /usr/share/horizonos/desktop/hyprland/configs/binds.conf /home/liveuser/.config/hypr/binds.conf
-ln -sf /usr/share/horizonos/desktop/hyprland/configs/rules.conf /home/liveuser/.config/hypr/rules.conf
-ln -sf /usr/share/horizonos/desktop/hyprland/configs/exec.conf /home/liveuser/.config/hypr/exec.conf
+
+# Copy configs instead of symlinking to avoid permission issues
+cp -r /usr/share/horizonos/desktop/hyprland/configs/* /home/liveuser/.config/hypr/
+
+# Also create a fallback config in /etc/skel for new users
+mkdir -p /etc/skel/.config/hypr
+cp -r /usr/share/horizonos/desktop/hyprland/configs/* /etc/skel/.config/hypr/
+
+# Ensure configs are readable
+chmod -R 755 /usr/share/horizonos/desktop/hyprland/
+chmod -R 755 /home/liveuser/.config/hypr/
+
+# Create a minimal backup config as fallback
+cat > /home/liveuser/.config/hypr/hyprland.conf.backup << 'EOF'
+# Minimal HorizonOS Hyprland Config (Fallback)
+monitor=,preferred,auto,auto
+exec-once = waybar
+exec-once = swaybg -c "#1e1e2e"
+
+input {
+    kb_layout = us
+    follow_mouse = 1
+}
+
+general {
+    gaps_in = 5
+    gaps_out = 10
+    border_size = 2
+    col.active_border = rgba(33ccffee) rgba(00ff99ee) 45deg
+    col.inactive_border = rgba(595959aa)
+}
+
+decoration {
+    rounding = 10
+}
+
+$mainMod = SUPER
+
+bind = $mainMod, Return, exec, kitty
+bind = $mainMod, Q, killactive
+bind = $mainMod SHIFT, E, exit
+bind = $mainMod, D, exec, wofi --show drun
+EOF
 
 # Set up Waybar with KDE style as default
 mkdir -p /home/liveuser/.config/waybar
