@@ -212,10 +212,6 @@ echo "Copying HorizonOS desktop configurations..."
 mkdir -p airootfs/usr/share/horizonos/desktop
 cp -r "$PROJECT_ROOT/scripts/archiso/airootfs/usr/share/horizonos/desktop/"* airootfs/usr/share/horizonos/desktop/ 2>/dev/null || true
 
-# Copy wayland session file
-mkdir -p airootfs/usr/share/wayland-sessions
-cp "$PROJECT_ROOT/scripts/archiso/airootfs/usr/share/wayland-sessions/hyprland.desktop" airootfs/usr/share/wayland-sessions/ 2>/dev/null || true
-
 # Copy customize_airootfs.sh (CRITICAL - as per guide)
 cp "$PROJECT_ROOT/scripts/archiso/customize_airootfs.sh" airootfs/root/
 chmod +x airootfs/root/customize_airootfs.sh
