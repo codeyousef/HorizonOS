@@ -88,6 +88,7 @@ test "$(cat /sys/class/block/vda/serial)" = AIOS_DEV_ROOT
 test "$(readlink -f /sys/class/block/vda/device/driver)" = /sys/bus/virtio/drivers/virtio_blk
 test "$(lsblk --nodeps --noheadings --output NAME,SERIAL,TYPE | awk '$2 == \"AIOS_DEV_ROOT\" && $3 == \"disk\" {print $1}' | xargs)" = vda
 test "$(lsblk --list --noheadings --output NAME /dev/vda | wc -l)" = 3
+printf 'AIOS_LAYOUT_INSTALLER_KERNEL=%s\n' "$(uname -r)"
 sgdisk --verify /dev/vda
 test "$(sgdisk --print /dev/vda | sed -n 's/^Disk identifier (GUID): //p' | tr '[:upper:]' '[:lower:]')" = GUEST_UUID
 test "$(lsblk --bytes --noheadings --output SIZE /dev/vda1 | xargs)" = 1073741824
@@ -99,12 +100,15 @@ test "$(lsblk --noheadings --output FSTYPE /dev/vda1 | xargs)" = vfat
 test "$(lsblk --noheadings --output FSTYPE /dev/vda2 | xargs)" = btrfs
 test "$(lsblk --noheadings --output UUID /dev/vda2 | xargs)" = INSTALLATION_UUID
 ! mountpoint -q /mnt
-mount -o ro,nologreplay,subvol=@root /dev/vda2 /mnt
+mount -o ro,rescue=nologreplay,subvol=@root /dev/vda2 /mnt
 trap 'umount -R /mnt' EXIT
+options=$(findmnt --noheadings --output OPTIONS /mnt)
+printf '%s\n' \"$options\" | tr ',' '\n' | grep -Fx -- ro
+printf '%s\n' \"$options\" | tr ',' '\n' | grep -Fx -- rescue=nologreplay
 subvolumes=$(btrfs subvolume list /mnt | awk '{print $NF}')
 for name in @root @home @nix @var; do printf '%s\n' "$subvolumes" | grep -Fx -- "$name"; done
 for name in var nix home; do
-  mount -o ro,nologreplay,subvol=@$name /dev/vda2 /mnt/$name
+  mount -o ro,rescue=nologreplay,subvol=@$name /dev/vda2 /mnt/$name
   test "$(findmnt --noheadings --output UUID /mnt/$name)" = INSTALLATION_UUID
 done
 mount -o ro,umask=0077 /dev/vda1 /mnt/boot
@@ -143,9 +147,9 @@ test "$(cat /sys/class/dmi/id/product_uuid)" = GUEST_UUID
 test "$(lsblk --nodeps --noheadings --output SERIAL /dev/vda | xargs)" = AIOS_DEV_ROOT
 test "$(readlink -f /sys/class/block/vda/device/driver)" = /sys/bus/virtio/drivers/virtio_blk
 test "$(lsblk --noheadings --output UUID /dev/vda2 | xargs)" = INSTALLATION_UUID
-mount -o ro,nologreplay,subvol=@root /dev/vda2 /mnt
+mount -o ro,rescue=nologreplay,subvol=@root /dev/vda2 /mnt
 trap 'umount -R /mnt' EXIT
-mount -o ro,nologreplay,subvol=@nix /dev/vda2 /mnt/nix
+mount -o ro,rescue=nologreplay,subvol=@nix /dev/vda2 /mnt/nix
 chroot /mnt /nix/var/nix/profiles/system/sw/bin/bash -c 'set -eu
 export PATH=/nix/var/nix/profiles/system/sw/bin
 test "$(cat /etc/aios/installation-uuid)" = INSTALLATION_UUID
@@ -155,8 +159,10 @@ test "$(sed -n "s/^ID=//p" /etc/os-release)" = nixos
 test "$(ssh-keygen -lf /mnt/etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}')" = HOST_FINGERPRINT
 test "$(stat -c %a /mnt/etc/ssh/ssh_host_ed25519_key)" = 600
 test "$(stat -c %u /mnt/etc/ssh/ssh_host_ed25519_key)" = 0
-mount -o remount,rw /mnt
-mount -o remount,rw /mnt/nix
+umount -R /mnt
+test "$(lsblk --noheadings --output UUID /dev/vda2 | xargs)" = INSTALLATION_UUID
+mount -o subvol=@root /dev/vda2 /mnt
+mount -o subvol=@nix /dev/vda2 /mnt/nix
 mount -o subvol=@var /dev/vda2 /mnt/var
 mount -o subvol=@home /dev/vda2 /mnt/home
 mount -o umask=0077 /dev/vda1 /mnt/boot
@@ -401,8 +407,8 @@ class QMP:
                     try:
                         chunk = serial.recv(65536)
                     except socket.timeout:
-                        if qualification is not None and payload is not None and time.monotonic() > ready_deadline:
-                            raise failure(ExitCode.TIMEOUT, "CONSOLE_NOT_READY", "Disposable installer did not acknowledge the registered operation; inspect retained evidence before retry")
+                        if payload is not None and time.monotonic() > ready_deadline:
+                            raise failure(ExitCode.TIMEOUT, "CONSOLE_NOT_READY", "Installer did not acknowledge the registered operation; inspect retained evidence before retry")
                         continue
                     if not chunk:
                         raise failure(ExitCode.VERIFICATION_FAILURE, "BOOTSTRAP_CONSOLE_CLOSED", "Bootstrap serial channel closed before completion")
