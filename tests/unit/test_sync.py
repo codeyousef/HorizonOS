@@ -113,6 +113,22 @@ class SourceTests(unittest.TestCase):
                 synchronize(config)
         send.assert_not_called()
 
+    def test_local_provenance_is_private_and_tampering_is_not_reused(self):
+        config = VMConfig.from_data(self.root, EXAMPLE)
+        manifest, digest, _ = collect(self.root)
+        receipt = {"guest_source_path": "/home/dev/aios-releases/" + digest, "snapshot_digest": digest}
+        with patch("aios_dev.sync.guest.enrolled_identity", return_value=({"host_key_fingerprint": "fixture"}, IDENTITY)), patch("aios_dev.sync.transfer", return_value=receipt):
+            status, result = synchronize(config)
+            self.assertEqual(status, 0)
+            path = Path(result["artifact_path"])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(path.read_bytes())["manifest"], manifest)
+            self.assertEqual(result["release_digest"], digest)
+            path.write_text('{"tampered":true}')
+            with self.assertRaises(DevctlError) as caught:
+                synchronize(config)
+        self.assertEqual(caught.exception.code, "LOCAL_SOURCE_RECORD_MISMATCH")
+
     def test_manifest_rejects_unsafe_paths_modes_duplicates_and_provenance(self):
         manifest, _, _ = collect(self.root)
         for name in ("/etc/passwd", "../escape", "a/../escape", "a//b", "./a", "a\\b", "a\nb", ".local/secret", contract.MANIFEST):

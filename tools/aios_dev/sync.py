@@ -11,7 +11,7 @@ import time
 from . import guest
 from .config import invalid
 from .errors import DevctlError, ExitCode
-from .provision import failure, private_directory, write_json_new
+from .provision import failure, private_directory, write_new
 
 # One registered receiver supplied by the host tooling, never a caller command.
 RECEIVER = Path(__file__).resolve().parents[1] / "guest/snapshot.py"
