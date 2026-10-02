@@ -92,6 +92,33 @@ cleanup only removes the directory created by that transfer. Build tooling must
 verify the published source and use the returned `path:<release>#...` reference.
 The source receipt proves publication, not a successful build or OS acceptance.
 
+Build and unit-test commands synchronize source, recheck identity, and launch a
+registered worker with a durable UUID job record under the guest dev home. The
+worker detaches from SSH, keeps exact command/status/source/lock/identity
+evidence, bounds command output and deadlines, and sanitizes exported logs.
+`--detach` returns after submission; `jobs status --job <uuid>` reads the durable
+record. `jobs cancel --job <uuid>` verifies the worker PID/start time and sends a
+signal through its process descriptor. The worker cancels only its own child
+process group. A disconnected or timed-out host wait leaves the job tracked.
+
+`lock` generates real Nix and Cargo locks in a separate writable guest copy;
+`artifacts pull --job <uuid>` copies reports, readable summaries, sanitized logs
+and generated public locks into a fresh ignored `.local/reports` directory.
+Lock adoption into the host checkout requires matching artifact hashes and
+unchanged flake/Cargo source. Ordinary builds require those locks and refuse
+to update them. The host never runs Nix or Cargo.
+
+`build --target packages` selects all five required non-image AIOS packages;
+missing outputs fail rather than silently reducing the target. An explicitly
+selected package such as `--package aios-dev-tools` supports an upstream smoke
+build. `build --target system` selects the aios-dev system output without
+activation. `test --suite unit` runs locked Rust workspace tests in the guest
+Nix development shell and host-tool Python fixtures in the guest. Their results
+do not establish provider or model acceptance. Integration/desktop, benchmark,
+deployment and journal operations remain unsupported until their registered
+providers exist. The fixed 30-second `jobs probe` is labeled as a supervision
+fixture for disconnect/cancellation checks; it is never a CPU benchmark.
+
 For a bootstrap access failure, the host can return to the verified installer and
 run `vm console --bootstrap-audit`: it mounts the installed subvolumes read-only,
 checks installation/role identity, and inspects public key metadata/account status

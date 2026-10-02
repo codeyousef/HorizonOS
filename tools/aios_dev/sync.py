@@ -65,13 +65,11 @@ def receiver_arguments(config):
     return [*guest.ssh_arguments(config)[:-1], command]
 
 
-def transfer(config, request, contents):
-    header = contract.canonical(request)
-    if len(header) > contract.MAX_HEADER:
-        raise invalid("Snapshot request exceeds header limit")
-    payloads = iter([f"{len(header):08d}".encode(), header, *contents])
+def exchange(arguments, payloads, *, response_limit=65536, timeout=120):
+    """Bounded transport shared only by registered host operations."""
+    payloads = iter(payloads)
     pending = memoryview(next(payloads))
-    process = subprocess.Popen(receiver_arguments(config), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output, errors = bytearray(), bytearray()
     try:
         with selectors.DefaultSelector() as selector:
@@ -80,7 +78,7 @@ def transfer(config, request, contents):
             selector.register(process.stdin, selectors.EVENT_WRITE, "input")
             selector.register(process.stdout, selectors.EVENT_READ, output)
             selector.register(process.stderr, selectors.EVENT_READ, errors)
-            deadline = time.monotonic() + 120
+            deadline = time.monotonic() + timeout
             while selector.get_map():
                 if time.monotonic() >= deadline:
                     raise failure(ExitCode.TIMEOUT, "SOURCE_TRANSFER_TIMEOUT", "Guest source transfer timed out")
@@ -104,28 +102,36 @@ def transfer(config, request, contents):
                         chunk = os.read(event.fd, 4096)
                         if chunk:
                             event.data.extend(chunk)
-                            if len(output) + len(errors) > 65536:
+                            if len(output) + len(errors) > response_limit:
                                 raise failure(ExitCode.VERIFICATION_FAILURE, "SOURCE_RESPONSE_LIMIT", "Source receiver exceeded its response limit")
                         else:
                             selector.unregister(event.fileobj)
         status = process.wait(timeout=1)
-        if status:
-            code = ExitCode.TARGET_MISMATCH if b"Host key verification failed" in errors or b"HOST IDENTIFICATION HAS CHANGED" in errors else ExitCode.VERIFICATION_FAILURE
-            raise DevctlError(code, "SOURCE_TRANSFER_FAILED", "Pinned guest source receiver failed verification", details={"upstream_exit": status})
-        try:
-            result = contract.decode(output)
-        except (ValueError, UnicodeError) as error:
-            raise failure(ExitCode.VERIFICATION_FAILURE, "INVALID_SOURCE_RECEIPT", "Invalid source publication receipt") from error
-        fields = {"schema_version", "snapshot_digest", "guest_digest", "guest_source_path", "file_count", "reused", "identity"}
-        if not isinstance(result, dict) or set(result) != fields or type(result["schema_version"]) is not int or result["schema_version"] != 1 or type(result["reused"]) is not bool or type(result["file_count"]) is not int or result["snapshot_digest"] != request["digest"] or result["guest_digest"] != request["digest"] or result["identity"] != request["identity"] or result["file_count"] != len(request["manifest"]["files"]) or result["guest_source_path"] != request["source_root"] + "/" + request["digest"]:
-            raise failure(ExitCode.VERIFICATION_FAILURE, "SOURCE_RECEIPT_MISMATCH", "Guest receipt does not match the requested snapshot and target")
-        return result
+        return status, bytes(output), bytes(errors)
     finally:
         if process.poll() is None:
             process.kill()
             process.wait()
         for pipe in (process.stdin, process.stdout, process.stderr):
             pipe.close()
+
+
+def transfer(config, request, contents):
+    header = contract.canonical(request)
+    if len(header) > contract.MAX_HEADER:
+        raise invalid("Snapshot request exceeds header limit")
+    status, output, errors = exchange(receiver_arguments(config), [f"{len(header):08d}".encode(), header, *contents])
+    if status:
+        code = ExitCode.TARGET_MISMATCH if b"Host key verification failed" in errors or b"HOST IDENTIFICATION HAS CHANGED" in errors else ExitCode.VERIFICATION_FAILURE
+        raise DevctlError(code, "SOURCE_TRANSFER_FAILED", "Pinned guest source receiver failed verification", details={"upstream_exit": status})
+    try:
+        result = contract.decode(output)
+    except (ValueError, UnicodeError) as error:
+        raise failure(ExitCode.VERIFICATION_FAILURE, "INVALID_SOURCE_RECEIPT", "Invalid source publication receipt") from error
+    fields = {"schema_version", "snapshot_digest", "guest_digest", "guest_source_path", "file_count", "reused", "identity"}
+    if not isinstance(result, dict) or set(result) != fields or type(result["schema_version"]) is not int or result["schema_version"] != 1 or type(result["reused"]) is not bool or type(result["file_count"]) is not int or result["snapshot_digest"] != request["digest"] or result["guest_digest"] != request["digest"] or result["identity"] != request["identity"] or result["file_count"] != len(request["manifest"]["files"]) or result["guest_source_path"] != request["source_root"] + "/" + request["digest"]:
+        raise failure(ExitCode.VERIFICATION_FAILURE, "SOURCE_RECEIPT_MISMATCH", "Guest receipt does not match the requested snapshot and target")
+    return result
 
 
 def synchronize(config):
@@ -141,7 +147,7 @@ def synchronize(config):
     # Store local source provenance separately from per-operation guest evidence.
     if not path.exists():
         try:
-            write_json_new(path, {"schema_version": 1, "snapshot_digest": digest, "manifest": manifest})
+            write_new(path, contract.canonical({"schema_version": 1, "snapshot_digest": digest, "manifest": manifest}))
         except FileExistsError:
             pass
     guest.private_file(path)

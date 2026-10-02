@@ -1,7 +1,7 @@
 {
   description = "Horizon OS: deterministic AIOS control plane on NixOS";
 
-  # Initial selection; the verified guest workflow generates and validates the lock.
+  # Exact revision/NAR hash are pinned in the guest-generated flake.lock.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
   outputs = { self, nixpkgs }:

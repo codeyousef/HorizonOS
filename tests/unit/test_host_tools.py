@@ -229,7 +229,7 @@ class CommandTests(unittest.TestCase):
         return status, result
 
     def test_every_pending_command_fails_without_execution(self):
-        commands = ["build --target packages", "build --target system", "test --suite unit", "test --suite integration", "test --suite desktop", "benchmark --profile normal", "deploy --mode test", "deploy --mode commit", "logs --unit aios-sessiond --user tester", "artifacts pull", "vm snapshot --name known-good", "vm restore --name known-good"]
+        commands = ["test --suite integration", "test --suite desktop", "benchmark --profile normal", "deploy --mode test", "deploy --mode commit", "logs --unit aios-sessiond --user tester", "vm snapshot --name known-good", "vm restore --name known-good"]
         with patch("aios_dev.doctor.subprocess.run") as run:
             for command in commands:
                 with self.subTest(command=command):
@@ -254,7 +254,7 @@ class CommandTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("fish"), "fish is optional in the guest package test environment")
     def test_fish_invocation(self):
-        result = subprocess.run([shutil.which("fish"), "--no-config", "-c", "python3 tools/devctl.py build --target packages --json"], cwd=ROOT, capture_output=True, text=True, check=False, timeout=5)
+        result = subprocess.run([shutil.which("fish"), "--no-config", "-c", "python3 tools/devctl.py test --suite desktop --json"], cwd=ROOT, capture_output=True, text=True, check=False, timeout=5)
         self.assertEqual(result.returncode, 9, result.stderr)
         self.assertEqual(json.loads(result.stdout)["error"]["code"], "UNSUPPORTED_CAPABILITY")
 

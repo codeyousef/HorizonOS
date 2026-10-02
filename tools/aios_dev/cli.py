@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import guest, provision, sync, vm
+from . import guest, jobs, provision, sync, vm
 
 
 class Parser(argparse.ArgumentParser):
@@ -48,14 +48,25 @@ def parser() -> Parser:
     enrollment.add_argument("--pin-console-only", action="store_true")
     enrollment.add_argument("--trust-file", metavar="LOCAL_CONSOLE_JSON")
     commands.add_parser("sync")
-    commands.add_parser("build").add_argument("--target", choices=("packages", "system"), required=True)
-    commands.add_parser("test").add_argument("--suite", choices=("unit", "integration", "desktop"), required=True)
+    lock = commands.add_parser("lock", help="generate Nix/Cargo locks inside a verified guest job")
+    lock.add_argument("--detach", action="store_true")
+    build = commands.add_parser("build")
+    build.add_argument("--target", choices=("packages", "system"), required=True)
+    build.add_argument("--package", choices=jobs.PACKAGES)
+    build.add_argument("--detach", action="store_true")
+    test = commands.add_parser("test")
+    test.add_argument("--suite", choices=("unit", "integration", "desktop"), required=True)
+    test.add_argument("--detach", action="store_true")
+    controls = commands.add_parser("jobs").add_subparsers(dest="operation", required=True)
+    for action in ("status", "cancel"):
+        controls.add_parser(action).add_argument("--job", required=True)
+    controls.add_parser("probe", help="registered 30-second supervision fixture").add_argument("--detach", action="store_true")
     commands.add_parser("benchmark").add_argument("--profile", choices=("normal", "low", "high"), required=True)
     commands.add_parser("deploy").add_argument("--mode", choices=("test", "commit"), required=True)
     logs = commands.add_parser("logs")
     logs.add_argument("--unit", required=True)
     logs.add_argument("--user")
-    commands.add_parser("artifacts").add_subparsers(dest="operation", required=True).add_parser("pull")
+    commands.add_parser("artifacts").add_subparsers(dest="operation", required=True).add_parser("pull").add_argument("--job")
     return root
 
 
@@ -75,6 +86,20 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         return guest.enroll(load_config(args.workspace), args.trust_file)
     if args.command == "sync":
         return sync.synchronize(load_config(args.workspace))
+    if args.command == "lock":
+        return jobs.start(load_config(args.workspace), "resolve-lock", detach=args.detach)
+    if args.command == "build":
+        if args.package is not None and args.target != "packages":
+            raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Package selection requires the packages build target")
+        return jobs.start(load_config(args.workspace), "build-" + args.target, package=args.package, detach=args.detach)
+    if args.command == "test" and args.suite == "unit":
+        return jobs.start(load_config(args.workspace), "test-unit", detach=args.detach)
+    if args.command == "jobs":
+        if args.operation == "probe":
+            return jobs.start(load_config(args.workspace), "supervision-probe", detach=args.detach)
+        return jobs.control(load_config(args.workspace), args.operation, args.job)
+    if args.command == "artifacts":
+        return jobs.pull(load_config(args.workspace), args.job)
     if args.command == "vm" and args.operation in ("create", "start", "console", "stop"):
         config = load_config(args.workspace)
         if config.values["provider"] != "qemu":
@@ -132,7 +157,7 @@ def main(argv=None) -> int:
     if use_json:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     else:
-        print(f"{result['command'] or 'devctl'}: target={result['target']} exit={int(code)} release=unknown artifact=none")
+        print(f"{result['command'] or 'devctl'}: target={result['target']} exit={int(code)} release={result['release_digest'] or 'unknown'} artifact={result['artifact_path'] or 'none'}")
         if error:
             print(f"{error['code']}: {error['message']}")
         elif data:

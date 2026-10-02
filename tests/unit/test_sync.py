@@ -80,10 +80,20 @@ class SourceTests(unittest.TestCase):
             collect(self.root)
         path.unlink()
         path.write_text("public")
-        for mode in (0o600, 0o666, 0o4755):
+        for mode in (0o600, 0o666):
             path.chmod(mode)
             with self.assertRaises(DevctlError):
                 collect(self.root)
+        path.chmod(0o755)
+        # Nix's sandbox forbids creating setuid files. Inject its stat flag to
+        # exercise rejection without requiring or weakening sandbox permissions.
+        info = path.stat()
+        class SetuidStat:
+            st_mode = info.st_mode | 0o4000
+            def __getattr__(self, name):
+                return getattr(info, name)
+        with patch.object(contract.os, "fstat", return_value=SetuidStat()), self.assertRaises(ValueError):
+            contract.read_regular(self.root, "new.txt")
 
     def test_parent_symlink_and_private_key_in_public_file_denied(self):
         (self.root / "linked").symlink_to(self.root, target_is_directory=True)
