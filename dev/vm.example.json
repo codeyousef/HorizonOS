@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "aios-dev",
+  "transport": "ssh",
+  "provider": "qemu",
+  "ssh_host": "127.0.0.1",
+  "ssh_port": 2222,
+  "ssh_user": "dev",
+  "identity_file": ".local/ssh/aios_dev_ed25519",
+  "known_hosts_file": ".local/ssh/known_hosts",
+  "guest_source_root": "/home/dev/aios-releases",
+  "guest_build_target": "aios-dev",
+  "vcpus": 8,
+  "memory_mib": 16384,
+  "disk_gib": 96,
+  "disk_image": ".local/vm/root.qcow2",
+  "nvram_file": ".local/vm/OVMF_VARS.fd",
+  "qmp_socket": ".local/vm/qmp.sock",
+  "serial_socket": ".local/vm/serial.sock",
+  "serial_log": ".local/vm/serial.log"
+}

@@ -1,0 +1,5 @@
+# Selection only: pin an exact validated release in the M0 guest/upstream workflow.
+[toolchain]
+channel = "stable"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

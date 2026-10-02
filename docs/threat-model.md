@@ -1,0 +1,32 @@
+# Trust boundaries
+
+Protect against target confusion, accidental destructive intent, hostile retrieved
+content, forged/stale handles, cross-user disclosure, replayed approvals, unsafe
+Nix candidates, parser faults and lost management connectivity during activation.
+
+Direct authenticated user intent and approved rules confer bounded task authority.
+Documents, UI text, logs, events and model output are untrusted evidence. The model
+cannot approve, escalate, load adapters, access credentials or bypass denials through
+a different input modality. Same-UID unsandboxed malware, guest root, a compromised
+kernel and malicious host administrators are outside the advertised protection.
+
+Runtime paths are canonicalized below project-owned `.local/vm/`; keys and pinned
+host trust live below `.local/ssh/`. Relative traversal and symlink escapes are
+rejected before any operation. No host credentials enter source snapshots or guests.
+Enrollment must establish SSH trust through the console/seed path, never an
+unverified key scan. TCP reachability is not guest identity verification.
+
+The model and extractors have no tools/root/network/home/keyring/Nix-daemon access.
+The privileged broker executes reviewed typed adapters and durably records effects.
+Parser workers are isolated and bounded. Private evidence is scoped per UID/session
+and not broadcast. Approval UI, protected fields and terminals cannot be operated
+as a policy workaround.
+
+Boot and deterministic tools remain available without inference. Cold snapshots
+require stopped images and include UEFI state. Recovery must distinguish reversible
+configuration, compensatable file effects, data migrations and irreversible external
+effects. Ambiguous identity and unsupported recovery require human decisions.
+
+Security acceptance uses finite adversarial/failure tests from PRD 21; passing
+those tests is not a claim of perfect safety. Private test data and diagnostics
+remain ignored locally or in Linear; distributed artifacts contain sanitized data.
