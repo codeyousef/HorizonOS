@@ -18,7 +18,7 @@ import uuid
 import snapshot as source
 
 PACKAGES = ("aios-core", "aios-model", "aios-desktop", "aios-cli", "aios-dev-tools")
-KINDS = {"resolve-lock", "build-packages", "build-system", "test-unit", "system-info-smoke", "supervision-probe"}
+KINDS = {"resolve-lock", "build-packages", "build-system", "test-unit", "system-info-smoke", "service-inspection-smoke", "supervision-probe"}
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 LIMIT = 4 * 1024**2
 cancelled = False
@@ -109,6 +109,10 @@ def commands(kind, release, package=None):
         return [["nix", "flake", "lock", reference], ["nix", "develop", *locked, reference, "--command", "cargo", "generate-lockfile"]]
     if kind == "system-info-smoke":
         return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-cli", "--test", "system_info", "--", "--nocapture"]]
+    if kind == "service-inspection-smoke":
+        return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", package_name, "--test", test_name, "--", "--nocapture"]
+                for package_name, test_name in (("aios-cli", "service_inspect"), ("aios-session", "ipc"))] + [
+                    ["python3", str(release / "tools/guest/service_inspection_smoke.py")]]
     if kind == "supervision-probe":
         return [["python3", "-c", "import time; time.sleep(30)"]]
     raise ValueError("unregistered job kind")

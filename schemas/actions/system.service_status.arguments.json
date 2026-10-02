@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.service_status:arguments:v1",
+  "title": "system.service_status arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "service_id"
+  ],
+  "properties": {
+    "service_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  }
+}

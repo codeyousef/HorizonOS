@@ -119,3 +119,5 @@ mod tests {
         assert_eq!(generation(Path::new("system-link")), None);
     }
 }
+
+pub mod services;

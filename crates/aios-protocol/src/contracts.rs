@@ -59,8 +59,12 @@ struct ToolEnvelope {
 #[serde(deny_unknown_fields)]
 struct EmptyArguments {}
 
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceStatusArguments { pub service_id: String }
+
 #[derive(Debug, PartialEq, Eq)]
-pub enum Action { SystemInfo }
+pub enum Action { SystemInfo, SystemServiceStatus(ServiceStatusArguments) }
 
 pub fn parse_tool_call(bytes: &[u8]) -> Result<Action, ErrorCode> {
     if bytes.is_empty() || bytes.len() > MAX_TASK_BYTES { return Err(ErrorCode::ResourceExhausted); }
@@ -70,6 +74,11 @@ pub fn parse_tool_call(bytes: &[u8]) -> Result<Action, ErrorCode> {
         "system.info" => {
             serde_json::from_str::<EmptyArguments>(envelope.arguments.get()).map_err(|_| ErrorCode::InvalidArgument)?;
             Ok(Action::SystemInfo)
+        }
+        "system.service_status" => {
+            let args: ServiceStatusArguments = serde_json::from_str(envelope.arguments.get()).map_err(|_| ErrorCode::InvalidArgument)?;
+            if args.service_id.is_empty() || args.service_id.chars().count() > 128 { return Err(ErrorCode::InvalidArgument); }
+            Ok(Action::SystemServiceStatus(args))
         }
         _ => Err(ErrorCode::UnknownCapability),
     }
@@ -117,5 +126,19 @@ mod tests {
         let output = canonical_json(&value).unwrap();
         assert_eq!(String::from_utf8(output).unwrap(), r#"{"a":{"bytes":18446744073709551615,"duration_ms":20},"z":[true,null,"مرحبا"]}"#);
         assert_eq!(canonical_json(&serde_json::json!({"duration":0.5})), Err(ErrorCode::InvalidArgument));
+    }
+    #[test]
+    fn service_actions_accept_only_one_bounded_handle_field() {
+        assert!(matches!(parse_tool_call(br#"{"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":"issued-handle"}}"#), Ok(Action::SystemServiceStatus(_))));
+        for args in [
+            serde_json::json!({"service_id":""}),
+            serde_json::json!({"service_id":"x".repeat(129)}),
+            serde_json::json!({"service_id":"handle","unit_name":"sshd.service"}),
+            serde_json::json!({"service_id":"handle","approved":true}),
+        ] {
+            let call = serde_json::json!({"kind":"tool_call","action_id":"system.service_status","arguments":args}).to_string();
+            assert_eq!(parse_tool_call(call.as_bytes()), Err(ErrorCode::InvalidArgument));
+        }
+        assert_eq!(parse_tool_call(br#"{"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":"a","service_id":"b"}}"#),Err(ErrorCode::InvalidArgument));
     }
 }

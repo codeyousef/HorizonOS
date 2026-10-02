@@ -21,20 +21,22 @@
         root = ./.;
         fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./crates ];
       };
-      cli = pkgs.rustPlatform.buildRustPackage {
-        pname = "aios-cli";
+      productPackage = pname: package: program: pkgs.rustPlatform.buildRustPackage {
+        inherit pname;
         version = "0.1.0";
         src = productSource;
         cargoLock.lockFile = ./Cargo.lock;
-        cargoBuildFlags = [ "--package" "aios-cli" ];
+        cargoBuildFlags = [ "--package" package ];
         # Real OS integration runs separately in the verified KVM guest.
         doCheck = false;
-        meta.mainProgram = "aiosctl";
+        meta.mainProgram = program;
       };
+      cli = productPackage "aios-cli" "aios-cli" "aiosctl";
+      core = productPackage "aios-core" "aios-session" "aios-sessiond";
     in {
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios/development.nix;
-      packages.${system} = { aios-dev-tools = devTools; aios-cli = cli; default = devTools; };
+      packages.${system} = { aios-dev-tools = devTools; aios-cli = cli; aios-core = core; default = devTools; };
       checks.${system}.host-unit = devTools;
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy ];

@@ -7,6 +7,10 @@ pub const MAX_FRAME_BYTES: usize = 1_048_576;
 pub const MAX_TASK_BYTES: usize = 65_536;
 
 pub fn read_frame(reader: &mut impl Read) -> io::Result<Option<String>> {
+    read_frame_with_limit(reader, MAX_FRAME_BYTES)
+}
+
+pub fn read_frame_with_limit(reader: &mut impl Read, maximum: usize) -> io::Result<Option<String>> {
     let mut header = [0_u8; 4];
     loop {
         match reader.read(&mut header[..1]) {
@@ -18,7 +22,7 @@ pub fn read_frame(reader: &mut impl Read) -> io::Result<Option<String>> {
     }
     reader.read_exact(&mut header[1..])?;
     let length = u32::from_be_bytes(header) as usize;
-    if length == 0 || length > MAX_FRAME_BYTES {
+    if length == 0 || length > maximum.min(MAX_FRAME_BYTES) {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid frame length"));
     }
     let mut payload = vec![0; length];
@@ -55,6 +59,9 @@ mod tests {
     fn rejects_length_before_reading_payload() {
         let mut reader = Cursor::new(u32::MAX.to_be_bytes());
         assert_eq!(read_frame(&mut reader).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(reader.position(), 4);
+        let mut reader = Cursor::new(((MAX_TASK_BYTES + 1) as u32).to_be_bytes());
+        assert_eq!(read_frame_with_limit(&mut reader, MAX_TASK_BYTES).unwrap_err().kind(), io::ErrorKind::InvalidData);
         assert_eq!(reader.position(), 4);
     }
 

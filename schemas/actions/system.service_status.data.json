@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.service_status:data:v1",
+  "title": "system.service_status data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["service_id", "unit_name", "scope", "manager_owner", "manager_version", "boot_id", "load_state", "active_state", "sub_state", "result", "main_pid", "restart_count", "exec_main_code", "exec_main_status", "job"],
+  "properties": {
+    "service_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "unit_name": {"type": "string", "minLength": 9, "maxLength": 255, "pattern": "^[a-zA-Z0-9_.:@][a-zA-Z0-9_.:@-]*\\.service$"},
+    "scope": {"const": "system"},
+    "manager_owner": {"type": "string", "pattern": "^:"},
+    "manager_version": {"type": "string", "minLength": 1, "maxLength": 256},
+    "boot_id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "load_state": {"$ref": "#/$defs/state"},
+    "active_state": {"$ref": "#/$defs/state"},
+    "sub_state": {"$ref": "#/$defs/state"},
+    "result": {"$ref": "#/$defs/state"},
+    "main_pid": {"$ref": "#/$defs/u32"},
+    "restart_count": {"$ref": "#/$defs/u32"},
+    "exec_main_code": {"$ref": "#/$defs/i32"},
+    "exec_main_status": {"$ref": "#/$defs/i32"},
+    "job": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "object", "additionalProperties": false, "required": ["id", "object_path"],
+          "properties": {"id": {"type": "integer", "minimum": 1, "maximum": 4294967295}, "object_path": {"type": "string", "pattern": "^/org/freedesktop/systemd1/job/[0-9]+$"}}}
+      ]
+    }
+  },
+  "$defs": {
+    "state": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_-]+$"},
+    "u32": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "i32": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647}
+  }
+}
