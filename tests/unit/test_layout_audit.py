@@ -66,6 +66,7 @@ class LayoutTests(unittest.TestCase):
     def test_nix_trusted_users_and_sandbox_are_enforced(self):
         good = "trusted-users = root\nsandbox = true\n"
         self.assertTrue(audit.nix_report(good)["sandbox"])
+        self.assertEqual(audit.nix_report(good.replace("root", "root root"))["trusted_users"], ["root"])
         for value in (good.replace("root", "root dev"), good.replace("true", "false"), good + "trusted-users = root\n"):
             with self.assertRaises(audit.Denied):
                 audit.nix_report(value)

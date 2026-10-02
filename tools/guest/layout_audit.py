@@ -103,9 +103,9 @@ def nix_report(contents):
         settings[key] = value
     trusted = settings.get("trusted-users", "").split()
     require(len(trusted) <= 32 and all(re.fullmatch(r"@?[A-Za-z_][A-Za-z0-9_-]{0,31}", user) for user in trusted), "nix-trusted-users-format")
-    require(trusted == ["root"], "nix-root-only-trust", {"trusted_users": trusted})
+    require(set(trusted) == {"root"}, "nix-root-only-trust", {"trusted_users": trusted})
     require(settings.get("sandbox") == "true", "nix-sandbox")
-    return {"trusted_users": ["root"], "sandbox": True}
+    return {"trusted_users": ["root"], "configured_trusted_users": trusted, "sandbox": True}
 
 
 def credential_metadata(path, *, secret=False):
