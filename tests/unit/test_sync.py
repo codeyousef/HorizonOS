@@ -49,13 +49,14 @@ class SourceTests(unittest.TestCase):
         self.assertEqual([f["path"] for f in dirty["files"]], [".gitignore", "new.txt"])
 
     def test_credential_and_artifact_paths_excluded_even_when_tracked(self):
-        for name in (".local/private.txt", ".ssh/id_ed25519", "model.gguf", "build/output", "secrets/token.txt", ".env", "id_rsa", "image.qcow2", "secrets.yaml", "credentials.toml", "api_keys.json", "models/weights.bin"):
+        for name in (".local/private.txt", ".ssh/id_ed25519", "model.gguf", "build/output", "secrets/token.txt", ".env", "id_rsa", "image.qcow2", "secrets.yaml", "credentials.toml", "api_keys.json", "models/weights.bin", "models/weights.txt"):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("PRIVATE FIXTURE")
+        (self.root / "models/profiles.json").write_text('{"public_metadata":true}')
         self.git("add", "-f", ".")
         manifest, _, contents = collect(self.root)
-        self.assertEqual([f["path"] for f in manifest["files"]], [".gitignore", "flake.nix"])
+        self.assertEqual([f["path"] for f in manifest["files"]], [".gitignore", "flake.nix", "models/profiles.json"])
         self.assertNotIn(b"PRIVATE FIXTURE", contents)
 
     def test_filemode_changes_are_dirty_even_when_git_ignores_them(self):
