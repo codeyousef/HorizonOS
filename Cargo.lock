@@ -10,6 +10,7 @@ dependencies = [
  "aios-session",
  "aios-system",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -27,6 +28,7 @@ version = "0.1.0"
 dependencies = [
  "aios-protocol",
  "aios-system",
+ "blocking",
  "nix",
  "serde",
  "serde_json",

@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Exercise the real packaged user unit; never replace an existing service."""
+import json
+import fcntl
+import os
+from pathlib import Path
+import stat
+import subprocess
+import time
+from service_inspection_smoke import products
+
+UNIT = "aios-sessiond.service"
+
+
+def main():
+    paths, binaries = products()
+    runtime = Path(f"/run/user/{os.geteuid()}")
+    info = runtime.lstat()
+    if runtime.resolve() != runtime or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        raise RuntimeError("private user runtime identity mismatch")
+    env = {**os.environ, "XDG_RUNTIME_DIR": str(runtime), "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(runtime / "bus")}
+    qualification = runtime / "aios-qualification"
+    qualification.mkdir(mode=0o700, exist_ok=True)
+    info = qualification.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        raise RuntimeError("unsafe qualification directory")
+    descriptor = os.open(qualification / "public-session.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    lock = os.fdopen(descriptor, "r+")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    def ctl(*arguments, check=True):
+        return subprocess.run(["systemctl", "--user", *arguments], env=env, check=check, stdout=subprocess.PIPE, timeout=20)
+    def show():
+        selected = ["LoadState", "ActiveState", "SubState", "Result", "ExecMainCode", "ExecMainStatus", "MainPID", "FragmentPath", "NoNewPrivileges", "PrivateNetwork", "ProtectHome", "ProtectSystem", "MemoryMax", "TasksMax", "RuntimeDirectoryMode"]
+        arguments = [part for key in selected for part in ("--property", key)]
+        output = ctl("show", UNIT, *arguments).stdout.decode()
+        return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+    if show()["LoadState"] != "not-found":
+        raise RuntimeError("existing session unit must not be replaced")
+    unit_file = binaries["aios-sessiond"].parents[1] / "share/systemd/user" / UNIT
+    runtime_link = runtime / "systemd/user" / UNIT
+    if runtime_link.exists() or runtime_link.is_symlink():
+        raise RuntimeError("existing runtime unit must not be replaced")
+    ctl("link", "--runtime", str(unit_file))
+    def owns_link():
+        return runtime_link.is_symlink() and runtime_link.resolve() == unit_file
+    def owns_fragment(properties):
+        fragment = properties.get("FragmentPath", "")
+        return bool(fragment) and Path(fragment).resolve() == unit_file
+    try:
+        ctl("start", UNIT)
+        properties = show()
+        if not owns_fragment(properties) or properties["ActiveState"] != "active" or int(properties["MainPID"]) <= 1:
+            raise RuntimeError("packaged user service did not become active")
+        for key, value in {"NoNewPrivileges":"yes", "PrivateNetwork":"yes", "ProtectHome":"tmpfs", "ProtectSystem":"strict", "MemoryMax":"268435456", "TasksMax":"64", "RuntimeDirectoryMode":"0700"}.items():
+            if properties[key] != value:
+                raise RuntimeError("effective unit hardening mismatch: " + key)
+        socket = runtime / "aios/session.sock"
+        deadline = time.monotonic() + 5
+        while not socket.exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("packaged private socket missing")
+            time.sleep(0.01)
+        if stat.S_IMODE(socket.stat().st_mode) != 0o600:
+            raise RuntimeError("private socket mode mismatch")
+        def cli(*arguments):
+            return subprocess.run([str(binaries["aiosctl"]), *arguments], env=env, stdout=subprocess.PIPE, timeout=10)
+        status = cli("status", "--json")
+        if status.returncode != 0:
+            raise RuntimeError("packaged status client failed")
+        capabilities = json.loads(status.stdout)
+        if capabilities["transport"] != "session-dbus" or capabilities["ui_enabled"] or capabilities["inference_available"]:
+            raise RuntimeError("session availability scope mismatch")
+        question = cli("ask", "Why is sshd running?", "--json")
+        answer = json.loads(question.stdout)
+        if question.returncode != 1 or answer["error"] != "MODEL_UNAVAILABLE" or answer["mutation_performed"]:
+            raise RuntimeError("unavailable model was not reported truthfully")
+        inspection = cli("inspect", "service", "sshd.service", "--json")
+        observed = json.loads(inspection.stdout)
+        if inspection.returncode != 0 or observed["status"] != "ok" or observed["data"]["boot_id"] != Path("/proc/sys/kernel/random/boot_id").read_text().strip():
+            raise RuntimeError("hardened service inspection failed")
+        ctl("restart", UNIT)
+        after = show()
+        if after["ActiveState"] != "active" or after["MainPID"] == properties["MainPID"]:
+            raise RuntimeError("packaged restart did not establish a new daemon")
+        print("AIOS_USER_SERVICE=" + json.dumps({"outputs":[str(p) for p in paths], "before":properties, "after":after,
+            "capabilities":capabilities,"unavailable_model":answer,"service_observation":observed}), flush=True)
+    except Exception:
+        print("AIOS_USER_SERVICE_FAILURE=" + json.dumps(show()), flush=True)
+        journal = subprocess.run(["journalctl", "--user", "--user-unit=" + UNIT, "--boot", "--lines=20", "--no-pager", "--output=json", "--output-fields=MESSAGE,PRIORITY,_BOOT_ID,_UID"],
+                                 env=env, stdout=subprocess.PIPE, timeout=5)
+        print("AIOS_OWN_UNIT_JOURNAL=" + journal.stdout.decode(errors="replace"), flush=True)
+        raise
+    finally:
+        # Only the exact newly linked package unit belongs to this fixture.
+        if owns_link():
+            properties = show()
+            if owns_fragment(properties):
+                ctl("stop", UNIT)
+                ctl("reset-failed", UNIT, check=False)
+                if show()["MainPID"] != "0":
+                    raise RuntimeError("owned service did not stop; cleanup refused")
+            else:
+                raise RuntimeError("runtime service fragment changed; cleanup refused")
+            runtime_link.unlink()
+            ctl("daemon-reload")
+        else:
+            raise RuntimeError("runtime service ownership changed; cleanup refused")
+
+
+if __name__ == "__main__":
+    main()

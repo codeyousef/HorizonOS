@@ -32,7 +32,12 @@
         meta.mainProgram = program;
       };
       cli = productPackage "aios-cli" "aios-cli" "aiosctl";
-      core = productPackage "aios-core" "aios-session" "aios-sessiond";
+      core = (productPackage "aios-core" "aios-session" "aios-sessiond").overrideAttrs (old: {
+        postInstall = (old.postInstall or "") + ''
+          install -Dm644 ${./nix/packages/aios-sessiond.service} "$out/share/systemd/user/aios-sessiond.service"
+          substituteInPlace "$out/share/systemd/user/aios-sessiond.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-sessiond"
+        '';
+      });
     in {
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios/development.nix;

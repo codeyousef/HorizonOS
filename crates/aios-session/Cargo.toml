@@ -18,3 +18,4 @@ uuid = { version = "1.0", features = ["v4"] }
 time = { version = "0.3", features = ["formatting"] }
 zbus = { version = "5.19", features = ["blocking-api"] }
 sha2 = "0.10"
+blocking = "1.6"

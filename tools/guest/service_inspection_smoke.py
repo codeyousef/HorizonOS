@@ -8,7 +8,7 @@ import tempfile
 import time
 
 
-def main():
+def products():
     release = Path(__file__).resolve().parents[2]
     arguments = ["nix", "build", "--json", "--no-link", "--no-update-lock-file", "--no-write-lock-file",
                  "path:" + str(release) + "#aios-core", "path:" + str(release) + "#aios-cli"]
@@ -27,6 +27,11 @@ def main():
         if len(matches) != 1:
             raise ValueError("missing or ambiguous product binary")
         binaries[program] = matches[0]
+    return paths, binaries
+
+
+def main():
+    paths, binaries = products()
     boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     # Guest /tmp lives inside the project-owned qcow2; short paths are necessary
     # for Unix sockets. The host never runs this script or mounts this directory.

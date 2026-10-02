@@ -23,6 +23,7 @@ pub struct Peer {
     pub uid: u32, pub pid: u32, pub start_ticks: u64, pub boot_id: String,
     pub logind_session: Option<String>, pub remote: bool, pub session_type: Option<String>,
     pub ui_enabled: bool,
+    pub bus_sender: Option<String>, pub bus_id: Option<String>,
 }
 
 fn process(pid: u32, uid: u32) -> Result<(u64, String), ErrorCode> {
@@ -38,9 +39,13 @@ fn process(pid: u32, uid: u32) -> Result<(u64, String), ErrorCode> {
 pub fn authenticate(stream: &UnixStream) -> Result<Peer, ErrorCode> {
     let credentials = getsockopt(stream, PeerCredentials).map_err(|_| ErrorCode::PermissionDenied)?;
     let uid = credentials.uid(); let pid = u32::try_from(credentials.pid()).map_err(|_| ErrorCode::PermissionDenied)?;
+    authenticate_process(uid, pid)
+}
+
+pub(crate) fn authenticate_process(uid: u32, pid: u32) -> Result<Peer, ErrorCode> {
     if uid != geteuid().as_raw() || pid <= 1 { return Err(ErrorCode::PermissionDenied); }
     let (start_ticks, boot_id) = process(pid, uid)?;
-    let mut peer = Peer { uid, pid, start_ticks, boot_id, logind_session: None, remote: false, session_type: None, ui_enabled: false };
+    let mut peer = Peer { uid, pid, start_ticks, boot_id, logind_session: None, remote: false, session_type: None, ui_enabled: false, bus_sender: None, bus_id: None };
     // Failure to associate a process never guesses a desktop. All present APIs
     // are headless and read-only; interactive grants require later enrollment.
     match logind_session(pid, uid) {

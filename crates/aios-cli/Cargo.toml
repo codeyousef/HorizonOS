@@ -13,3 +13,4 @@ aios-protocol = { path = "../aios-protocol" }
 aios-system = { path = "../aios-system" }
 serde_json = "1.0"
 aios-session = { path = "../aios-session" }
+uuid = { version = "1.0", features = ["v4"] }

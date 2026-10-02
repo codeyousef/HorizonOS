@@ -1,5 +1,6 @@
 //! Private, peer-authenticated read-only control and task lifecycle.
 pub mod identity;
+pub mod bus;
 use aios_protocol::{MAX_TASK_BYTES, read_frame_with_limit, write_frame, contracts::{Action, ErrorCode, ProviderError, parse_tool_call, canonical_json}};
 use aios_system::services::{service_result, validate_service_name};
 use identity::Peer;
@@ -89,6 +90,7 @@ pub struct Response {
 
 #[derive(Clone, Serialize)]
 pub struct TaskStatus {
+    pub schema_version: u32, pub operation: String,
     pub request_id: String, pub mode: Mode, pub state: String,
     pub submitted_at: String, pub mutation_performed: bool, pub error: ErrorCode,
 }
@@ -118,7 +120,7 @@ impl State {
     pub fn dispatch(&mut self, peer: &Peer, operation: Operation) -> Result<Value, ErrorCode> {
         self.prune();
         match operation {
-            Operation::GetCapabilities => Ok(json!({"schema_version":1,"actions":["system.info","system.service_status"],
+            Operation::GetCapabilities => Ok(json!({"schema_version":1,"request_id":Uuid::new_v4().to_string(),"operation":"capabilities","actions":["system.info","system.service_status"],
                 "read_only":true,"inference_available":false,"ui_enabled":false,"transport":"private-unix",
                 "task_request_max_bytes":MAX_TASK_BYTES,"session_associated":peer.logind_session.is_some()})),
             Operation::GetSystemInfo => provider(aios_system::observe_system_info()),
@@ -157,7 +159,7 @@ impl State {
                 let id = Uuid::new_v4().to_string();
                 // Never guess an action from text, execute a mutation or fake a
                 // model answer. Lifecycle remains available while model is absent.
-                let status = TaskStatus { request_id: id.clone(), mode: request.mode, state: "failed".into(), submitted_at: now(),
+                let status = TaskStatus { schema_version: 1, operation: "task_status".into(), request_id: id.clone(), mode: request.mode, state: "failed".into(), submitted_at: now(),
                     mutation_performed: false, error: ErrorCode::ModelUnavailable };
                 self.tasks.insert(id.clone(), Task { owner: peer.clone(), expires: Instant::now() + Duration::from_secs(300),
                     nonce: request.client_nonce, digest, status });
@@ -171,16 +173,16 @@ impl State {
                     json!({"sequence":2,"kind":"failed","request_id":task_id,"code":"MODEL_UNAVAILABLE","mutation_performed":false})];
                 let events = all.into_iter().filter(|event| event["sequence"].as_u64().unwrap() > after_sequence).take(limit as usize).collect::<Vec<_>>();
                 let last = events.last().and_then(|e| e["sequence"].as_u64()).unwrap_or(after_sequence);
-                Ok(json!({"events":events,"complete":last>=2,"next_sequence":last}))
+                Ok(json!({"schema_version":1,"request_id":task_id,"operation":"task_events","events":events,"complete":last>=2,"next_sequence":last}))
             },
             Operation::Cancel { task_id } => {
                 self.task(&task_id, peer)?;
-                Ok(json!({"request_id":task_id,"cancelled":false,"already_terminal":true,"mutation_performed":false}))
+                Ok(json!({"schema_version":1,"request_id":task_id,"operation":"cancellation","cancelled":false,"already_terminal":true,"mutation_performed":false}))
             },
             Operation::Forget { task_id } => {
                 self.task(&task_id, peer)?;
                 self.tasks.remove(&task_id);
-                Ok(json!({"request_id":task_id,"deleted":true}))
+                Ok(json!({"schema_version":1,"request_id":task_id,"operation":"deletion","deleted":true}))
             },
         }
     }
@@ -238,7 +240,7 @@ mod tests {
     use super::*;
     fn peer_fixture() -> Peer {
         Peer { uid: 1000, pid: 200, start_ticks: 3, boot_id: "fixture-boot".into(),
-            logind_session: None, remote: true, session_type: None, ui_enabled: false }
+            logind_session: None, remote: true, session_type: None, ui_enabled: false, bus_sender: None, bus_id: None }
     }
     fn submit_fixture(mode: Mode, nonce: &str, text: &str) -> Operation {
         Operation::Submit { request: Submit { mode, text: text.into(), client_nonce: nonce.into(),
