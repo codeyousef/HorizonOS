@@ -20,6 +20,15 @@ WRONG_SERIAL = "AIOS_WRONG_ROOT"
 STORAGE_ROOT = Path("/mnt/Storage")
 
 
+def sanitize(text):
+    text = re.sub(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)", "[REDACTED PRIVATE KEY]", text, flags=re.S)
+    text = re.sub(r"(?im)(authorization\s*[:=]\s*)[^\n]*", r"\1[REDACTED]", text)
+    text = re.sub(r"(?i)((?:password|api[_-]?key|access[_-]?token|secret)\s*[:=]\s*)[^\s,;]+", r"\1[REDACTED]", text)
+    text = re.sub(r"\bsk-[A-Za-z0-9_-]{16,}\b", "[REDACTED TOKEN]", text)
+    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)
+    return "".join(c for c in text if c in "\n\t" or 32 <= ord(c) != 127)
+
+
 def validate_disposable(config, record, case):
     from .guest import private_file
     if case not in CASES:
@@ -88,6 +97,7 @@ after=$(sha256sum /dev/vda | awk '{print $1}')
 test "$before" = "$after"
 printf 'AIOS_QUALIFICATION_ASSERT case=%s installer_exit=%s disk_before=%s disk_after=%s unchanged=true
 ' CASE_NAME "$status" "$before" "$after"
+cd /
 umount /run/aios-seed
 '''
     if case in ("wrong-dmi", "wrong-authorization"):
@@ -127,7 +137,7 @@ def free_port():
         return listener.getsockname()[1]
 
 
-def prepare_case(owner, directory, case, run_id, manifest, digest, contents):
+def prepare_case(owner, directory, case, run_id, manifest, digest, contents, media):
     if case not in CASES or directory != owner.root / ".local/a" / uuid.UUID(run_id).hex[:8] / CASES[case]:
         raise invalid("Invalid disposable case directory")
     for item, data in zip(manifest["files"], contents):
@@ -146,8 +156,9 @@ def prepare_case(owner, directory, case, run_id, manifest, digest, contents):
     provision.private_directory(directory, ".local/vm")
     provision.write_json_new(directory / ".local/vm.json", values)
     # Only immutable, verified installer media are shared; never live disks.
-    media = vm.load_record(owner)["media"]
     cached = directory / ".local/vm" / Path(media["path"]).name
+    if provision.digest_file(Path(media["path"])) != media["sha256"]:
+        raise invalid("Shared official installer cache digest changed")
     os.link(media["path"], cached)
     plan = provision.prepare_plan(config)
     code, result = provision.create(config, plan["guest_uuid"])
@@ -177,6 +188,8 @@ def run_bootstrap_guards(owner, selected=None):
     if any(case not in CASES for case in cases):
         raise invalid("Unknown bootstrap qualification case")
     trust, identity = enrolled_identity(owner)
+    cache = provision.private_directory(owner.root, ".local/installer-cache")
+    media = provision.fetch_media(cache)
     manifest, digest, contents = sync.collect(owner.root)
     run_id = str(uuid.uuid4())
     base = provision.private_directory(owner.root, ".local/a/" + uuid.UUID(run_id).hex[:8])
@@ -187,7 +200,7 @@ def run_bootstrap_guards(owner, selected=None):
         result = {"case": case, "workspace": str(directory), "evidence_kind": "real-KVM-installer-guard-with-disposable-fixture"}
         config = None
         try:
-            code, prepared, config = prepare_case(owner, directory, case, run_id, manifest, digest, contents)
+            code, prepared, config = prepare_case(owner, directory, case, run_id, manifest, digest, contents, media)
             result["prepared"] = prepared
             if code == ExitCode.SUCCESS:
                 record = vm.load_record(config)
@@ -236,6 +249,13 @@ def run_bootstrap_guards(owner, selected=None):
                         code = error.exit_code
             result["exit_status"] = int(code)
         results.append(result)
+        result["console_evidence"] = []
+        for log in sorted(directory.glob(".local/vm/console/qualification-*.log")):
+            with log.open("rb") as handle:
+                handle.seek(max(0, log.stat().st_size - 65536))
+                tail = sanitize(handle.read(65536).decode(errors="replace"))
+            result["console_evidence"].append({"path": str(log), "sha256": provision.digest_file(log), "sanitized_tail": tail, "tail_limit_bytes": 65536})
+            provision.write_new(reports / (case + ".log"), tail.encode())
         if code != ExitCode.SUCCESS:
             break
     report = {"schema_version": 1, "run_id": run_id, "suite": "bootstrap-guards", "observed_at": datetime.now(timezone.utc).isoformat(),

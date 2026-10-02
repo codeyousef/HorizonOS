@@ -3,13 +3,12 @@ import base64
 import contextlib
 import io
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -118,6 +117,13 @@ class AcceptanceTests(unittest.TestCase):
             with self.assertRaises(DevctlError):
                 acceptance.run_bootstrap_guards(owner)
         prepare.assert_not_called()
+
+    def test_exported_logs_redact_credentials_and_terminal_controls(self):
+        raw = "password=fixture-secret\nAuthorization: fixture-token\n" + "-----BEGIN " + "OPENSSH PRIVATE KEY-----\nfixture-key\n-----END " + "OPENSSH PRIVATE KEY-----\n\x1b[31mpublic\x1b[0m\x00"
+        clean = acceptance.sanitize(raw)
+        for value in ("fixture-secret", "fixture-token", "fixture-key", "\x1b", "\x00"):
+            self.assertNotIn(value, clean)
+        self.assertIn("public", clean)
 
 
 if __name__ == "__main__":
