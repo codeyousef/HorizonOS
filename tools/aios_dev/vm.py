@@ -69,34 +69,55 @@ sync
     return encoded_console_script(script, "AIOS_FINISH_EXIT")
 
 
-def audit_console_command(record):
+def audit_console_command(config, record):
+    from .guest import load_trust
+    fingerprint = load_trust(config)["host_key_fingerprint"]
+    if not re.fullmatch(r"SHA256:[A-Za-z0-9/+]{43}", fingerprint):
+        raise invalid("Invalid pinned SSH fingerprint")
     plan = record["plan"]
+    source = Path(__file__).resolve().parents[1] / "guest/layout_audit.py"
+    encoded = base64.b64encode(source.read_bytes()).decode()
     script = """#!/usr/bin/env bash
 set -euo pipefail
-test "$(sed -n 's/^ID=//p' /etc/os-release)" = nixos
+export LC_ALL=C
+test "$EUID" = 0
+test "$(sed -n 's/^ID=//p' /etc/os-release | tr -d '\"')" = nixos
 test "$(systemd-detect-virt --vm)" = kvm
-test "$(cat /sys/class/dmi/id/product_uuid)" = GUEST_UUID
-test "$(lsblk --nodeps --noheadings --output SERIAL /dev/vda | xargs)" = AIOS_DEV_ROOT
+test "$(tr '[:upper:]' '[:lower:]' </sys/class/dmi/id/product_uuid)" = GUEST_UUID
+test "$(cat /sys/class/block/vda/serial)" = AIOS_DEV_ROOT
+test "$(readlink -f /sys/class/block/vda/device/driver)" = /sys/bus/virtio/drivers/virtio_blk
+test "$(lsblk --nodeps --noheadings --output NAME,SERIAL,TYPE | awk '$2 == \"AIOS_DEV_ROOT\" && $3 == \"disk\" {print $1}' | xargs)" = vda
+test "$(lsblk --list --noheadings --output NAME /dev/vda | wc -l)" = 3
+sgdisk --verify /dev/vda
+test "$(sgdisk --print /dev/vda | sed -n 's/^Disk identifier (GUID): //p' | tr '[:upper:]' '[:lower:]')" = GUEST_UUID
+test "$(lsblk --bytes --noheadings --output SIZE /dev/vda1 | xargs)" = 1073741824
+test "$(lsblk --noheadings --output PARTLABEL /dev/vda1 | xargs)" = AIOS_DEV_EFI
+test "$(lsblk --noheadings --output PARTLABEL /dev/vda2 | xargs)" = AIOS_DEV_ROOT
+test "$(lsblk --noheadings --output PARTTYPE /dev/vda1 | xargs)" = c12a7328-f81f-11d2-ba4b-00a0c93ec93b
+test "$(lsblk --noheadings --output PARTTYPE /dev/vda2 | xargs)" = 0fc63daf-8483-4772-8e79-3d69d8477de4
+test "$(lsblk --noheadings --output FSTYPE /dev/vda1 | xargs)" = vfat
+test "$(lsblk --noheadings --output FSTYPE /dev/vda2 | xargs)" = btrfs
 test "$(lsblk --noheadings --output UUID /dev/vda2 | xargs)" = INSTALLATION_UUID
-mount -o ro,subvol=@root /dev/vda2 /mnt
+! mountpoint -q /mnt
+mount -o ro,nologreplay,subvol=@root /dev/vda2 /mnt
 trap 'umount -R /mnt' EXIT
-mount -o ro,subvol=@var /dev/vda2 /mnt/var
-mount -o ro,subvol=@nix /dev/vda2 /mnt/nix
-mount -o ro,subvol=@home /dev/vda2 /mnt/home
+subvolumes=$(btrfs subvolume list /mnt | awk '{print $NF}')
+for name in @root @home @nix @var; do printf '%s\n' "$subvolumes" | grep -Fx -- "$name"; done
+for name in var nix home; do
+  mount -o ro,nologreplay,subvol=@$name /dev/vda2 /mnt/$name
+  test "$(findmnt --noheadings --output UUID /mnt/$name)" = INSTALLATION_UUID
+done
+mount -o ro,umask=0077 /dev/vda1 /mnt/boot
 mount --bind /dev /mnt/dev
-chroot /mnt /nix/var/nix/profiles/system/sw/bin/bash -c 'set -eu
-export PATH=/nix/var/nix/profiles/system/sw/bin
-test "$(cat /etc/aios/installation-uuid)" = INSTALLATION_UUID
-test "$(cat /etc/aios/guest-role)" = development
-passwd -S dev
-getent passwd dev
-ssh-keygen -lf /etc/ssh/authorized_keys.d/dev
-namei -l /etc/ssh/authorized_keys.d/dev
-sshd -T | grep -E "^(usepam|authorizedkeysfile|pubkeyauthentication|allowusers) "
-ls -ld /home /home/dev /etc/ssh/authorized_keys.d
-'
+mount -o remount,bind,ro /mnt/dev
+test "$(cat /mnt/etc/aios/installation-uuid)" = INSTALLATION_UUID
+test "$(cat /mnt/etc/aios/guest-role)" = development
+test "$(cat /mnt/etc/aios/expected-dmi-uuid)" = GUEST_UUID
+test "$(ssh-keygen -lf /mnt/etc/ssh/ssh_host_ed25519_key.pub -E sha256 | awk '{print $2}')" = HOST_FINGERPRINT
+printf 'AIOS_LAYOUT_STORAGE GPT=verified EFI_BYTES=1073741824 ROOT_FS=btrfs UUID=%s DMI=%s RO=true NOLOGREPLAY=true\n' INSTALLATION_UUID GUEST_UUID
+chroot /mnt /nix/var/nix/profiles/system/sw/bin/python3 -c "$(printf %s AUDIT_SOURCE | base64 -d)" GUEST_UUID INSTALLATION_UUID HOST_FINGERPRINT
 journalctl --directory=/mnt/var/log/journal -u sshd.service --no-pager -n 30 || true
-""".replace("GUEST_UUID", plan["guest_uuid"]).replace("INSTALLATION_UUID", plan["installation_uuid"])
+""".replace("GUEST_UUID", plan["guest_uuid"]).replace("INSTALLATION_UUID", plan["installation_uuid"]).replace("HOST_FINGERPRINT", fingerprint).replace("AUDIT_SOURCE", encoded)
     return encoded_console_script(script, "AIOS_AUDIT_EXIT")
 
 
@@ -122,9 +143,9 @@ test "$(cat /sys/class/dmi/id/product_uuid)" = GUEST_UUID
 test "$(lsblk --nodeps --noheadings --output SERIAL /dev/vda | xargs)" = AIOS_DEV_ROOT
 test "$(readlink -f /sys/class/block/vda/device/driver)" = /sys/bus/virtio/drivers/virtio_blk
 test "$(lsblk --noheadings --output UUID /dev/vda2 | xargs)" = INSTALLATION_UUID
-mount -o ro,subvol=@root /dev/vda2 /mnt
+mount -o ro,nologreplay,subvol=@root /dev/vda2 /mnt
 trap 'umount -R /mnt' EXIT
-mount -o ro,subvol=@nix /dev/vda2 /mnt/nix
+mount -o ro,nologreplay,subvol=@nix /dev/vda2 /mnt/nix
 chroot /mnt /nix/var/nix/profiles/system/sw/bin/bash -c 'set -eu
 export PATH=/nix/var/nix/profiles/system/sw/bin
 test "$(cat /etc/aios/installation-uuid)" = INSTALLATION_UUID
@@ -294,7 +315,7 @@ class QMP:
         return json.loads(line)
 
     def command(self, name):
-        if name not in ("qmp_capabilities", "query-uuid", "query-block", "query-status", "quit"):
+        if name not in ("qmp_capabilities", "query-uuid", "query-block", "query-status", "system_powerdown", "quit"):
             raise invalid("Unregistered QMP lifecycle operation")
         return self._request(name)
 
@@ -344,7 +365,7 @@ class QMP:
         if audit:
             from .guest import load_trust
             load_trust(config)
-            command = audit_console_command(record)
+            command = audit_console_command(config, record)
         if finish:
             from .guest import load_trust
             load_trust(config)
@@ -536,7 +557,7 @@ def follow_console(config, seconds):
     return ExitCode.SUCCESS, {"artifact_path": str(path), "guest_identity_verified": False}
 
 
-def stop(config):
+def stop(config, *, graceful=False):
     # Host power control is tied to the exact QMP process/UUID/disk, and works
     # without SSH. It never executes a guest command or sends a process signal.
     record = load_record(config)
@@ -545,12 +566,12 @@ def stop(config):
     client = QMP(config, process, record["plan"]["guest_uuid"])
     try:
         verify_block(client, config)
-        client.command("quit")
+        client.command("system_powerdown" if graceful else "quit")
     finally:
         client.close()
-    for _ in range(30):
+    for _ in range(600 if graceful else 30):
         try:
-            process_identity(process["pid"])
+            verify_process(process)
         except DevctlError:
             # Only disappearance of this exact PID allows stale-artifact cleanup.
             if not (Path("/proc") / str(process["pid"])).exists():
@@ -558,7 +579,7 @@ def stop(config):
                     if path.is_symlink():
                         raise invalid("Control artifacts must not become symlinks")
                     path.unlink(missing_ok=True)
-                return ExitCode.SUCCESS, {"state": "stopped", "guest_uuid": record["plan"]["guest_uuid"], "guest_identity_verified": False}
+                return ExitCode.SUCCESS, {"state": "stopped", "guest_uuid": record["plan"]["guest_uuid"], "guest_identity_verified": False, "shutdown": "acpi" if graceful else "qmp-quit"}
             raise
         time.sleep(0.1)
-    raise failure(ExitCode.TIMEOUT, "VM_STOP_TIMEOUT", "Recorded QEMU process did not exit; no signal escalation was attempted")
+    raise failure(ExitCode.TIMEOUT, "VM_STOP_TIMEOUT", "Recorded QEMU process did not exit; no force-off or signal escalation was attempted")

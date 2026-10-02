@@ -30,6 +30,10 @@ and IPv4 loopback port forwarding. QMP control verifies PID/start time, user,
 executable, exact arguments, peer credentials, UUID and root disk. `vm stop`
 powers off that exact VM through QMP; finish/unmount the installer first.
 No process-name kill, host mount, agent forwarding or remote display is used.
+For an installed guest, `vm stop --graceful --json` requests ACPI shutdown and
+waits for the exact recorded process to exit. A 60-second timeout retains control
+state and returns failure; it never escalates to force-off. Use a clean shutdown
+before offline audits and cold snapshots.
 
 The initial bootstrap starts a known installer; it does not establish an enrolled
 SSH target. Inspect the captured screen and wait for the NixOS installer shell
@@ -143,6 +147,17 @@ making the SSH directory traversable and rebuilding the reviewed bootstrap
 configuration for next boot. It never repartitions or formats the existing disk.
 Private host-key files remain mode 0600; the shared SSH directory is mode 0755
 so `dev` can read its public authorized-key file.
+
+The registered audit additionally checks GPT GUID/types/labels, the 1 GiB EFI
+partition, Btrfs installation UUID and all four subvolumes. Read-only Btrfs mounts
+disable tree-log replay. Before the installed Python auditor runs, the wrapper
+checks the installed role and pinned public SSH fingerprint. Structured evidence
+checks `dev`/`tester` groups, locked service accounts with nologin shells, root-only
+Nix trust, sandboxing, SSH forwarding/login restrictions, fstab subvolumes and
+private EFI masks. Credential evidence contains only file ownership, mode and
+outside-store location; tester secret bytes and password hashes never leave the
+guest. This verifies bootstrap storage/accounts, not production modules or the
+running product services.
 
 External-provider adoption accepts `enroll --trust-file .local/ssh/console.json`
 with an explicitly supplied, owned mode-0600 console record. Its exact schema is

@@ -41,7 +41,7 @@ def parser() -> Parser:
     console.add_argument("--bootstrap-repair-access", action="store_true")
     console.add_argument("--bootstrap-inspect", action="store_true")
     console.add_argument("--follow", type=int, metavar="SECONDS")
-    vm.add_parser("stop")
+    vm.add_parser("stop").add_argument("--graceful", action="store_true", help="request ACPI shutdown and refuse force-off on timeout")
     for action in ("snapshot", "restore"):
         vm.add_parser(action).add_argument("--name", required=True)
     enrollment = commands.add_parser("enroll").add_mutually_exclusive_group()
@@ -116,6 +116,9 @@ def dispatch(args) -> tuple[ExitCode, dict]:
             return provision.create(config, args.authorize_provision)
         if args.operation == "start":
             return vm.lifecycle(config, "start", display=args.display, bootstrap=args.bootstrap)
+        if args.operation == "stop" and args.graceful:
+            with provision.operation_lock(config.root):
+                return vm.stop(config, graceful=True)
         if args.operation == "console" and args.follow is not None:
             if not 1 <= args.follow <= 3600:
                 raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Console follow duration must be 1..3600 seconds")
