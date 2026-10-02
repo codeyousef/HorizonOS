@@ -51,9 +51,11 @@
       });
     in {
       nixosModules.default = import ./nix/modules/aios;
-      nixosModules.development = import ./nix/modules/aios/development.nix;
-      packages.${system} = { aios-dev-tools = devTools; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
+      nixosModules.development = import ./nix/modules/aios;
+      nixosModules.production = import ./nix/modules/aios/production.nix;
+      packages.${system} = { aios-dev-tools = devTools; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system}.host-unit = devTools;
+      lib.developmentBoundary = import ./tests/nix/development.nix { inherit nixpkgs; };
       devShells.${system} = {
       lock-resolution = pkgs.mkShell { packages = [ pkgs.cargo pkgs.rustc ]; };
       default = pkgs.mkShell {

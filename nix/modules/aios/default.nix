@@ -1,5 +1,6 @@
 { config, lib, ... }:
 {
+  imports = [ ./development.nix ];
   options.services.aios.enable = lib.mkEnableOption "the Horizon OS control plane";
   config.assertions = [ {
     assertion = !config.services.aios.enable;
