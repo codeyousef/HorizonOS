@@ -138,7 +138,7 @@ def audit(guest_uuid, installation_uuid, fingerprint):
     require(completed.returncode == 0 and len(completed.stdout) <= 262144, "sshd-effective-check")
     effective = dict(line.split(" ", 1) for line in completed.stdout.splitlines() if " " in line)
     expected = {"permitrootlogin": "no", "passwordauthentication": "no", "kbdinteractiveauthentication": "no", "allowusers": "dev", "allowtcpforwarding": "no", "allowstreamlocalforwarding": "no", "allowagentforwarding": "no", "x11forwarding": "no", "permittunnel": "no"}
-    require(all(effective.get(key) == value for key, value in expected.items()), "sshd-isolation")
+    require(all(effective.get(key) == value for key, value in expected.items()), "sshd-isolation", {key: effective.get(key) for key in expected})
     return {"schema_version": 1, "guest_uuid": guest_uuid, "installation_uuid": installation_uuid, "guest_role": "development", "host_key_fingerprint": fingerprint,
             "accounts": accounts, "credential_metadata": metadata, "fstab": mounts, "nix": nix, "sshd": expected,
             "assertions": {"installed_identity": True, "dev_not_wheel_or_nix_trusted": True, "tester_wheel_with_guest_only_secret": True, "service_accounts_nologin": True, "required_btrfs_subvolumes": True, "efi_private_mask": True, "no_swap_partition_or_fstab_entry": True},
