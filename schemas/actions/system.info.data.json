@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.info:data:v1",
+  "title": "system.info data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "os_id",
+    "os_version",
+    "current_closure",
+    "generation",
+    "boot_id",
+    "architecture",
+    "virtualization"
+  ],
+  "properties": {
+    "os_id": {
+      "const": "nixos"
+    },
+    "os_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "current_closure": {
+      "type": "string",
+      "pattern": "^/nix/store/[^/]+$",
+      "maxLength": 512
+    },
+    "generation": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "boot_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "architecture": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "virtualization": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  }
+}

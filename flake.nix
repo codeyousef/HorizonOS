@@ -17,10 +17,24 @@
         ];
       };
       devTools = pkgs.callPackage ./nix/packages/dev-tools.nix { src = hostSource; };
+      productSource = pkgs.lib.fileset.toSource {
+        root = ./.;
+        fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./crates ];
+      };
+      cli = pkgs.rustPlatform.buildRustPackage {
+        pname = "aios-cli";
+        version = "0.1.0";
+        src = productSource;
+        cargoLock.lockFile = ./Cargo.lock;
+        cargoBuildFlags = [ "--package" "aios-cli" ];
+        # Real OS integration runs separately in the verified KVM guest.
+        doCheck = false;
+        meta.mainProgram = "aiosctl";
+      };
     in {
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios/development.nix;
-      packages.${system} = { aios-dev-tools = devTools; default = devTools; };
+      packages.${system} = { aios-dev-tools = devTools; aios-cli = cli; default = devTools; };
       checks.${system}.host-unit = devTools;
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy ];

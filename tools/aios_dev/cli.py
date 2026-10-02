@@ -60,6 +60,7 @@ def parser() -> Parser:
     test.add_argument("--suite", choices=("unit", "integration", "desktop"), required=True)
     test.add_argument("--detach", action="store_true")
     test.add_argument("--bootstrap-case", choices=("all", *acceptance.CASES), help="run only the named disposable installer guard qualification")
+    test.add_argument("--provider", choices=("system-info",), help="run the named real product provider smoke in the verified guest")
     controls = commands.add_parser("jobs").add_subparsers(dest="operation", required=True)
     for action in ("status", "cancel"):
         controls.add_parser(action).add_argument("--job", required=True)
@@ -96,6 +97,10 @@ def dispatch(args) -> tuple[ExitCode, dict]:
             raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Package selection requires the packages build target")
         return jobs.start(load_config(args.workspace), "build-" + args.target, package=args.package, detach=args.detach)
     if args.command == "test":
+        if args.provider is not None:
+            if args.suite != "integration" or args.bootstrap_case is not None:
+                raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Provider smoke requires integration scope without a bootstrap case")
+            return jobs.start(load_config(args.workspace), "system-info-smoke", detach=args.detach)
         if args.bootstrap_case is not None:
             if args.suite != "integration" or args.detach:
                 raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Bootstrap cases require integration scope without --detach")

@@ -73,3 +73,5 @@ mod tests {
         assert_eq!(writer.bytes, vec![0, 0, 0, 2, b'{']);
     }
 }
+
+pub mod contracts;

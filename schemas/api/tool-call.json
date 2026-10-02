@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:tool-call:v1",
+  "title": "AIOS Tool Call v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "action_id", "arguments"],
+  "properties": {
+    "kind": {"const": "tool_call"},
+    "action_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$", "maxLength": 128},
+    "arguments": {"type": "object"}
+  }
+}
