@@ -54,9 +54,11 @@ class SourceTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("PRIVATE FIXTURE")
         (self.root / "models/profiles.json").write_text('{"public_metadata":true}')
+        (self.root / "models/source-lock.json").write_text('{"repository":"public/upstream","revision":"pinned"}')
+        (self.root / "models/README.md").write_text("Public model packaging contract")
         self.git("add", "-f", ".")
         manifest, _, contents = collect(self.root)
-        self.assertEqual([f["path"] for f in manifest["files"]], [".gitignore", "flake.nix", "models/profiles.json"])
+        self.assertEqual([f["path"] for f in manifest["files"]], [".gitignore", "flake.nix", "models/README.md", "models/profiles.json", "models/source-lock.json"])
         self.assertNotIn(b"PRIVATE FIXTURE", contents)
 
     def test_filemode_changes_are_dirty_even_when_git_ignores_them(self):

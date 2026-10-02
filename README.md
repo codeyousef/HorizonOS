@@ -5,7 +5,7 @@ interface names. A deterministic control plane authorizes, executes, verifies an
 recovers typed actions; local CPU inference interprets requests and evidence.
 
 [Project and delivery issues](https://linear.app/felidai-studio/project/horizon-os-978454c1cb4a)
-and [full PRD v1.0](https://linear.app/felidai-studio/document/horizon-os-full-prd-v10-aios-nixos-11afca2bea89)
+and [full PRD v1.0](https://linear.app/felidai-studio/document/horizon-os-full-prd-v10-11afca2bea89)
 are the canonical task and specification context.
 
 ## Host entry points
@@ -25,8 +25,8 @@ Copy `dev/vm.example.json` to ignored `.local/vm.json` only when configuring a
 target. `vm create` prepares a reviewable plan; its UUID authorizes preparation
 of a fresh virtual disk. The protected QEMU bootstrap uses official installer
 media and a read-only public seed. See [bootstrap deployment](docs/deployment.md).
-Guest SSH/build/deployment operations report `UNSUPPORTED_CAPABILITY` until
-trusted enrollment and their implementations exist.
+Guest operations require trusted enrollment. Registered build/test jobs verify
+the target and source snapshot before executing in the NixOS guest.
 
 ## Engineering boundaries
 
@@ -35,13 +35,14 @@ in guests. Images, keys and sanitized reports belong under ignored `.local/`.
 Guest identity mismatch is a hard stop. See [architecture](docs/architecture.md),
 [threat model](docs/threat-model.md) and [versioning](docs/versioning.md).
 
-The Rust workspace begins with protocol framing and test fixtures. The reusable
-NixOS module refuses AI enablement until the services exist. The initial flake
-exposes host tooling and its check; OS/model/desktop/install/recovery outputs will
-be added with their implementations. These sources are not a complete OS or
-evidence of guest build, model quality, rollback or GUI reliability.
+The flake packages host tooling, the authenticated user session service, the
+read-only CLI and a native CPU model qualification executable. The reusable
+NixOS module refuses full AI enablement until the service contract is complete.
+See [system observation](docs/system-info.md), [service inspection](docs/service-inspection.md)
+and [model artifacts](models/README.md) for their engineering contracts.
 
-Nixpkgs and the stable Rust channel are initial selections. `flake.lock` and a
-pinned Rust release must be generated and validated through the M0 upstream and
-guest workflow. No external lock hashes are fabricated here. The Rust crates
-currently use only the standard library.
+`flake.lock`, `Cargo.lock` and the model manifests pin the dependencies and model
+provenance. Build and runtime checks belong in the verified guest. A model
+compatibility probe establishes native loading and constrained generation;
+held-out quality, resource targets, desktop behavior and recovery require their
+own acceptance evidence.

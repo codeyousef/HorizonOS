@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/aios-protocol", "crates/aios-testkit", "crates/aios-system", "crates/aios-cli", "crates/aios-session"]
+members = ["crates/aios-protocol", "crates/aios-testkit", "crates/aios-system", "crates/aios-cli", "crates/aios-session", "crates/aios-model"]
 
 [workspace.package]
 version = "0.1.0"

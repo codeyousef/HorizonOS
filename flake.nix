@@ -17,9 +17,12 @@
         ];
       };
       devTools = pkgs.callPackage ./nix/packages/dev-tools.nix { src = hostSource; };
+      llamaBridge = pkgs.callPackage ./nix/packages/llama-bridge.nix { };
+      conversionPython = pkgs.python3.withPackages (p: [ p.numpy p.safetensors p.transformers p.sentencepiece p.protobuf p.torch ]);
       productSource = pkgs.lib.fileset.toSource {
         root = ./.;
-        fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./crates ];
+        fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./crates
+          (pkgs.lib.fileset.fileFilter (file: file.hasExt "json") ./models) ];
       };
       productPackage = pname: package: program: pkgs.rustPlatform.buildRustPackage {
         inherit pname;
@@ -38,13 +41,27 @@
           substituteInPlace "$out/share/systemd/user/aios-sessiond.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-sessiond"
         '';
       });
+      model = (productPackage "aios-model" "aios-model" "aios-model-probe").overrideAttrs (old: {
+        AIOS_LLAMA_BRIDGE = "${llamaBridge}";
+      });
     in {
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios/development.nix;
-      packages.${system} = { aios-dev-tools = devTools; aios-cli = cli; aios-core = core; default = devTools; };
+      packages.${system} = { aios-dev-tools = devTools; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system}.host-unit = devTools;
-      devShells.${system}.default = pkgs.mkShell {
+      devShells.${system} = {
+      lock-resolution = pkgs.mkShell { packages = [ pkgs.cargo pkgs.rustc ]; };
+      default = pkgs.mkShell {
         packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy ];
+        AIOS_LLAMA_BRIDGE = "${llamaBridge}";
+      };
+      model-conversion = pkgs.mkShell {
+        packages = [ conversionPython llamaBridge ];
+        AIOS_LLAMA_SOURCE = "${pkgs.llama-cpp.src}";
+        AIOS_LLAMA_BRIDGE = "${llamaBridge}";
+        PYTHONPATH = "${pkgs.llama-cpp.src}/gguf-py";
+        HF_HUB_OFFLINE = "1";
+      };
       };
     };
 }

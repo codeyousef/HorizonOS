@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "profile": "normal",
+  "availability": "available",
+  "source_lock_sha256": "f397aa869c5287d8ebefd3f4dd1f2aa69fb56c7f8ea0671f0bb63cc589a11859",
+  "runtime_revision": "b64739ea393b3c9d07cc9907e0a611f707838051",
+  "artifact": {
+    "filename": "model-q4_k_m.gguf",
+    "bytes": 1312164192,
+    "sha256": "a0c9c9d7ceaad9443d467420b41bdcfac53819da9c5151b097737d0b60cd57a8"
+  },
+  "chat_template_sha256": "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80",
+  "converter_sha256": "7594edd441c04ae7c7854917b603f1366ad13e17a558eb06c9920ccfc26d1eab",
+  "quantizer_sha256": "7c12e210a8bf124a8ed2a5a12e48442abfb8a019cdcadd0e4ed724622b17a849",
+  "quality_qualified": false,
+  "performance_qualified": false
+}
