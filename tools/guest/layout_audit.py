@@ -20,12 +20,14 @@ SERVICES = ("aios-state", "aios-observer", "aios-builder", "aios-model")
 
 
 class Denied(Exception):
-    pass
+    def __init__(self, check, evidence=None):
+        super().__init__(check)
+        self.evidence = evidence
 
 
-def require(condition, check):
+def require(condition, check, evidence=None):
     if not condition:
-        raise Denied(check)
+        raise Denied(check, evidence)
 
 
 def key_fingerprint(value):
@@ -99,7 +101,9 @@ def nix_report(contents):
         key, value = (part.strip() for part in line.split("=", 1))
         require(key not in settings, "nix-settings-duplicate")
         settings[key] = value
-    require(settings.get("trusted-users", "").split() == ["root"], "nix-root-only-trust")
+    trusted = settings.get("trusted-users", "").split()
+    require(len(trusted) <= 32 and all(re.fullmatch(r"@?[A-Za-z_][A-Za-z0-9_-]{0,31}", user) for user in trusted), "nix-trusted-users-format")
+    require(trusted == ["root"], "nix-root-only-trust", {"trusted_users": trusted})
     require(settings.get("sandbox") == "true", "nix-sandbox")
     return {"trusted_users": ["root"], "sandbox": True}
 
@@ -149,6 +153,8 @@ def main(argv=None):
         status = 0
     except Denied as error:
         report, status = {"schema_version": 1, "error": "LAYOUT_AUDIT_DENIED", "check": str(error)}, 4
+        if error.evidence is not None:
+            report["evidence"] = error.evidence
     except (OSError, ValueError, subprocess.TimeoutExpired):
         report, status = {"schema_version": 1, "error": "LAYOUT_AUDIT_FAILED"}, 4
     print("AIOS_LAYOUT_REPORT=" + json.dumps(report, sort_keys=True))
