@@ -566,12 +566,58 @@ def follow_console(config, seconds):
     return ExitCode.SUCCESS, {"artifact_path": str(path), "guest_identity_verified": False}
 
 
+def cleanup_stopped(config, process, state):
+    # A missing PID is authoritative exit evidence, not a timed-out observation.
+    # Never unlink a live or substituted control endpoint while reaping state.
+    from .guest import private_file
+    if (Path("/proc") / str(process["pid"])).exists():
+        raise failure(ExitCode.TARGET_MISMATCH, "VM_STILL_PRESENT", "Recorded PID must disappear before control cleanup")
+    private_file(state)
+    if read_json(state) != process:
+        raise failure(ExitCode.TARGET_MISMATCH, "PROCESS_RECORD_CHANGED", "Process record changed before cleanup")
+    pidfile = config.root / ".local/vm/qemu.pid"
+    if pidfile.exists():
+        info = pidfile.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o022 or pidfile.read_text().strip() != str(process["pid"]):
+            raise invalid("PID file changed before cleanup")
+    for field in ("qmp_socket", "serial_socket"):
+        endpoint = config.paths[field]
+        if endpoint.exists():
+            info = endpoint.lstat()
+            if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid():
+                raise invalid("Control endpoint changed before cleanup")
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                probe.settimeout(1)
+                try:
+                    probe.connect(str(endpoint))
+                except (ConnectionRefusedError, FileNotFoundError):
+                    pass
+                else:
+                    raise failure(ExitCode.TARGET_MISMATCH, "LIVE_CONTROL_ENDPOINT", "Control endpoint still accepts connections")
+    for path in (state, pidfile, config.paths["qmp_socket"], config.paths["serial_socket"]):
+        if path.is_symlink():
+            raise invalid("Control artifacts must not become symlinks")
+        path.unlink(missing_ok=True)
+
+
+def exiting_process(process):
+    entry = Path("/proc") / str(process["pid"])
+    try:
+        fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+        return fields[0] == "Z" and int(fields[19]) == process["start_ticks"] and entry.stat().st_uid == process["uid"] == os.getuid()
+    except (OSError, ValueError, IndexError):
+        return False
+
+
 def stop(config, *, graceful=False):
     # Host power control is tied to the exact QMP process/UUID/disk, and works
     # without SSH. It never executes a guest command or sends a process signal.
     record = load_record(config)
     state = project_path(config.root, ".local/vm/process.json", ".local/vm")
     process = read_json(state)
+    if not (Path("/proc") / str(process["pid"])).exists():
+        cleanup_stopped(config, process, state)
+        return ExitCode.SUCCESS, {"state": "stopped", "guest_uuid": record["plan"]["guest_uuid"], "guest_identity_verified": False, "shutdown": "already-exited"}
     client = QMP(config, process, record["plan"]["guest_uuid"])
     try:
         verify_block(client, config)
@@ -584,11 +630,9 @@ def stop(config, *, graceful=False):
         except DevctlError:
             # Only disappearance of this exact PID allows stale-artifact cleanup.
             if not (Path("/proc") / str(process["pid"])).exists():
-                for path in (state, config.root / ".local/vm/qemu.pid", config.paths["qmp_socket"], config.paths["serial_socket"]):
-                    if path.is_symlink():
-                        raise invalid("Control artifacts must not become symlinks")
-                    path.unlink(missing_ok=True)
+                cleanup_stopped(config, process, state)
                 return ExitCode.SUCCESS, {"state": "stopped", "guest_uuid": record["plan"]["guest_uuid"], "guest_identity_verified": False, "shutdown": "acpi" if graceful else "qmp-quit"}
-            raise
+            if not exiting_process(process):
+                raise
         time.sleep(0.1)
     raise failure(ExitCode.TIMEOUT, "VM_STOP_TIMEOUT", "Recorded QEMU process did not exit; no force-off or signal escalation was attempted")

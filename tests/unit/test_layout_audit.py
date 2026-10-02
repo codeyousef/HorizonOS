@@ -107,13 +107,47 @@ class LayoutTests(unittest.TestCase):
             config = VMConfig.from_data(root, EXAMPLE)
             provision.private_directory(root, ".local/vm")
             state = root / ".local/vm/process.json"
-            provision.write_json_new(state, {"pid": 42})
+            provision.write_json_new(state, {"pid": os.getpid()})
             client = Mock()
             with patch.object(vm, "load_record", return_value={"plan": {"guest_uuid": GUEST}}), patch.object(vm, "QMP", return_value=client), patch.object(vm, "verify_block"), patch.object(vm, "verify_process"), patch.object(vm.time, "sleep"):
                 with self.assertRaises(DevctlError) as caught:
                     vm.stop(config, graceful=True)
             self.assertEqual(caught.exception.exit_code, ExitCode.TIMEOUT)
             client.command.assert_called_once_with("system_powerdown")
+            self.assertTrue(state.exists())
+
+    def test_exited_pid_cleans_only_its_private_record_without_qmp(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = VMConfig.from_data(root, EXAMPLE)
+            provision.private_directory(root, ".local/vm")
+            state = root / ".local/vm/process.json"
+            provision.write_json_new(state, {"pid": 2147483647})
+            with patch.object(vm, "load_record", return_value={"plan": {"guest_uuid": GUEST}}), patch.object(vm, "QMP") as client:
+                code, result = vm.stop(config)
+            self.assertEqual(code, 0)
+            self.assertEqual(result["shutdown"], "already-exited")
+            self.assertFalse(state.exists())
+            client.assert_not_called()
+
+    def test_changed_record_or_live_control_is_never_unlinked(self):
+        import socket
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = VMConfig.from_data(root, EXAMPLE)
+            provision.private_directory(root, ".local/vm")
+            state = root / ".local/vm/process.json"
+            process = {"pid": 2147483647}
+            provision.write_json_new(state, process)
+            with self.assertRaises(DevctlError):
+                vm.cleanup_stopped(config, {**process, "different": True}, state)
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as endpoint:
+                endpoint.bind(str(config.paths["qmp_socket"]))
+                endpoint.listen()
+                with self.assertRaises(DevctlError) as caught:
+                    vm.cleanup_stopped(config, process, state)
+                self.assertEqual(caught.exception.code, "LIVE_CONTROL_ENDPOINT")
+                self.assertTrue(config.paths["qmp_socket"].exists())
             self.assertTrue(state.exists())
 
 
