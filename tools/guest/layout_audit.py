@@ -118,6 +118,20 @@ def credential_metadata(path, *, secret=False):
     return {"uid": info.st_uid, "gid": info.st_gid, "mode": oct(mode), "outside_nix_store": True, "regular_single_link": True}
 
 
+def ssh_report(contents):
+    expected = {"permitrootlogin": "no", "passwordauthentication": "no", "kbdinteractiveauthentication": "no", "allowusers": "dev", "allowtcpforwarding": "no", "allowstreamlocalforwarding": "no", "allowagentforwarding": "no", "x11forwarding": "no", "permittunnel": "no"}
+    effective = {}
+    for line in contents.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2 or parts[0].lower() not in expected:
+            continue
+        key = parts[0].lower()
+        require(key not in effective, "sshd-duplicate-selected-setting")
+        effective[key] = parts[1].strip()
+    require(effective == expected, "sshd-isolation", {"settings": {key: effective.get(key) for key in expected}})
+    return effective
+
+
 def audit(guest_uuid, installation_uuid, fingerprint):
     require(os.geteuid() == 0, "root-auditor-required")
     require(str(uuid.UUID(guest_uuid)) == guest_uuid and str(uuid.UUID(installation_uuid)) == installation_uuid and re.fullmatch(r"SHA256:[A-Za-z0-9/+]{43}", fingerprint), "expected-target-format")
@@ -136,11 +150,9 @@ def audit(guest_uuid, installation_uuid, fingerprint):
     nix = nix_report(text("/etc/nix/nix.conf"))
     completed = subprocess.run(["/nix/var/nix/profiles/system/sw/bin/sshd", "-T"], capture_output=True, text=True, timeout=10, check=False)
     require(completed.returncode == 0 and len(completed.stdout) <= 262144, "sshd-effective-check")
-    effective = dict(line.split(" ", 1) for line in completed.stdout.splitlines() if " " in line)
-    expected = {"permitrootlogin": "no", "passwordauthentication": "no", "kbdinteractiveauthentication": "no", "allowusers": "dev", "allowtcpforwarding": "no", "allowstreamlocalforwarding": "no", "allowagentforwarding": "no", "x11forwarding": "no", "permittunnel": "no"}
-    require(all(effective.get(key) == value for key, value in expected.items()), "sshd-isolation", {"settings": {key: effective.get(key) for key in expected}, "stdout_bytes": len(completed.stdout), "stderr_bytes": len(completed.stderr), "leading_whitespace_lines": sum(line[:1].isspace() for line in completed.stdout.splitlines()), "selected_keys_case_insensitive": [key for key in effective if key.lower() in expected]})
+    effective = ssh_report(completed.stdout)
     return {"schema_version": 1, "guest_uuid": guest_uuid, "installation_uuid": installation_uuid, "guest_role": "development", "host_key_fingerprint": fingerprint,
-            "accounts": accounts, "credential_metadata": metadata, "fstab": mounts, "nix": nix, "sshd": expected,
+            "accounts": accounts, "credential_metadata": metadata, "fstab": mounts, "nix": nix, "sshd": effective,
             "assertions": {"installed_identity": True, "dev_not_wheel_or_nix_trusted": True, "tester_wheel_with_guest_only_secret": True, "service_accounts_nologin": True, "required_btrfs_subvolumes": True, "efi_private_mask": True, "no_swap_partition_or_fstab_entry": True},
             "limitations": ["Offline read-only bootstrap layout/account audit; not running product services, production configuration or final OS acceptance."]}
 

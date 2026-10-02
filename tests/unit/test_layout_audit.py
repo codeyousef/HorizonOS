@@ -71,6 +71,13 @@ class LayoutTests(unittest.TestCase):
             with self.assertRaises(audit.Denied):
                 audit.nix_report(value)
 
+    def test_effective_ssh_keys_are_case_insensitive_and_empty_or_unsafe_output_fails(self):
+        good = "PermitRootLogin no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers dev\nAllowTcpForwarding no\nAllowStreamLocalForwarding no\nAllowAgentForwarding no\nX11Forwarding no\nPermitTunnel no\n"
+        self.assertEqual(audit.ssh_report(good), audit.ssh_report(good.lower()))
+        for value in ("", good.replace("PasswordAuthentication no", "PasswordAuthentication yes"), good.replace("AllowUsers dev", "AllowUsers dev tester"), good + "permitrootlogin no\n"):
+            with self.assertRaises(audit.Denied):
+                audit.ssh_report(value)
+
     def test_symlink_and_public_secret_metadata_rejected_without_reading_secret(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "secret"
