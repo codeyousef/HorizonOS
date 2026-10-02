@@ -41,8 +41,13 @@
           substituteInPlace "$out/share/systemd/user/aios-sessiond.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-sessiond"
         '';
       });
-      model = (productPackage "aios-model" "aios-model" "aios-model-probe").overrideAttrs (old: {
+      model = (productPackage "aios-model" "aios-model" "aios-modeld").overrideAttrs (old: {
         AIOS_LLAMA_BRIDGE = "${llamaBridge}";
+        postInstall = (old.postInstall or "") + ''
+          install -Dm644 ${./nix/packages/aios-model.socket} "$out/share/systemd/system/aios-model.socket"
+          install -Dm644 ${./nix/packages/aios-model.service} "$out/share/systemd/system/aios-model.service"
+          substituteInPlace "$out/share/systemd/system/aios-model.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-modeld"
+        '';
       });
     in {
       nixosModules.default = import ./nix/modules/aios;

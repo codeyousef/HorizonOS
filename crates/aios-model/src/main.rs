@@ -56,7 +56,7 @@ fn probe(directory:PathBuf)->Result<serde_json::Value,ErrorCode> {
     let prefill_cancellation_ms=stopped.elapsed().as_millis();drop(context);
     let mut context=model.context(Cancellation::new()?)?;
     let oversized=context.evaluate(model.prompt(system,&"word ".repeat(9000))?,GRAMMAR);
-    if oversized!=Err(ErrorCode::ResourceExhausted) {return Err(ErrorCode::PartialResult);}
+    if oversized!=Err(ErrorCode::ContextBudgetExceeded) {return Err(ErrorCode::PartialResult);}
     Ok(json!({"schema_version":1,"evidence_kind":"actual-pinned-cpu-model-compatibility",
         "runtime_revision":"b64739ea393b3c9d07cc9907e0a611f707838051","backend":"cpu",
         "no_hidden_thinking_prefix":no_hidden_thinking,"input_tokens":input_tokens,"output_tokens":output_tokens,

@@ -146,7 +146,7 @@ def pull(config, job=None):
 
 
 def start(config, kind, *, package=None, detach=False, wait_seconds=120):
-    if kind not in {"resolve-lock", "build-packages", "build-system", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "model-inference-smoke", "supervision-probe"} or package is not None and (kind != "build-packages" or package not in PACKAGES):
+    if kind not in {"resolve-lock", "build-packages", "build-system", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "model-inference-smoke", "model-service-smoke", "supervision-probe"} or package is not None and (kind != "build-packages" or package not in PACKAGES):
         raise invalid("Unregistered build/test job")
     _, snapshot = sync.synchronize(config)
     provenance = sync.contract.decode(Path(snapshot["artifact_path"]).read_bytes())

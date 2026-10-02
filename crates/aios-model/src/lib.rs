@@ -1,4 +1,6 @@
 //! CPU inference only. No tool, subprocess, download or authorization API.
+pub mod protocol;
+pub mod service;
 use aios_protocol::contracts::ErrorCode;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -13,8 +15,10 @@ mod ffi {
         pub fn aios_cpu_backend_check() -> i32;
         pub fn aios_cancel_new() -> *mut c_void;
         pub fn aios_cancel_set(token:*mut c_void);
+        pub fn aios_cancelled(token:*mut c_void) -> u32;
         pub fn aios_cancel_free(token:*mut c_void);
         pub fn aios_model_open(path:*const c_char,out:*mut *mut c_void) -> i32;
+        pub fn aios_model_open_cancelable(path:*const c_char,cancel:*mut c_void,out:*mut *mut c_void) -> i32;
         pub fn aios_model_free(model:*mut c_void);
         pub fn aios_model_template(model:*mut c_void,out:*mut c_char,capacity:usize,written:*mut usize) -> i32;
         pub fn aios_chat_format(model:*mut c_void,system:*const c_char,user:*const c_char,out:*mut c_char,capacity:usize,written:*mut usize) -> i32;
@@ -62,6 +66,7 @@ pub struct Cancellation(Arc<NativeCancel>);
 impl Cancellation {
     pub fn new()->Result<Self,ErrorCode> { NonNull::new(unsafe { ffi::aios_cancel_new() }).map(|v|Self(Arc::new(NativeCancel(v)))).ok_or(ErrorCode::ResourceExhausted) }
     pub fn cancel(&self) { unsafe { ffi::aios_cancel_set(self.0.0.as_ptr()); } }
+    pub fn is_cancelled(&self) -> bool { unsafe { ffi::aios_cancelled(self.0.0.as_ptr()) != 0 } }
 }
 /// Production accepts only root-owned immutable store files. Qualification
 /// permits an owned read-only converted artifact in the development guest.
@@ -70,6 +75,10 @@ pub struct Model { value:NonNull<c_void>,_descriptor:File }
 impl Drop for Model { fn drop(&mut self) { unsafe { ffi::aios_model_free(self.value.as_ptr()); } } }
 impl Model {
     pub fn load(directory:&Path,trust:ArtifactTrust) -> Result<Self,ErrorCode> {
+        Self::load_cancelable(directory,trust,None)
+    }
+    pub fn load_cancelable(directory:&Path,trust:ArtifactTrust,cancel:Option<&Cancellation>) -> Result<Self,ErrorCode> {
+        if cancel.is_some_and(Cancellation::is_cancelled) { return Err(ErrorCode::Cancelled); }
         let lock=lock()?;let artifact=lock.artifact.ok_or(ErrorCode::ModelUnavailable)?;
         if !valid_hash(&artifact.sha256) || artifact.bytes<1024 || artifact.bytes>4*1024*1024*1024 ||
             Path::new(&artifact.filename).file_name().and_then(|v|v.to_str())!=Some(artifact.filename.as_str()) ||
@@ -86,7 +95,10 @@ impl Model {
             _=>{},
         }
         let mut digest=Sha256::new();let mut buffer=[0_u8;65536];
-        loop { let read=file.read(&mut buffer).map_err(|_|ErrorCode::TargetChanged)?;if read==0 {break;}digest.update(&buffer[..read]); }
+        loop {
+            if cancel.is_some_and(Cancellation::is_cancelled) {buffer.fill(0);return Err(ErrorCode::Cancelled);}
+            let read=file.read(&mut buffer).map_err(|_|ErrorCode::TargetChanged)?;if read==0 {break;}digest.update(&buffer[..read]);
+        }
         buffer.fill(0);
         if format!("{:x}",digest.finalize())!=artifact.sha256 { return Err(ErrorCode::TargetChanged); }
         file.seek(SeekFrom::Start(0)).map_err(|_|ErrorCode::TargetChanged)?;
@@ -94,7 +106,13 @@ impl Model {
         if unsafe { ffi::aios_abi_version() }!=1 || revision!=lock.runtime_revision { return Err(ErrorCode::TargetChanged); }
         result(unsafe { ffi::aios_cpu_backend_check() })?;
         let descriptor=CString::new(format!("/proc/self/fd/{}",file.as_raw_fd())).unwrap();let mut value=std::ptr::null_mut();
-        result(unsafe { ffi::aios_model_open(descriptor.as_ptr(),&mut value) })?;
+        let code=unsafe {
+            match cancel {
+                Some(token)=>ffi::aios_model_open_cancelable(descriptor.as_ptr(),token.0.0.as_ptr(),&mut value),
+                None=>ffi::aios_model_open(descriptor.as_ptr(),&mut value),
+            }
+        };
+        result(code)?;
         let model=Self { value:NonNull::new(value).ok_or(ErrorCode::ModelUnavailable)?,_descriptor:file };
         let after=model._descriptor.metadata().map_err(|_|ErrorCode::TargetChanged)?;
         if (before.dev(),before.ino(),before.len(),before.ctime(),before.ctime_nsec())!=
@@ -105,15 +123,15 @@ impl Model {
     }
     fn bytes(&self,maximum:usize,call:impl FnOnce(*mut c_char,usize,*mut usize)->i32)->Result<Vec<u8>,ErrorCode> {
         let mut output=vec![0;maximum];let mut count=0;
-        if let Err(code)=result(call(output.as_mut_ptr().cast(),maximum,&mut count)) {output.fill(0);return Err(code);}
-        if count>maximum { output.fill(0);return Err(ErrorCode::ResourceExhausted); }output.truncate(count);Ok(output)
+        if let Err(code)=result(call(output.as_mut_ptr().cast(),maximum,&mut count)) {service::wipe(&mut output);return Err(code);}
+        if count>maximum { service::wipe(&mut output);return Err(ErrorCode::ResourceExhausted); }output.truncate(count);Ok(output)
     }
     pub fn prompt(&self,system:&str,user:&str)->Result<Vec<u8>,ErrorCode> {
         if system.len()>16384 || user.len()>65536 { return Err(ErrorCode::ResourceExhausted); }
         let system=CString::new(system).map_err(|_|ErrorCode::InvalidArgument)?;
         let user=CString::new(user).map_err(|_|ErrorCode::InvalidArgument)?;
         let value=self.bytes(131072,|out,capacity,written|unsafe { ffi::aios_chat_format(self.value.as_ptr(),system.as_ptr(),user.as_ptr(),out,capacity,written) });
-        let mut system=system.into_bytes_with_nul();let mut user=user.into_bytes_with_nul();system.fill(0);user.fill(0);value
+        let mut system=system.into_bytes_with_nul();let mut user=user.into_bytes_with_nul();service::wipe(&mut system);service::wipe(&mut user);value
     }
     pub fn context(&self,cancel:Cancellation)->Result<Context<'_>,ErrorCode> {
         let cpus=std::thread::available_parallelism().map(|n|n.get()).unwrap_or(1);
@@ -130,7 +148,8 @@ impl Context<'_> {
         let prompt=CString::new(prompt).map_err(|_|ErrorCode::InvalidArgument)?;
         let grammar=CString::new(grammar).map_err(|_|ErrorCode::InvalidArgument)?;
         let mut tokens=0;let code=unsafe { ffi::aios_context_prompt(self.value.as_ptr(),prompt.as_ptr(),grammar.as_ptr(),6144,&mut tokens) };
-        let mut bytes=prompt.into_bytes_with_nul();bytes.fill(0);result(code)?;Ok(tokens)
+        let mut bytes=prompt.into_bytes_with_nul();service::wipe(&mut bytes);
+        if code==2 {return Err(ErrorCode::ContextBudgetExceeded);}result(code)?;Ok(tokens)
     }
     pub fn next(&mut self)->Result<Option<Vec<u8>>,ErrorCode> {
         let mut buffer=vec![0_u8;16384];let mut count=0;
@@ -143,14 +162,14 @@ impl Context<'_> {
         if maximum<1 || maximum>768 || deadline.saturating_duration_since(Instant::now())>Duration::from_secs(90) { return Err(ErrorCode::InvalidArgument); }
         let mut output=Vec::new();
         for _ in 0..maximum {
-            if Instant::now()>=deadline { self._cancel.cancel();output.fill(0);return Err(ErrorCode::DeadlineExceeded); }
+            if Instant::now()>=deadline { self._cancel.cancel();service::wipe(&mut output);return Err(ErrorCode::DeadlineExceeded); }
             match self.next() {
-                Ok(Some(mut bytes))=>{if output.len()+bytes.len()>65536 {bytes.fill(0);output.fill(0);return Err(ErrorCode::ResourceExhausted);}token(&bytes);output.extend_from_slice(&bytes);bytes.fill(0);},
-                Ok(None)=>return String::from_utf8(output).map_err(|error|{let mut bytes=error.into_bytes();bytes.fill(0);ErrorCode::InvalidArgument}),
-                Err(code)=>{output.fill(0);return Err(code);},
+                Ok(Some(mut bytes))=>{if output.len()+bytes.len()>65536 {service::wipe(&mut bytes);service::wipe(&mut output);return Err(ErrorCode::ResourceExhausted);}token(&bytes);output.extend_from_slice(&bytes);service::wipe(&mut bytes);},
+                Ok(None)=>return String::from_utf8(output).map_err(|error|{let mut bytes=error.into_bytes();service::wipe(&mut bytes);ErrorCode::InvalidArgument}),
+                Err(code)=>{service::wipe(&mut output);return Err(code);},
             }
         }
-        output.fill(0);Err(ErrorCode::ResourceExhausted)
+        service::wipe(&mut output);Err(ErrorCode::ResourceExhausted)
     }
 }
 

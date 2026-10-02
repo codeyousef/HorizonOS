@@ -1,0 +1,15 @@
+[Unit]
+Description=Horizon OS authenticated local inference socket
+
+[Socket]
+ListenStream=/run/aios/model.sock
+SocketUser=root
+SocketGroup=aios-inference
+SocketMode=0660
+DirectoryMode=0755
+PassCredentials=yes
+FileDescriptorName=model
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

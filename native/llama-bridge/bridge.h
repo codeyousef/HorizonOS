@@ -16,8 +16,10 @@ const char * aios_runtime_revision(void);
 int aios_cpu_backend_check(void);
 aios_cancel * aios_cancel_new(void);
 void aios_cancel_set(aios_cancel *);
+uint32_t aios_cancelled(aios_cancel *);
 void aios_cancel_free(aios_cancel *);
 int aios_model_open(const char * verified_descriptor_path, aios_model ** out);
+int aios_model_open_cancelable(const char * verified_descriptor_path, aios_cancel *, aios_model ** out);
 void aios_model_free(aios_model *);
 int aios_model_template(aios_model *, char * out, size_t capacity, size_t * written);
 int aios_chat_format(aios_model *, const char * system, const char * user,

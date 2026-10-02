@@ -47,6 +47,7 @@ static void initialize() {
 static bool abort_decode(void * value) {
     return static_cast<std::atomic_bool *>(value)->load(std::memory_order_acquire);
 }
+static bool loading_progress(float,void * value) { return !abort_decode(value); }
 static bool text_bound(const char * text, size_t maximum) {
     return text && strnlen(text, maximum+1) <= maximum;
 }
@@ -64,18 +65,25 @@ aios_cancel * aios_cancel_new() {
     try { return new aios_cancel{std::make_shared<std::atomic_bool>(false)}; } catch (...) { return nullptr; }
 }
 void aios_cancel_set(aios_cancel * token) { if (token) token->value->store(true, std::memory_order_release); }
+uint32_t aios_cancelled(aios_cancel * token) { return !token || token->value->load(std::memory_order_acquire); }
 void aios_cancel_free(aios_cancel * token) { delete token; }
 int aios_model_open(const char * path, aios_model ** out) {
+    return aios_model_open_cancelable(path,nullptr,out);
+}
+int aios_model_open_cancelable(const char * path,aios_cancel * cancel,aios_model ** out) {
     if (!out) return AIOS_INVALID; *out = nullptr;
     if (!text_bound(path,4096) || std::strncmp(path,"/proc/self/fd/",14) != 0) return AIOS_INVALID;
     try {
+        if (cancel && cancel->value->load()) return AIOS_CANCELLED;
         initialize(); if (!cpu_only) return AIOS_BACKEND;
         auto model = std::make_unique<aios_model>();
         auto params = llama_model_default_params();
         ggml_backend_dev_t devices[] = {nullptr};
         params.devices = devices; params.n_gpu_layers = 0;
         params.use_mmap = true; params.use_mlock = false; params.check_tensors = true;
+        if (cancel) { params.progress_callback=loading_progress;params.progress_callback_user_data=cancel->value.get(); }
         model->value = llama_model_load_from_file(path,params);
+        if (cancel && cancel->value->load()) return AIOS_CANCELLED;
         if (!model->value) return AIOS_LOAD;
         const char * templ = llama_model_chat_template(model->value,nullptr);
         if (!text_bound(templ,32768) || !*templ) return AIOS_TEMPLATE;

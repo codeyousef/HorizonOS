@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:model-request:v1",
+  "title": "Horizon OS inference request v1",
+  "description": "Inference proposals confer no execution authority. UTF-8 frame maximum 65536 bytes; duplicate fields are rejected before validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "request_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "generate"
+            },
+            "generation": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "profile": {
+                  "enum": [
+                    "normal",
+                    "low",
+                    "high"
+                  ]
+                },
+                "system_prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 16384,
+                  "x-maxUtf8Bytes": 16384,
+                  "pattern": "^[^\\u0000]*$"
+                },
+                "user_prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 48000,
+                  "x-maxUtf8Bytes": 48000,
+                  "pattern": "^[^\\u0000]*$"
+                },
+                "response_mode": {
+                  "enum": [
+                    "decision",
+                    "final_answer"
+                  ]
+                },
+                "allowed_tools": {
+                  "type": "array",
+                  "maxItems": 8,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "system_info",
+                      "system_service_status"
+                    ]
+                  }
+                },
+                "evidence_ids": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_:-]+$"
+                  }
+                },
+                "deadline_ms": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 90000
+                }
+              },
+              "required": [
+                "profile",
+                "system_prompt",
+                "user_prompt",
+                "response_mode",
+                "allowed_tools",
+                "evidence_ids",
+                "deadline_ms"
+              ],
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "response_mode": {
+                        "const": "final_answer"
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "allowed_tools": {
+                        "maxItems": 0
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "generation"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "get_status"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "unload"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "get_result"
+            },
+            "generation_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          },
+          "required": [
+            "kind",
+            "generation_id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "cancel"
+            },
+            "generation_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          },
+          "required": [
+            "kind",
+            "generation_id"
+          ]
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "request_id",
+    "operation"
+  ]
+}
