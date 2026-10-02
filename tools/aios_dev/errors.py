@@ -14,7 +14,8 @@ class ExitCode(IntEnum):
 
 
 class DevctlError(Exception):
-    def __init__(self, exit_code: ExitCode, code: str, message: str):
+    def __init__(self, exit_code: ExitCode, code: str, message: str, *, details=None):
         super().__init__(message)
         self.exit_code = exit_code
         self.code = code
+        self.details = details or {}

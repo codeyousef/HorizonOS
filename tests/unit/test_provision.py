@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 from aios_dev.config import VMConfig
 from aios_dev.errors import DevctlError, ExitCode
-from aios_dev.provision import CHECKSUM_URL, create, digest_file, fetch_media, official_url, prepare_plan, private_directory, seed_manifest, source_files, validate_plan
+from aios_dev.provision import CHECKSUM_URL, create, digest_file, fetch_media, official_url, operation_lock, prepare_plan, private_directory, run, seed_manifest, source_files, validate_plan
 from aios_dev.vm import qemu_arguments, verify_block, verify_process
 
 EXAMPLE = json.loads((ROOT / "dev/vm.example.json").read_text())
@@ -48,6 +48,19 @@ class ProvisionTests(unittest.TestCase):
         execute.assert_not_called()
         fetch.assert_not_called()
         self.assertFalse(self.config.paths["disk_image"].exists())
+
+    def test_concurrent_vm_operation_is_denied_before_work(self):
+        with operation_lock(self.root), patch("aios_dev.provision.run") as execute:
+            with self.assertRaises(DevctlError) as caught:
+                create(self.config, None)
+        self.assertEqual(caught.exception.code, "VM_OPERATION_BUSY")
+        execute.assert_not_called()
+
+    def test_tool_failure_preserves_upstream_exit_without_exposing_output(self):
+        with patch("aios_dev.provision.subprocess.run", return_value=subprocess.CompletedProcess([], 42, "sensitive fixture", "sensitive fixture")), self.assertRaises(DevctlError) as caught:
+            run(["qemu-img", "info", "fixture"])
+        self.assertEqual(caught.exception.details["upstream_exit"], 42)
+        self.assertNotIn("sensitive", str(caught.exception) + json.dumps(caught.exception.details))
 
     def test_existing_disk_is_never_overwritten(self):
         private_directory(self.root, ".local/vm")

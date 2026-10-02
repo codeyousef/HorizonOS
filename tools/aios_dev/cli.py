@@ -58,10 +58,8 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         if args.operation == "create":
             return provision.create(config, args.authorize_provision)
         if args.operation == "start":
-            return vm.start(config, args.display, args.bootstrap)
-        if args.operation == "console":
-            return vm.console(config)
-        return vm.stop(config)
+            return vm.lifecycle(config, "start", display=args.display, bootstrap=args.bootstrap)
+        return vm.lifecycle(config, args.operation)
     # No unverified SSH, guest shell or host mutation fallback is available.
     raise DevctlError(
         ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY",
@@ -80,7 +78,7 @@ def main(argv=None) -> int:
         code, data = dispatch(args)
     except DevctlError as failure:
         code = failure.exit_code
-        error = {"code": failure.code, "message": str(failure)}
+        error = {"code": failure.code, "message": str(failure), **failure.details}
     except TimeoutError:
         code = ExitCode.TIMEOUT
         error = {"code": "TIMEOUT", "message": "Host operation timed out"}

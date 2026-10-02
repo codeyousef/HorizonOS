@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 from aios_dev.cli import main
 from aios_dev.config import VMConfig, load_config, read_json
-from aios_dev.doctor import find_firmware, host_report, memory_info, qemu_processes, ssh_file_permissions, tcp_probe, tool_info
+from aios_dev.doctor import find_firmware, host_report, memory_info, qemu_capabilities, qemu_processes, ssh_file_permissions, tcp_probe, tool_info
 from aios_dev.errors import DevctlError, ExitCode
 
 EXAMPLE = json.loads((ROOT / "dev/vm.example.json").read_text())
@@ -141,6 +141,20 @@ class DiscoveryTests(unittest.TestCase):
             self.assertFalse(tool_info("ssh")["available"])
         with patch("aios_dev.doctor.shutil.which", return_value="/ssh"), patch("aios_dev.doctor.subprocess.run", side_effect=subprocess.TimeoutExpired(["/ssh"], 3)):
             self.assertEqual(tool_info("ssh")["error"], "TimeoutExpired")
+
+    def test_qemu_module_discovery_requires_exact_device_name(self):
+        for output, ready in (('name "virtio-vga", bus PCI\n', True), ('name "virtio-vga-gl", bus PCI\n', False)):
+            results = [subprocess.CompletedProcess([], 0, output, ""), subprocess.CompletedProcess([], 0, "Available display backend types:\nnone\ngtk\n", "")]
+            with patch("aios_dev.doctor.shutil.which", return_value="/qemu"), patch("aios_dev.doctor.subprocess.run", side_effect=results) as run:
+                result = qemu_capabilities()
+            self.assertIs(result["virtio_vga"], ready)
+            self.assertTrue(result["gtk"] and result["probe_complete"])
+            self.assertEqual(run.call_args_list[0].args[0], ["/qemu", "-device", "help"])
+
+    def test_qemu_module_timeout_is_not_readiness(self):
+        with patch("aios_dev.doctor.shutil.which", return_value="/qemu"), patch("aios_dev.doctor.subprocess.run", side_effect=subprocess.TimeoutExpired(["/qemu"], 3)):
+            result = qemu_capabilities()
+        self.assertFalse(result["probe_complete"] or result["virtio_vga"])
 
     def test_firmware_must_be_a_matching_pair(self):
         (self.root / "OVMF_CODE.4m.fd").touch()

@@ -1,6 +1,7 @@
 """Read-only Linux host probes. TCP reachability never establishes guest identity."""
 import os
 import platform
+import re
 import shlex
 import shutil
 import socket
@@ -82,6 +83,20 @@ def kvm_info(path: Path = Path("/dev/kvm")) -> dict:
     return {"exists": exists, "read_write_access": exists and os.access(path, os.R_OK | os.W_OK)}
 
 
+def qemu_capabilities() -> dict:
+    path = shutil.which("qemu-system-x86_64")
+    result = {"virtio_vga": False, "gtk": False, "probe_complete": False}
+    if not path:
+        return result
+    try:
+        devices = subprocess.run([path, "-device", "help"], capture_output=True, text=True, timeout=3, check=False)
+        displays = subprocess.run([path, "-display", "help"], capture_output=True, text=True, timeout=3, check=False)
+        result.update({"virtio_vga": bool(re.search(r'^name "virtio-vga"(?:,|$)', devices.stdout, re.MULTILINE)), "gtk": "gtk" in displays.stdout.splitlines(), "probe_complete": devices.returncode == 0 and displays.returncode == 0})
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return result
+
+
 def find_firmware(directories=FIRMWARE_DIRECTORIES) -> dict:
     # A CODE/VARS pair must belong to the same format, not arbitrary matching files.
     for directory in directories:
@@ -154,6 +169,7 @@ def host_report(config: VMConfig) -> dict:
     memory = memory_info()
     cpu_count = os.cpu_count()
     processes = qemu_processes(config)
+    capabilities = qemu_capabilities() if config.values["provider"] == "qemu" else None
     # Probe only the configured loopback port by default, never scan other ports.
     probe = tcp_probe(config.values["ssh_host"], config.values["ssh_port"]) if config.values["provider"] == "qemu" or config.configured else {"reachable": None, "identity_verified": False, "reason": "not_configured"}
     missing = []
@@ -166,6 +182,8 @@ def host_report(config: VMConfig) -> dict:
     if config.values["provider"] == "qemu":
         require(platform.machine() == "x86_64", "x86-64 host for the KVM target", ["vm create", "vm start", "CPU benchmarks"])
         require(tools["qemu-system-x86_64"]["available"], "QEMU x86-64", ["vm start", "acceptance guests"])
+        require(capabilities["probe_complete"] and capabilities["virtio_vga"], "QEMU virtio-vga display device", ["vm start"])
+        require(capabilities["probe_complete"] and capabilities["gtk"], "QEMU local GTK display backend", ["vm start --display gtk"])
         require(tools["qemu-img"]["available"], "qemu-img", ["vm create", "cold snapshots"])
         require(tools["xorriso"]["available"], "xorriso", ["read-only seed ISO"])
         require(firmware["available"], "matching OVMF CODE/VARS files", ["UEFI vm create"])
@@ -182,7 +200,7 @@ def host_report(config: VMConfig) -> dict:
         "kernel": platform.release(), "execution_context": execution_context(),
         "logical_cpus": cpu_count, "memory": memory,
         "disk": {"workspace": str(config.root), "free_bytes": disk.free, "total_bytes": disk.total},
-        "tools": tools, "kvm": kvm, "firmware": firmware,
+        "tools": tools, "kvm": kvm, "firmware": firmware, "qemu_capabilities": capabilities,
         "configuration": {"local": config.configured, "provider": config.values["provider"], "name": config.values["name"]},
         "ssh_port": {"host": config.values["ssh_host"], "port": config.values["ssh_port"], "available_for_forwarding": probe["reachable"] is False, **probe},
         "guest": {"state": "not_verified", "identity_verified": False, "ssh_tcp_reachable": probe["reachable"]},

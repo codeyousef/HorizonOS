@@ -4,6 +4,7 @@ This module never installs an OS remotely or operates on host block devices.
 The console installer performs its own identity/disk checks before partitioning.
 """
 import hashlib
+from contextlib import contextmanager
 import json
 import os
 import fcntl
@@ -72,7 +73,7 @@ def run(arguments, timeout=60):
         raise failure(ExitCode.TIMEOUT, "TIMEOUT", "Bootstrap tool timed out") from error
     if result.returncode:
         # Never include SSH key contents or arbitrary full subprocess output.
-        raise failure(ExitCode.OPERATION_FAILURE, "OPERATION_FAILED", f"{Path(arguments[0]).name} exited {result.returncode}")
+        raise DevctlError(ExitCode.OPERATION_FAILURE, "OPERATION_FAILED", f"{Path(arguments[0]).name} exited {result.returncode}", details={"upstream_exit": result.returncode})
     return result
 
 
@@ -204,16 +205,25 @@ def seed_manifest(directory: Path):
     write_new(directory / "manifest.sha256", "".join(lines).encode(), 0o644)
 
 
-def create(config: VMConfig, authorization: str | None) -> tuple[ExitCode, dict]:
-    if config.values["provider"] != "qemu":
-        raise failure(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "External targets cannot be provisioned by QEMU")
-    private_directory(config.root, ".local")
-    lock = config.root / ".local/provisioning.lock"
+@contextmanager
+def operation_lock(root: Path):
+    private_directory(root, ".local")
+    lock = root / ".local/provisioning.lock"
     with os.fdopen(os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), "r+") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) & 0o077:
+            raise invalid("VM operation lock must be a private regular file")
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
-            raise failure(ExitCode.OPERATION_FAILURE, "PROVISIONING_BUSY", "Another provisioning operation is active") from error
+            raise failure(ExitCode.OPERATION_FAILURE, "VM_OPERATION_BUSY", "Another VM operation is active") from error
+        yield
+
+
+def create(config: VMConfig, authorization: str | None) -> tuple[ExitCode, dict]:
+    if config.values["provider"] != "qemu":
+        raise failure(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "External targets cannot be provisioned by QEMU")
+    with operation_lock(config.root):
         return create_locked(config, authorization)
 
 

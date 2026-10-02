@@ -9,9 +9,9 @@ import struct
 import time
 
 from .config import invalid, project_path, read_json
-from .doctor import tcp_probe
+from .doctor import qemu_capabilities, tcp_probe
 from .errors import DevctlError, ExitCode
-from .provision import DISK_SERIAL, digest_file, failure, private_directory, run, validate_plan, write_json_new
+from .provision import DISK_SERIAL, digest_file, failure, operation_lock, private_directory, run, validate_plan, write_json_new
 
 
 def load_record(config):
@@ -41,6 +41,20 @@ def load_record(config):
     if project_path(config.root, str(relative), ".local/vm") != candidate or candidate.is_symlink() or not candidate.is_file() or digest_file(candidate) != media["sha256"]:
         raise failure(ExitCode.VERIFICATION_FAILURE, "MEDIA_DIGEST_MISMATCH", "Installer media failed verification")
     return record
+
+
+def lifecycle(config, action, *, display="gtk", bootstrap=False):
+    if action == "start" and not bootstrap:
+        raise failure(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "Normal guest startup requires enrollment; use --bootstrap for the prepared installer")
+    load_record(config)
+    with operation_lock(config.root):
+        if action == "start":
+            return start(config, display, bootstrap)
+        if action == "console":
+            return console(config)
+        if action == "stop":
+            return stop(config)
+        raise invalid("Unknown lifecycle operation")
 
 
 def qemu_arguments(config, record, display):
@@ -144,6 +158,9 @@ def start(config, display, bootstrap):
         raise failure(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "Normal guest startup requires enrollment; use --bootstrap only for the prepared installer")
     record = load_record(config)
     private_directory(config.root, ".local/vm")
+    capabilities = qemu_capabilities()
+    if not capabilities["probe_complete"] or not capabilities["virtio_vga"] or display == "gtk" and not capabilities["gtk"]:
+        raise failure(ExitCode.UNMET_PREREQUISITE, "QEMU_DEVICE_UNAVAILABLE", "QEMU must provide virtio-vga and the requested display backend; doctor --host reports missing modules")
     state = config.root / ".local/vm/process.json"
     pidfile = config.root / ".local/vm/qemu.pid"
     if state.exists() or pidfile.exists() or any(config.paths[key].exists() for key in ("qmp_socket", "serial_socket")):
