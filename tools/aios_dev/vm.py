@@ -114,9 +114,12 @@ done
 mount -o ro,umask=0077 /dev/vda1 /mnt/boot
 mount --bind /dev /mnt/dev
 mount -o remount,bind,ro /mnt/dev
-test "$(cat /mnt/etc/aios/installation-uuid)" = INSTALLATION_UUID
-test "$(cat /mnt/etc/aios/guest-role)" = development
-test "$(cat /mnt/etc/aios/expected-dmi-uuid)" = GUEST_UUID
+chroot /mnt /nix/var/nix/profiles/system/sw/bin/bash -c 'set -eu
+export PATH=/nix/var/nix/profiles/system/sw/bin
+test "$(cat /etc/aios/installation-uuid)" = INSTALLATION_UUID
+test "$(cat /etc/aios/guest-role)" = development
+test "$(cat /etc/aios/expected-dmi-uuid)" = GUEST_UUID
+'
 test "$(ssh-keygen -lf /mnt/etc/ssh/ssh_host_ed25519_key.pub -E sha256 | awk '{print $2}')" = HOST_FINGERPRINT
 printf 'AIOS_LAYOUT_STORAGE GPT=verified EFI_BYTES=1073741824 ROOT_FS=btrfs UUID=%s DMI=%s RO=true NOLOGREPLAY=true\n' INSTALLATION_UUID GUEST_UUID
 chroot /mnt /nix/var/nix/profiles/system/sw/bin/python3 -c "$(printf %s AUDIT_SOURCE | base64 -d)" GUEST_UUID INSTALLATION_UUID HOST_FINGERPRINT

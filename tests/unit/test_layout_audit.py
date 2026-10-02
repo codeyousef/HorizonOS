@@ -91,7 +91,7 @@ class LayoutTests(unittest.TestCase):
         script = base64.b64decode(payload)
         self.assertEqual(subprocess.run(["bash", "-n"], input=script, capture_output=True, timeout=5).returncode, 0)
         self.assertIn(b"ro,rescue=nologreplay", script)
-        self.assertLess(script.index(b"ssh-keygen -lf"), script.index(b"chroot /mnt"))
+        self.assertLess(script.index(b"ssh-keygen -lf"), script.index(b"chroot /mnt /nix/var/nix/profiles/system/sw/bin/python3"))
 
     def test_graceful_timeout_never_forces_vm_or_removes_control_state(self):
         with tempfile.TemporaryDirectory() as temp:
