@@ -41,6 +41,10 @@
           substituteInPlace "$out/share/systemd/user/aios-sessiond.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-sessiond"
         '';
       });
+      guard = (productPackage "aios-guard" "aios-guard" "aios-guard").overrideAttrs (old: {
+        nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
+        buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
+      });
       model = (productPackage "aios-model" "aios-model" "aios-modeld").overrideAttrs (old: {
         AIOS_LLAMA_BRIDGE = "${llamaBridge}";
         postInstall = (old.postInstall or "") + ''
@@ -53,13 +57,13 @@
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios;
       nixosModules.production = import ./nix/modules/aios/production.nix;
-      packages.${system} = { aios-dev-tools = devTools; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
+      packages.${system} = { aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system}.host-unit = devTools;
       lib.developmentBoundary = import ./tests/nix/development.nix { inherit nixpkgs; };
       devShells.${system} = {
       lock-resolution = pkgs.mkShell { packages = [ pkgs.cargo pkgs.rustc ]; };
       default = pkgs.mkShell {
-        packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy ];
+        packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy pkg-config sqlite ];
         AIOS_LLAMA_BRIDGE = "${llamaBridge}";
       };
       model-conversion = pkgs.mkShell {
