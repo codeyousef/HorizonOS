@@ -14,6 +14,7 @@ in {
   networking.useDHCP = lib.mkDefault true;
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
+  fileSystems."/boot".options = lib.mkForce [ "fmask=0077" "dmask=0077" ];
   boot.kernelParams = [ "console=tty0" "console=ttyS0,115200n8" ];
   nix.settings = { experimental-features = [ "nix-command" "flakes" ]; trusted-users = [ "root" ]; sandbox = true; };
   users.users = lib.genAttrs serviceUsers (name: { isSystemUser = true; group = name; }) // {
@@ -24,7 +25,11 @@ in {
   services.openssh = {
     enable = true;
     hostKeys = [ { path = "/etc/ssh/ssh_host_ed25519_key"; type = "ed25519"; } ];
-    settings = { PermitRootLogin = "no"; PasswordAuthentication = false; KbdInteractiveAuthentication = false; AllowUsers = [ "dev" ]; AllowAgentForwarding = false; };
+    settings = {
+      PermitRootLogin = "no"; PasswordAuthentication = false; KbdInteractiveAuthentication = false;
+      AllowUsers = [ "dev" ]; AllowAgentForwarding = false; AllowTcpForwarding = "no";
+      AllowStreamLocalForwarding = "no"; PermitTunnel = "no"; X11Forwarding = false;
+    };
   };
   environment.systemPackages = with pkgs; [ identity python3 git cargo rustc rustfmt clippy btrfs-progs ];
   environment.etc."aios/installation-uuid".text = installationUUID + "\n";

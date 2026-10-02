@@ -7,7 +7,7 @@ python3 tools/devctl.py doctor --host --json
 python3 tools/devctl.py vm create --json
 python3 tools/devctl.py vm create --authorize-provision <printed-guest-uuid> --json
 python3 tools/devctl.py vm start --bootstrap --display gtk --json
-python3 tools/devctl.py vm console --json
+python3 tools/devctl.py vm console --capture --json
 ```
 
 The first create command records a private plan and returns exit 5. The second
@@ -32,31 +32,69 @@ powers off that exact VM through QMP; finish/unmount the installer first.
 No process-name kill, host mount, agent forwarding or remote display is used.
 
 The initial bootstrap starts a known installer; it does not establish an enrolled
-SSH target. Use its local graphical console for these commands:
+SSH target. Inspect the captured screen and wait for the NixOS installer shell
+before submitting the registered console bootstrap. All commands below run on
+the host, including when its shell is fish. No manual guest sudo step is needed:
 
 ```sh
-sudo mkdir -p /run/aios-seed
-sudo mount -o ro /dev/disk/by-label/AIOS_SEED /run/aios-seed
-sudo bash /run/aios-seed/bootstrap.sh
-sudo nixos-enter --root /mnt -c 'passwd tester'
-sudo umount -R /mnt
+python3 tools/devctl.py vm console --bootstrap-run --json
+python3 tools/devctl.py enroll --pin-console-only --json
+python3 tools/devctl.py vm console --bootstrap-finish --json
+python3 tools/devctl.py vm stop --json
+python3 tools/devctl.py vm start --display gtk --json
+python3 tools/devctl.py enroll --json
+python3 tools/devctl.py doctor --guest --json
 ```
 
 Before partitioning, the script checks NixOS, KVM/QEMU, the exact DMI UUID,
 read-only seed manifest, authorization, exactly one expected virtio disk, absence
 of partitions/signatures/mounts and a free installer mountpoint. It refuses all
-reinstallation. It creates GPT EFI/Btrfs with `@root`, `@home`, `@nix`, `@var`.
+reinstallation. Recovery with `--bootstrap-recover-unformatted` accepts only an
+interrupted GPT owned by the same provisioning UUID, with exactly the expected
+two partition labels/types and EFI size, no filesystems/signatures and no mounts.
+It does not repartition or overwrite a filesystem. Public seed updates use
+`vm create --refresh-seed` with the VM stopped; the disk and SSH key are preserved.
+It creates GPT EFI/Btrfs with `@root`, `@home`, `@nix`, `@var`.
 `dev` is not wheel or Nix-trusted; `tester` is wheel and gets a password only via
-the local console. Service accounts have no enabled AIOS services yet. SSH is
+the root-only console finish operation, generated inside the guest and retained
+in a mode-0600 guest root file outside the Nix store. Service accounts have no
+enabled AIOS services yet. SSH is
 key-only for `dev`, root login is disabled, and only root is Nix-trusted.
 
-Save the **public** host key and SHA256 fingerprint printed by the console. They
-must be pinned by the enrollment workflow before any SSH operation. Never copy
-or paste a private key or password. Host-key scans alone do not establish trust.
+The host captures the **public** host key and SHA256 fingerprint through a serial
+connection tied to the exact QEMU PID/UID, after checking QMP UUID and root disk.
+Console operations accept registered bootstrap/finish actions, not caller shell
+strings or arbitrary keystrokes. Completion requires an installer exit marker;
+delivery alone is not success. Evidence and receipts stay in private `.local`
+paths under the checkout. Console pinning checks media/seed/target identity,
+evidence digest, public key encoding and matching fingerprint before writing the
+private known_hosts file. Host-key scans alone do not establish trust.
 After enrollment, each guest operation checks NixOS, installation/DMI UUIDs and
 role; mutations additionally check disk and management identity. No remote guest
-command is implemented by the bootstrap provider. Rust/Nix/OS verification must
-run through that verified guest workflow.
+command other than the read-only identity endpoint is currently exposed over
+SSH. Rust/Nix/OS verification must run through that verified guest workflow.
+
+For a bootstrap access failure, the host can return to the verified installer and
+run `vm console --bootstrap-audit`: it mounts the installed subvolumes read-only,
+checks installation/role identity, and inspects public key metadata/account status
+and SSH journal evidence. `--bootstrap-repair-access` checks both UUIDs, virtio
+disk/serial, role, pinned public host key and private-key ownership/mode before
+making the SSH directory traversable and rebuilding the reviewed bootstrap
+configuration for next boot. It never repartitions or formats the existing disk.
+Private host-key files remain mode 0600; the shared SSH directory is mode 0755
+so `dev` can read its public authorized-key file.
+
+External-provider adoption accepts `enroll --trust-file .local/ssh/console.json`
+with an explicitly supplied, owned mode-0600 console record. Its exact schema is
+`schema_version: 1`, `host_public_key`, matching SHA256 `fingerprint`, canonical
+`guest_uuid` and `installation_uuid`, `guest_role`, `disk_serial` and
+`management_channel: "ssh-development"`. A key scan cannot supply this trust.
+External guests use the same pinned SSH identity checks; power and snapshot
+commands return unsupported until a verified provider adapter exists.
+
+Keep this checkout, VM disks, installer media, logs, caches, model data and build
+artifacts under `/mnt/Storage`. Guest `/nix`, `/home`, `/var` and root data reside
+on the virtual disk stored there; installer `/run` is guest runtime memory.
 
 When using the packaged `devctl`, specify `--workspace /path/to/checkout` before
 the command; the package's own Nix store path is not a writable VM workspace.

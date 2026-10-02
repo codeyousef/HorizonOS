@@ -205,6 +205,43 @@ def seed_manifest(directory: Path):
     write_new(directory / "manifest.sha256", "".join(lines).encode(), 0o644)
 
 
+def refresh_seed(config: VMConfig):
+    """Replace public bootstrap media only, while the managed VM is stopped."""
+    from .vm import load_record
+    with operation_lock(config.root):
+        record = load_record(config)
+        controls = [config.root / ".local/vm/process.json", config.root / ".local/vm/qemu.pid",
+                    config.paths["qmp_socket"], config.paths["serial_socket"]]
+        if any(path.exists() for path in controls):
+            raise failure(ExitCode.TARGET_MISMATCH, "VM_MUST_BE_STOPPED", "Stop the verified VM before refreshing public bootstrap media")
+        directory = private_directory(config.root, ".local/vm")
+        seed = private_directory(config.root, f".local/vm/seed-{uuid.uuid4()}")
+        public = Path(str(config.paths["identity_file"]) + ".pub").read_text().strip()
+        if not re.fullmatch(r"ssh-ed25519 [A-Za-z0-9+/=]+(?: [a-zA-Z0-9_-]+)?", public):
+            raise invalid("Unexpected public key format")
+        for relative in source_files(config.root):
+            target = seed / "source" / relative
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            write_new(target, (config.root / relative).read_bytes(), 0o644)
+        plan = record["plan"]
+        for name, value in (("guest.uuid", plan["guest_uuid"]), ("installation.uuid", plan["installation_uuid"]),
+                            ("disk.serial", DISK_SERIAL), ("authorized.uuid", record["authorized_uuid"]), ("dev.pub", public)):
+            write_new(seed / name, (value + "\n").encode(), 0o644)
+        write_new(seed / "bootstrap.sh", (config.root / "dev/seed/bootstrap.sh").read_bytes(), 0o644)
+        seed_manifest(seed)
+        iso = directory / (seed.name + ".iso")
+        run(["xorriso", "-as", "mkisofs", "-quiet", "-V", "AIOS_SEED", "-o", str(iso), str(seed)])
+        previous = config.root / ".local/provisioning.json"
+        write_new(directory / (seed.name + "-previous-provisioning.json"), previous.read_bytes())
+        source = run(["git", "-C", str(config.root), "rev-parse", "HEAD"]).stdout.strip()
+        dirty = bool(run(["git", "-C", str(config.root), "status", "--porcelain"]).stdout.strip())
+        updated = {**record, "seed_iso": str(iso), "seed_sha256": digest_file(iso), "seed_source_commit": source, "seed_source_dirty": dirty}
+        temporary = directory / (seed.name + "-provisioning.json")
+        write_json_new(temporary, updated)
+        os.replace(temporary, previous)
+        return ExitCode.SUCCESS, {"seed_iso": str(iso), "seed_sha256": updated["seed_sha256"], "source_commit": source, "source_dirty": dirty}
+
+
 @contextmanager
 def operation_lock(root: Path):
     private_directory(root, ".local")

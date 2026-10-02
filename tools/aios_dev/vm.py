@@ -1,7 +1,10 @@
 """Rootless host VM lifecycle. No SSH execution, mounts or process-name kills."""
 import json
+import base64
+import hashlib
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import stat
@@ -12,6 +15,158 @@ from .config import invalid, project_path, read_json
 from .doctor import qemu_capabilities, tcp_probe
 from .errors import DevctlError, ExitCode
 from .provision import DISK_SERIAL, digest_file, failure, operation_lock, private_directory, run, validate_plan, write_json_new
+
+
+# This is a single registered bootstrap operation, not a shell/keyboard RPC.
+# The verified official ISO supplies the console; the seed script checks guest
+# OS/DMI/virtual disk/freshness/authorization before its first disk mutation.
+BOOTSTRAP_CONSOLE = (
+    "sudo bash -c 'exec > /dev/ttyS0 2>&1; "
+    "mkdir -p /run/aios-seed && "
+    "mount -o ro /dev/disk/by-label/AIOS_SEED /run/aios-seed && "
+    "bash /run/aios-seed/bootstrap.sh; "
+    "status=$?; printf \"AIOS_BOOTSTRAP_EXIT=%s\\n\" \"$status\"'"
+)
+BOOTSTRAP_INSPECT = (
+    "sudo bash -c 'exec > /dev/ttyS0 2>&1; "
+    "cat /etc/os-release; systemd-detect-virt --vm; cat /sys/class/dmi/id/product_uuid; "
+    "lsblk -o NAME,SERIAL,FSTYPE,UUID; findmnt /mnt; ls /mnt/etc/nixos'"
+)
+
+
+def encoded_console_script(script, sentinel):
+    encoded = base64.b64encode(script.encode())
+    if len(encoded) > 65536:
+        raise invalid("Registered console script exceeds 64 KiB")
+    command = ("sudo bash -c 'exec > /dev/ttyS0 2>&1; stty -F /dev/ttyS0 raw -echo; "
+               "printf \"AIOS_CONSOLE_READY\\n\"; head -c " + str(len(encoded)) +
+               " < /dev/ttyS0 | base64 -d > /run/aios-console-action.sh; bash /run/aios-console-action.sh; "
+               "status=$?; printf \"" + sentinel + "=%s\\n\" \"$status\"'")
+    return command, encoded
+
+
+def finish_console_command(record):
+    # Only canonical UUIDs from the already validated provisioning record enter
+    # this registered script. The generated tester secret never leaves the guest.
+    plan = record["plan"]
+    script = """#!/usr/bin/env bash
+set -euo pipefail
+test "$(sed -n 's/^ID=//p' /etc/os-release)" = nixos
+test "$(systemd-detect-virt --vm)" = kvm
+test "$(cat /sys/class/dmi/id/product_uuid)" = GUEST_UUID
+test "$(lsblk --nodeps --noheadings --output SERIAL /dev/vda | xargs)" = AIOS_DEV_ROOT
+test "$(findmnt --noheadings --output UUID /mnt)" = INSTALLATION_UUID
+nixos-enter --root /mnt -c 'set -eu
+test "$(cat /etc/aios/installation-uuid)" = INSTALLATION_UUID
+test "$(cat /etc/aios/guest-role)" = development
+umask 077
+head -c 48 /dev/urandom | base64 > /root/.aios-tester-secret
+{ printf "tester:"; cat /root/.aios-tester-secret; } | chpasswd
+'
+umount -R /mnt
+sync
+""".replace("GUEST_UUID", plan["guest_uuid"]).replace("INSTALLATION_UUID", plan["installation_uuid"])
+    return encoded_console_script(script, "AIOS_FINISH_EXIT")
+
+
+def audit_console_command(record):
+    plan = record["plan"]
+    script = """#!/usr/bin/env bash
+set -euo pipefail
+test "$(sed -n 's/^ID=//p' /etc/os-release)" = nixos
+test "$(systemd-detect-virt --vm)" = kvm
+test "$(cat /sys/class/dmi/id/product_uuid)" = GUEST_UUID
+test "$(lsblk --nodeps --noheadings --output SERIAL /dev/vda | xargs)" = AIOS_DEV_ROOT
+test "$(lsblk --noheadings --output UUID /dev/vda2 | xargs)" = INSTALLATION_UUID
+mount -o ro,subvol=@root /dev/vda2 /mnt
+trap 'umount -R /mnt' EXIT
+mount -o ro,subvol=@var /dev/vda2 /mnt/var
+mount -o ro,subvol=@nix /dev/vda2 /mnt/nix
+mount -o ro,subvol=@home /dev/vda2 /mnt/home
+mount --bind /dev /mnt/dev
+chroot /mnt /nix/var/nix/profiles/system/sw/bin/bash -c 'set -eu
+export PATH=/nix/var/nix/profiles/system/sw/bin
+test "$(cat /etc/aios/installation-uuid)" = INSTALLATION_UUID
+test "$(cat /etc/aios/guest-role)" = development
+passwd -S dev
+getent passwd dev
+ssh-keygen -lf /etc/ssh/authorized_keys.d/dev
+namei -l /etc/ssh/authorized_keys.d/dev
+sshd -T | grep -E "^(usepam|authorizedkeysfile|pubkeyauthentication|allowusers) "
+ls -ld /home /home/dev /etc/ssh/authorized_keys.d
+'
+journalctl --directory=/mnt/var/log/journal -u sshd.service --no-pager -n 30 || true
+""".replace("GUEST_UUID", plan["guest_uuid"]).replace("INSTALLATION_UUID", plan["installation_uuid"])
+    return encoded_console_script(script, "AIOS_AUDIT_EXIT")
+
+
+def repair_console_command(config, record):
+    from .guest import load_trust
+    from .provision import source_files
+    trust = load_trust(config)
+    fingerprint = trust["host_key_fingerprint"]
+    if not re.fullmatch(r"SHA256:[A-Za-z0-9/+]{43}", fingerprint):
+        raise invalid("Invalid pinned SSH fingerprint")
+    relative = Path("nix/machines/aios-dev/bootstrap.nix")
+    identity_relative = Path("tools/guest/identity.py")
+    approved = source_files(config.root)
+    if relative not in approved or identity_relative not in approved:
+        raise invalid("Bootstrap repair source must be reviewed tracked source")
+    source = base64.b64encode((config.root / relative).read_bytes()).decode()
+    identity_source = base64.b64encode((config.root / identity_relative).read_bytes()).decode()
+    script = """#!/usr/bin/env bash
+set -euo pipefail
+test "$(sed -n 's/^ID=//p' /etc/os-release)" = nixos
+test "$(systemd-detect-virt --vm)" = kvm
+test "$(cat /sys/class/dmi/id/product_uuid)" = GUEST_UUID
+test "$(lsblk --nodeps --noheadings --output SERIAL /dev/vda | xargs)" = AIOS_DEV_ROOT
+test "$(readlink -f /sys/class/block/vda/device/driver)" = /sys/bus/virtio/drivers/virtio_blk
+test "$(lsblk --noheadings --output UUID /dev/vda2 | xargs)" = INSTALLATION_UUID
+mount -o ro,subvol=@root /dev/vda2 /mnt
+trap 'umount -R /mnt' EXIT
+mount -o ro,subvol=@nix /dev/vda2 /mnt/nix
+chroot /mnt /nix/var/nix/profiles/system/sw/bin/bash -c 'set -eu
+export PATH=/nix/var/nix/profiles/system/sw/bin
+test "$(cat /etc/aios/installation-uuid)" = INSTALLATION_UUID
+test "$(cat /etc/aios/guest-role)" = development
+test "$(sed -n "s/^ID=//p" /etc/os-release)" = nixos
+'
+test "$(ssh-keygen -lf /mnt/etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}')" = HOST_FINGERPRINT
+test "$(stat -c %a /mnt/etc/ssh/ssh_host_ed25519_key)" = 600
+test "$(stat -c %u /mnt/etc/ssh/ssh_host_ed25519_key)" = 0
+mount -o remount,rw /mnt
+mount -o remount,rw /mnt/nix
+mount -o subvol=@var /dev/vda2 /mnt/var
+mount -o subvol=@home /dev/vda2 /mnt/home
+mount -o umask=0077 /dev/vda1 /mnt/boot
+chmod 0755 /mnt/etc/ssh
+echo NIX_SOURCE | base64 -d > /mnt/etc/nixos/bootstrap.nix
+echo IDENTITY_SOURCE | base64 -d > /mnt/etc/nixos/identity.py
+nixos-enter --root /mnt -c 'nixos-rebuild boot'
+sync
+""".replace("GUEST_UUID", record["plan"]["guest_uuid"]).replace("INSTALLATION_UUID", record["plan"]["installation_uuid"]).replace("HOST_FINGERPRINT", fingerprint).replace("NIX_SOURCE", source).replace("IDENTITY_SOURCE", identity_source)
+    return encoded_console_script(script, "AIOS_REPAIR_EXIT")
+
+
+def console_keys(text):
+    plain = {" ": "spc", "-": "minus", "=": "equal", "/": "slash",
+             ".": "dot", ",": "comma", ";": "semicolon", "'": "apostrophe", "\\": "backslash"}
+    shifted = {">": "dot", "<": "comma", "&": "7", "_": "minus", ":": "semicolon",
+               "$": "4", "%": "5", "+": "equal", "|": "backslash", "?": "slash", '"': "apostrophe"}
+    result = []
+    for character in text:
+        if character in "abcdefghijklmnopqrstuvwxyz0123456789":
+            keys = [character]
+        elif character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            keys = ["shift", character.lower()]
+        elif character in plain:
+            keys = [plain[character]]
+        elif character in shifted:
+            keys = ["shift", shifted[character]]
+        else:
+            raise invalid("Unsupported character in registered bootstrap console operation")
+        result.append(keys)
+    return result
 
 
 def load_record(config):
@@ -44,8 +199,6 @@ def load_record(config):
 
 
 def lifecycle(config, action, *, display="gtk", bootstrap=False):
-    if action == "start" and not bootstrap:
-        raise failure(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "Normal guest startup requires enrollment; use --bootstrap for the prepared installer")
     load_record(config)
     with operation_lock(config.root):
         if action == "start":
@@ -57,7 +210,7 @@ def lifecycle(config, action, *, display="gtk", bootstrap=False):
         raise invalid("Unknown lifecycle operation")
 
 
-def qemu_arguments(config, record, display):
+def qemu_arguments(config, record, display, *, bootstrap=True):
     if display not in ("gtk", "none"):
         raise invalid("Only local GTK or headless display is supported")
     if config.values["ssh_host"] != "127.0.0.1":
@@ -70,18 +223,22 @@ def qemu_arguments(config, record, display):
     executable = shutil.which("qemu-system-x86_64")
     if not executable:
         raise failure(ExitCode.UNMET_PREREQUISITE, "MISSING_TOOL", "QEMU x86-64 is required")
+    media = ["-drive", f"if=none,id=installer,media=cdrom,readonly=on,file={record['media']['path']}",
+             "-device", "ide-cd,drive=installer,bus=ide.0,bootindex=1",
+             "-drive", f"if=none,id=seed,media=cdrom,readonly=on,file={record['seed_iso']}",
+             "-device", "ide-cd,drive=seed,bus=ide.1"] if bootstrap else []
     return [executable, "-name", config.values["name"], "-machine", "q35,accel=kvm", "-cpu", "host",
             "-smp", str(config.values["vcpus"]), "-m", str(config.values["memory_mib"]), "-uuid", record["plan"]["guest_uuid"],
             "-drive", f"if=pflash,format=raw,readonly=on,file={record['firmware_code']}",
             "-drive", f"if=pflash,format=raw,file={config.paths['nvram_file']}",
             "-drive", f"if=none,id=rootdisk,format=qcow2,file={config.paths['disk_image']}",
-            "-device", f"virtio-blk-pci,drive=rootdisk,serial={DISK_SERIAL}",
-            "-drive", f"file={record['media']['path']},media=cdrom,readonly=on", "-drive", f"file={record['seed_iso']},media=cdrom,readonly=on",
+            "-device", f"virtio-blk-pci,drive=rootdisk,serial={DISK_SERIAL},bootindex={2 if bootstrap else 1}",
+            *media,
             "-netdev", f"user,id=net0,hostfwd=tcp:127.0.0.1:{config.values['ssh_port']}-:22", "-device", "virtio-net-pci,netdev=net0",
             "-device", "virtio-vga", "-display", display,
             "-qmp", f"unix:{config.paths['qmp_socket']},server=on,wait=off",
             "-chardev", f"socket,id=serial0,path={config.paths['serial_socket']},server=on,wait=off,logfile={config.paths['serial_log']}",
-            "-serial", "chardev:serial0", "-boot", "order=d,menu=on", "-daemonize", "-pidfile", str(config.root / ".local/vm/qemu.pid")]
+            "-serial", "chardev:serial0", "-boot", "menu=on", "-daemonize", "-pidfile", str(config.root / ".local/vm/qemu.pid")]
 
 
 def process_identity(pid, proc=Path("/proc")):
@@ -131,8 +288,14 @@ class QMP:
     def command(self, name):
         if name not in ("qmp_capabilities", "query-uuid", "query-block", "query-status", "quit"):
             raise invalid("Unregistered QMP lifecycle operation")
+        return self._request(name)
+
+    def _request(self, name, arguments=None):
         verify_process(self.process)
-        self.socket.sendall((json.dumps({"execute": name, "id": name}) + "\n").encode())
+        message = {"execute": name, "id": name}
+        if arguments is not None:
+            message["arguments"] = arguments
+        self.socket.sendall((json.dumps(message) + "\n").encode())
         for _ in range(64):
             response = self.read()
             if response.get("id") == name:
@@ -140,6 +303,103 @@ class QMP:
                     raise failure(ExitCode.OPERATION_FAILURE, "QMP_OPERATION_FAILED", f"QMP rejected {name}")
                 return response["return"]
         raise failure(ExitCode.TIMEOUT, "QMP_TIMEOUT", "No matching lifecycle response")
+
+    def capture(self, config):
+        # Host display observation, with no guest command or keyboard input.
+        verify_block(self, config)
+        directory = private_directory(config.root, ".local/vm/console")
+        path = directory / f"screen-{time.time_ns()}.png"
+        self._request("screendump", {"filename": str(path), "format": "png"})
+        path.chmod(0o600)
+        return path
+
+    def bootstrap_console(self, config, *, resume=False, finish=False, audit=False, repair=False):
+        if sum((resume, finish, audit, repair)) > 1:
+            raise invalid("Choose one registered bootstrap console operation")
+        verify_block(self, config)
+        record = load_record(config)
+        if f"if=none,id=installer,media=cdrom,readonly=on,file={record['media']['path']}" not in self.process["arguments"]:
+            raise failure(ExitCode.TARGET_MISMATCH, "INSTALLER_CONSOLE_REQUIRED", "Bootstrap actions require the verified official installer console")
+        command = BOOTSTRAP_CONSOLE
+        operation = "repair" if repair else "audit" if audit else "finish" if finish else "bootstrap"
+        if repair:
+            command = repair_console_command(config, record)
+        if audit:
+            from .guest import load_trust
+            load_trust(config)
+            command = audit_console_command(record)
+        if finish:
+            from .guest import load_trust
+            load_trust(config)
+            command = finish_console_command(load_record(config))
+        if resume:
+            command = command.replace("bash /run/aios-seed/bootstrap.sh;", "bash /run/aios-seed/bootstrap.sh --resume-unformatted;")
+        payload = None
+        if isinstance(command, tuple):
+            command, payload = command
+        sequence = [["ctrl", "c"], ["ctrl", "u"], *console_keys(command), ["ret"]]
+        attempt = f"{self.process['pid']}-{time.time_ns()}" if audit or repair else str(self.process["pid"])
+        marker = config.root / f".local/vm/{operation}-console-{attempt}.json"
+        # Retain attempted state even on interrupted delivery. Never retry an
+        # installer blindly after a partial command or possible disk mutation.
+        write_json_new(marker, {"schema_version": 1, "state": "delivery-started",
+                                "process": self.process, "operation": "recover-unformatted" if resume else operation,
+                                "command_sha256": hashlib.sha256(command.encode()).hexdigest(),
+                                "payload_sha256": hashlib.sha256(payload).hexdigest() if payload is not None else None})
+        with serial_connection(config, self.process) as serial:
+            directory = private_directory(config.root, ".local/vm/console")
+            path = directory / f"{operation}-{attempt}.log"
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb", buffering=0) as output:
+                self._console_sequence(sequence)
+                # QEMU accepts one QMP client on this endpoint. Release it while
+                # the installer runs so read-only console captures stay usable.
+                self.close()
+                deadline = time.monotonic() + 3600
+                trailing = b""
+                while time.monotonic() < deadline:
+                    verify_process(self.process)
+                    try:
+                        chunk = serial.recv(65536)
+                    except socket.timeout:
+                        continue
+                    if not chunk:
+                        raise failure(ExitCode.VERIFICATION_FAILURE, "BOOTSTRAP_CONSOLE_CLOSED", "Bootstrap serial channel closed before completion")
+                    if output.tell() + len(chunk) > 64 * 1024 * 1024:
+                        raise failure(ExitCode.VERIFICATION_FAILURE, "SERIAL_EVIDENCE_LIMIT", "Bootstrap evidence exceeds 64 MiB")
+                    output.write(chunk)
+                    trailing = (trailing + chunk)[-65536:]
+                    if payload is not None and b"AIOS_CONSOLE_READY\n" in trailing:
+                        serial.sendall(payload)
+                        payload = None
+                    sentinel = b"AIOS_REPAIR_EXIT" if repair else b"AIOS_AUDIT_EXIT" if audit else b"AIOS_FINISH_EXIT" if finish else b"AIOS_BOOTSTRAP_EXIT"
+                    match = re.search(rb"(?:^|[\r\n])" + sentinel + rb"=([0-9]+)[\r\n]", trailing)
+                    if match:
+                        status = int(match[1])
+                        if status == 0 and not audit and not repair:
+                            record = load_record(config)
+                            receipt_name = "bootstrap-finish.json" if finish else "bootstrap-result.json"
+                            write_json_new(config.root / ".local/vm" / receipt_name, {
+                                "schema_version": 1, "upstream_exit": status,
+                                "guest_uuid": record["plan"]["guest_uuid"],
+                                "installation_uuid": record["plan"]["installation_uuid"],
+                                "seed_sha256": record["seed_sha256"],
+                                "media_sha256": record["media"]["sha256"],
+                                "serial_path": str(path), "serial_sha256": digest_file(path),
+                                "process": self.process,
+                            })
+                        state = "access-repaired" if repair else "audited" if audit else "setup-finished" if finish else "installer-finished"
+                        return (ExitCode.SUCCESS if status == 0 else ExitCode.OPERATION_FAILURE), {"state": state if status == 0 else "bootstrap-failed", "upstream_exit": status, "artifact_path": str(path), "guest_identity_verified": False}
+                raise failure(ExitCode.TIMEOUT, "BOOTSTRAP_TIMEOUT", "Bootstrap did not finish in one hour; no retry or disk reset attempted")
+
+    def inspect_console(self, config):
+        verify_block(self, config)
+        self._console_sequence([["ctrl", "u"], *console_keys(BOOTSTRAP_INSPECT), ["ret"]])
+
+    def _console_sequence(self, sequence):
+        for keys in sequence:
+            self._request("send-key", {"keys": [{"type": "qcode", "data": key} for key in keys], "hold-time": 10})
+            time.sleep(0.03)
 
     def close(self):
         self.reader.close()
@@ -154,9 +414,13 @@ def verify_block(client, config):
 
 
 def start(config, display, bootstrap):
-    if not bootstrap:
-        raise failure(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "Normal guest startup requires enrollment; use --bootstrap only for the prepared installer")
     record = load_record(config)
+    if not bootstrap:
+        from .guest import load_trust
+        trust = load_trust(config)
+        receipt = read_json(project_path(config.root, ".local/vm/bootstrap-finish.json", ".local/vm"))
+        if receipt.get("upstream_exit") != 0 or receipt.get("guest_uuid") != record["plan"]["guest_uuid"] or trust["expected"]["guest_uuid"] != record["plan"]["guest_uuid"]:
+            raise failure(ExitCode.TARGET_MISMATCH, "INSTALLATION_NOT_FINISHED", "Installed startup requires verified cleanup and console SSH trust")
     private_directory(config.root, ".local/vm")
     capabilities = qemu_capabilities()
     if not capabilities["probe_complete"] or not capabilities["virtio_vga"] or display == "gtk" and not capabilities["gtk"]:
@@ -167,7 +431,7 @@ def start(config, display, bootstrap):
         raise failure(ExitCode.TARGET_MISMATCH, "EXISTING_VM_CONTROL", "Refusing to attach to or overwrite existing VM control artifacts")
     if tcp_probe(config.values["ssh_host"], config.values["ssh_port"])["reachable"] is not False:
         raise failure(ExitCode.UNMET_PREREQUISITE, "PORT_UNAVAILABLE", "Cannot prove the configured loopback port is free")
-    args = qemu_arguments(config, record, display)
+    args = qemu_arguments(config, record, display, bootstrap=bootstrap)
     run(args, timeout=15)
     pid = int(pidfile.read_text().strip())
     process = process_identity(pid)
@@ -181,10 +445,46 @@ def start(config, display, bootstrap):
         status = client.command("query-status")
     finally:
         client.close()
-    return ExitCode.SUCCESS, {"state": "bootstrap-running", "guest_identity_verified": False, "qmp_uuid_verified": True, "pid": pid, "qemu_status": status, "display": display, "message": "Use the local GTK installer console; no SSH guest operation is enabled."}
+    return ExitCode.SUCCESS, {"state": "bootstrap-running" if bootstrap else "installed-running", "guest_identity_verified": False, "qmp_uuid_verified": True, "pid": pid, "qemu_status": status, "display": display, "message": "Verify/enroll guest SSH identity before guest operations."}
 
 
-def console(config):
+def console(config, *, capture=False, bootstrap_run=False, bootstrap_inspect=False, bootstrap_recover=False, bootstrap_finish=False, bootstrap_audit=False, bootstrap_repair=False):
+    record = load_record(config)
+    process = read_json(project_path(config.root, ".local/vm/process.json", ".local/vm"))
+    client = QMP(config, process, record["plan"]["guest_uuid"])
+    try:
+        verify_block(client, config)
+        if capture:
+            path = client.capture(config)
+            return ExitCode.SUCCESS, {"guest_uuid": record["plan"]["guest_uuid"], "artifact_path": str(path), "guest_identity_verified": False}
+        if bootstrap_run or bootstrap_recover or bootstrap_finish or bootstrap_audit or bootstrap_repair:
+            return client.bootstrap_console(config, resume=bootstrap_recover, finish=bootstrap_finish, audit=bootstrap_audit, repair=bootstrap_repair)
+        if bootstrap_inspect:
+            client.inspect_console(config)
+            return ExitCode.SUCCESS, {"state": "bootstrap-inspection-submitted", "guest_identity_verified": False}
+    finally:
+        client.close()
+    return ExitCode.SUCCESS, {"guest_uuid": record["plan"]["guest_uuid"], "message": "Use the local QEMU GTK display. Mount AIOS_SEED read-only at /run/aios-seed, then run sudo bash /run/aios-seed/bootstrap.sh in the NixOS installer console.", "guest_identity_verified": False}
+
+
+def serial_connection(config, process):
+    verify_process(process)
+    serial = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        serial.settimeout(1)
+        serial.connect(str(config.paths["serial_socket"]))
+        pid, uid, _ = struct.unpack("3i", serial.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+        if pid != process["pid"] or uid != os.getuid():
+            raise failure(ExitCode.TARGET_MISMATCH, "SERIAL_PEER_MISMATCH", "Serial peer is not the verified QEMU process")
+        return serial
+    except BaseException:
+        serial.close()
+        raise
+
+
+def follow_console(config, seconds):
+    # Read-only local serial transport; it never sends console input. QEMU's
+    # socket backend needs a connected reader while the guest transmits.
     record = load_record(config)
     process = read_json(project_path(config.root, ".local/vm/process.json", ".local/vm"))
     client = QMP(config, process, record["plan"]["guest_uuid"])
@@ -192,7 +492,26 @@ def console(config):
         verify_block(client, config)
     finally:
         client.close()
-    return ExitCode.SUCCESS, {"guest_uuid": record["plan"]["guest_uuid"], "message": "Use the local QEMU GTK display. Mount AIOS_SEED read-only at /run/aios-seed, then run sudo bash /run/aios-seed/bootstrap.sh in the NixOS installer console.", "guest_identity_verified": False}
+    directory = private_directory(config.root, ".local/vm/console")
+    path = directory / "serial-capture.log"
+    with serial_connection(config, process) as serial:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "ab", buffering=0) as output:
+            if not stat.S_ISREG(os.fstat(output.fileno()).st_mode):
+                raise invalid("Serial evidence must be a regular file")
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                verify_process(process)
+                try:
+                    chunk = serial.recv(65536)
+                except socket.timeout:
+                    continue
+                if not chunk:
+                    break
+                if output.tell() + len(chunk) > 64 * 1024 * 1024:
+                    raise failure(ExitCode.VERIFICATION_FAILURE, "SERIAL_EVIDENCE_LIMIT", "Serial evidence exceeds 64 MiB")
+                output.write(chunk)
+    return ExitCode.SUCCESS, {"artifact_path": str(path), "guest_identity_verified": False}
 
 
 def stop(config):

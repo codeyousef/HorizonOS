@@ -22,7 +22,7 @@ def main():
         "installation_uuid": text("/etc/aios/installation-uuid"), "guest_role": text("/etc/aios/guest-role"),
         "boot_id": text("/proc/sys/kernel/random/boot_id"), "machine_id": text("/etc/machine-id"),
         "current_system": str(Path("/run/current-system").resolve(strict=True)),
-        "disk_serial": text("/sys/class/block/vda/device/serial"), "management_channel": "ssh-development",
+        "disk_serial": text("/sys/class/block/vda/serial"), "management_channel": "ssh-development",
     }, sort_keys=True))
 
 

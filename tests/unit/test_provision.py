@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from aios_dev.config import VMConfig
 from aios_dev.errors import DevctlError, ExitCode
 from aios_dev.provision import CHECKSUM_URL, create, digest_file, fetch_media, official_url, operation_lock, prepare_plan, private_directory, run, seed_manifest, source_files, validate_plan
-from aios_dev.vm import qemu_arguments, verify_block, verify_process
+from aios_dev.vm import BOOTSTRAP_CONSOLE, BOOTSTRAP_INSPECT, QMP, console_keys, qemu_arguments, verify_block, verify_process
 
 EXAMPLE = json.loads((ROOT / "dev/vm.example.json").read_text())
 
@@ -179,6 +179,37 @@ class ProvisionTests(unittest.TestCase):
         with self.assertRaises(DevctlError) as caught:
             verify_block(client, self.config)
         self.assertEqual(caught.exception.code, "VM_DISK_MISMATCH")
+
+    def test_bootstrap_console_has_no_caller_shell_or_keyboard_rpc(self):
+        for registered in (BOOTSTRAP_CONSOLE, BOOTSTRAP_INSPECT):
+            self.assertTrue(console_keys(registered))
+        client = object.__new__(QMP)
+        for forbidden in ("send-key", "human-monitor-command", "blockdev-add", "system_reset"):
+            with self.subTest(forbidden=forbidden), self.assertRaises(DevctlError):
+                client.command(forbidden)
+
+    def test_keyboard_rejects_control_sequences_before_delivery(self):
+        for value in ("echo a\nrm", "\x1b", "\x00", "unicode \u2603"):
+            with self.subTest(value=value), self.assertRaises(DevctlError):
+                console_keys(value)
+
+    def test_bootstrap_wrong_disk_cannot_send_console_input(self):
+        client = object.__new__(QMP)
+        with patch("aios_dev.vm.verify_block", side_effect=DevctlError(ExitCode.TARGET_MISMATCH, "VM_DISK_MISMATCH", "fixture")), patch.object(client, "_console_sequence") as send:
+            with self.assertRaises(DevctlError):
+                client.bootstrap_console(self.config)
+        send.assert_not_called()
+        self.assertFalse(list(self.root.glob(".local/vm/bootstrap-console*")))
+
+    def test_seed_refresh_cannot_change_running_vm_media(self):
+        from aios_dev.provision import refresh_seed
+        private_directory(self.root, ".local/vm")
+        (self.root / ".local/vm/process.json").write_text("running fixture")
+        with patch("aios_dev.vm.load_record", return_value={}), patch("aios_dev.provision.source_files") as collect:
+            with self.assertRaises(DevctlError) as caught:
+                refresh_seed(self.config)
+        self.assertEqual(caught.exception.code, "VM_MUST_BE_STOPPED")
+        collect.assert_not_called()
 
 
 if __name__ == "__main__":
