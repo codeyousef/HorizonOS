@@ -22,9 +22,11 @@ connectivity. It does not install packages, change groups, enroll SSH keys or
 write VM configuration. Missing prerequisites are reported with exit status 3.
 
 Copy `dev/vm.example.json` to ignored `.local/vm.json` only when configuring a
-target. No guest operation is permitted until trusted enrollment is implemented
-and verified. Command surfaces for subsequent VM/build/deployment operations
-report `UNSUPPORTED_CAPABILITY` until their implementations exist.
+target. `vm create` prepares a reviewable plan; its UUID authorizes preparation
+of a fresh virtual disk. The protected QEMU bootstrap uses official installer
+media and a read-only public seed. See [bootstrap deployment](docs/deployment.md).
+Guest SSH/build/deployment operations report `UNSUPPORTED_CAPABILITY` until
+trusted enrollment and their implementations exist.
 
 ## Engineering boundaries
 

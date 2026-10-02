@@ -7,6 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
+from . import provision, vm
 
 
 class Parser(argparse.ArgumentParser):
@@ -25,7 +26,11 @@ def parser() -> Parser:
     scope.add_argument("--host", action="store_true")
     scope.add_argument("--guest", action="store_true")
     vm = commands.add_parser("vm").add_subparsers(dest="operation", required=True)
-    for action in ("create", "start", "console", "stop"):
+    vm.add_parser("create").add_argument("--authorize-provision", metavar="GUEST_UUID")
+    start = vm.add_parser("start")
+    start.add_argument("--bootstrap", action="store_true")
+    start.add_argument("--display", choices=("gtk", "none"), default="gtk")
+    for action in ("console", "stop"):
         vm.add_parser(action)
     for action in ("snapshot", "restore"):
         vm.add_parser(action).add_argument("--name", required=True)
@@ -46,6 +51,17 @@ def dispatch(args) -> tuple[ExitCode, dict]:
     if args.command == "doctor" and args.host:
         data = host_report(load_config(args.workspace))
         return (ExitCode.UNMET_PREREQUISITE if data["missing_prerequisites"] else ExitCode.SUCCESS), data
+    if args.command == "vm" and args.operation in ("create", "start", "console", "stop"):
+        config = load_config(args.workspace)
+        if config.values["provider"] != "qemu":
+            raise DevctlError(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "External provider has no verified power/provisioning adapter")
+        if args.operation == "create":
+            return provision.create(config, args.authorize_provision)
+        if args.operation == "start":
+            return vm.start(config, args.display, args.bootstrap)
+        if args.operation == "console":
+            return vm.console(config)
+        return vm.stop(config)
     # No unverified SSH, guest shell or host mutation fallback is available.
     raise DevctlError(
         ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY",
@@ -65,14 +81,17 @@ def main(argv=None) -> int:
     except DevctlError as failure:
         code = failure.exit_code
         error = {"code": failure.code, "message": str(failure)}
+    except TimeoutError:
+        code = ExitCode.TIMEOUT
+        error = {"code": "TIMEOUT", "message": "Host operation timed out"}
     except (OSError, ValueError) as failure:
         code = ExitCode.OPERATION_FAILURE
         error = {"code": "OPERATION_FAILED", "message": f"Host operation failed: {type(failure).__name__}"}
     result = {
         "schema_version": 1,
         "command": " ".join(filter(None, (getattr(args, "command", None), getattr(args, "operation", None)))),
-        "target": "host" if args and args.command == "doctor" and args.host else "guest",
-        "release_digest": None, "artifact_path": None,
+        "target": "host" if args and (args.command == "vm" or args.command == "doctor" and args.host) else "guest",
+        "release_digest": None, "artifact_path": data.get("artifact_path") if data else None,
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "exit_status": int(code), "status": "ok" if code == ExitCode.SUCCESS else "error",
         "data": data, "error": error,
