@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import guest, provision, vm
+from . import guest, provision, sync, vm
 
 
 class Parser(argparse.ArgumentParser):
@@ -73,6 +73,8 @@ def dispatch(args) -> tuple[ExitCode, dict]:
             trust = guest.pin_console(config)
             return ExitCode.SUCCESS, {"state": "console-trust-pinned", "identity_verified": False, "host_key_fingerprint": trust["host_key_fingerprint"]}
         return guest.enroll(load_config(args.workspace), args.trust_file)
+    if args.command == "sync":
+        return sync.synchronize(load_config(args.workspace))
     if args.command == "vm" and args.operation in ("create", "start", "console", "stop"):
         config = load_config(args.workspace)
         if config.values["provider"] != "qemu":
@@ -122,7 +124,7 @@ def main(argv=None) -> int:
         "schema_version": 1,
         "command": " ".join(filter(None, (getattr(args, "command", None), getattr(args, "operation", None)))),
         "target": "host" if args and (args.command == "vm" or args.command == "doctor" and args.host) else "guest",
-        "release_digest": None, "artifact_path": data.get("artifact_path") if data else None,
+        "release_digest": data.get("release_digest") if data else None, "artifact_path": data.get("artifact_path") if data else None,
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "exit_status": int(code), "status": "ok" if code == ExitCode.SUCCESS else "error",
         "data": data, "error": error,

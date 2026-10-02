@@ -1,9 +1,10 @@
-{ lib, stdenvNoCC, python3, makeWrapper, src }:
+{ lib, stdenvNoCC, python3, makeWrapper, git, src }:
 stdenvNoCC.mkDerivation {
   pname = "aios-dev-tools";
   version = "0.1.0-dev";
   inherit src;
   nativeBuildInputs = [ python3 makeWrapper ];
+  nativeCheckInputs = [ git ];
   dontBuild = true;
   doCheck = true;
   checkPhase = ''
@@ -20,7 +21,7 @@ stdenvNoCC.mkDerivation {
     runHook postInstall
   '';
   meta = {
-    description = "Read-only AIOS host discovery and protected guest CLI";
+    description = "Verified AIOS guest development tooling";
     mainProgram = "devctl";
     platforms = lib.platforms.linux;
   };

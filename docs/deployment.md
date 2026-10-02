@@ -70,9 +70,27 @@ paths under the checkout. Console pinning checks media/seed/target identity,
 evidence digest, public key encoding and matching fingerprint before writing the
 private known_hosts file. Host-key scans alone do not establish trust.
 After enrollment, each guest operation checks NixOS, installation/DMI UUIDs and
-role; mutations additionally check disk and management identity. No remote guest
-command other than the read-only identity endpoint is currently exposed over
-SSH. Rust/Nix/OS verification must run through that verified guest workflow.
+role; mutations additionally check disk and management identity. SSH exposes the
+read-only identity endpoint and a registered unprivileged source receiver through
+host tooling. Rust/Nix/OS verification must run through that verified workflow.
+
+Publish source from the host with `python3 tools/devctl.py sync --json`. It takes
+tracked files and Git's explicitly non-ignored new files, excludes private state,
+credentials and generated artifacts, and rejects symlinks, special files and
+unsafe modes. Public model metadata remains source; model weights are excluded.
+The normalized manifest records relative paths, modes, sizes, SHA256 content
+hashes, HEAD and the actual dirty state. A concurrent checkout change aborts
+collection. Neither Git nor private keys are transferred into the guest.
+
+The pinned SSH receiver rechecks the complete observed target identity before
+creating a unique staging directory below the configured user's release root.
+It validates all paths, content hashes and byte counts, then publishes atomically
+to `<guest_source_root>/<snapshot-digest>` with read-only files/directories.
+Existing releases must pass full verification before reuse; they are never
+updated in place. Concurrent transfers use separate staging directories, and
+cleanup only removes the directory created by that transfer. Build tooling must
+verify the published source and use the returned `path:<release>#...` reference.
+The source receipt proves publication, not a successful build or OS acceptance.
 
 For a bootstrap access failure, the host can return to the verified installer and
 run `vm console --bootstrap-audit`: it mounts the installed subvolumes read-only,

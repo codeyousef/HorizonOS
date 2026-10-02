@@ -464,7 +464,7 @@ def console(config, *, capture=False, bootstrap_run=False, bootstrap_inspect=Fal
             return ExitCode.SUCCESS, {"state": "bootstrap-inspection-submitted", "guest_identity_verified": False}
     finally:
         client.close()
-    return ExitCode.SUCCESS, {"guest_uuid": record["plan"]["guest_uuid"], "message": "Use the local QEMU GTK display. Mount AIOS_SEED read-only at /run/aios-seed, then run sudo bash /run/aios-seed/bootstrap.sh in the NixOS installer console.", "guest_identity_verified": False}
+    return ExitCode.SUCCESS, {"guest_uuid": record["plan"]["guest_uuid"], "message": "Inspect the installer with vm console --capture, then submit the registered host operation vm console --bootstrap-run. No manual guest sudo step is needed.", "guest_identity_verified": False}
 
 
 def serial_connection(config, process):

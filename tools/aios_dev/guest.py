@@ -151,6 +151,18 @@ def ssh_arguments(config):
             f"{config.values['ssh_user']}@{config.values['ssh_host']}", IDENTITY_COMMAND]
 
 
+def enrolled_identity(config):
+    """Verify the enrolled target immediately before a registered operation."""
+    trust = load_trust(config)
+    path = project_path(config.root, ".local/enrollment.json", ".local")
+    if not path.exists():
+        raise failure(ExitCode.UNMET_PREREQUISITE, "GUEST_NOT_ENROLLED", "Run enroll to verify the pinned guest identity")
+    private_file(path)
+    baseline = read_json(path)
+    value = verify_identity(identity_response(config), trust["expected"], baseline["identity"], mutation=True)
+    return trust, value
+
+
 def identity_response(config):
     # Bounded streams and deadline. Never echo arbitrary SSH errors or guest data
     # in an exception, and never fall back to password/keyscan/disabled checking.
@@ -222,13 +234,7 @@ def verify_identity(value, expected, baseline=None, *, mutation=False):
 
 
 def doctor(config):
-    trust = load_trust(config)
-    path = project_path(config.root, ".local/enrollment.json", ".local")
-    if not path.exists():
-        raise failure(ExitCode.UNMET_PREREQUISITE, "GUEST_NOT_ENROLLED", "Run enroll to verify the pinned guest identity")
-    private_file(path)
-    baseline = read_json(path)
-    value = verify_identity(identity_response(config), trust["expected"], baseline["identity"], mutation=True)
+    trust, value = enrolled_identity(config)
     return ExitCode.SUCCESS, {"identity_verified": True, "host_key_fingerprint": trust["host_key_fingerprint"], "identity": value, "read_only": True}
 
 
