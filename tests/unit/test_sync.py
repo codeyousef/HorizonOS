@@ -29,7 +29,7 @@ class SourceTests(unittest.TestCase):
         self.git("config", "user.name", "Source fixture")
         self.git("config", "user.email", "fixture@example.invalid")
         (self.root / "flake.nix").write_text("fixture public source")
-        (self.root / ".gitignore").write_text("ignored.txt\n")
+        (self.root / ".gitignore").write_text("ignored.txt\n.local/\n")
         self.git("add", ".")
         self.git("commit", "-qm", "public fixture")
 
