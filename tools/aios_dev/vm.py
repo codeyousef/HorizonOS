@@ -210,7 +210,15 @@ def lifecycle(config, action, *, display="gtk", bootstrap=False):
         raise invalid("Unknown lifecycle operation")
 
 
-def qemu_arguments(config, record, display, *, bootstrap=True):
+def qemu_arguments(config, record, display, *, bootstrap=True, qualification=None):
+    serial = DISK_SERIAL
+    if qualification is not None:
+        from .acceptance import validate_disposable, WRONG_SERIAL
+        if not bootstrap:
+            raise invalid("Bootstrap qualification requires official installer media")
+        validate_disposable(config, record, qualification)
+        if qualification == "wrong-disk":
+            serial = WRONG_SERIAL
     if display not in ("gtk", "none"):
         raise invalid("Only local GTK or headless display is supported")
     if config.values["ssh_host"] != "127.0.0.1":
@@ -232,7 +240,7 @@ def qemu_arguments(config, record, display, *, bootstrap=True):
             "-drive", f"if=pflash,format=raw,readonly=on,file={record['firmware_code']}",
             "-drive", f"if=pflash,format=raw,file={config.paths['nvram_file']}",
             "-drive", f"if=none,id=rootdisk,format=qcow2,file={config.paths['disk_image']}",
-            "-device", f"virtio-blk-pci,drive=rootdisk,serial={DISK_SERIAL},bootindex={2 if bootstrap else 1}",
+            "-device", f"virtio-blk-pci,drive=rootdisk,serial={serial},bootindex={2 if bootstrap else 1}",
             *media,
             "-netdev", f"user,id=net0,hostfwd=tcp:127.0.0.1:{config.values['ssh_port']}-:22", "-device", "virtio-net-pci,netdev=net0",
             "-device", "virtio-vga", "-display", display,
@@ -313,8 +321,8 @@ class QMP:
         path.chmod(0o600)
         return path
 
-    def bootstrap_console(self, config, *, resume=False, finish=False, audit=False, repair=False):
-        if sum((resume, finish, audit, repair)) > 1:
+    def bootstrap_console(self, config, *, resume=False, finish=False, audit=False, repair=False, qualification=None):
+        if sum((resume, finish, audit, repair, qualification is not None)) > 1:
             raise invalid("Choose one registered bootstrap console operation")
         verify_block(self, config)
         record = load_record(config)
@@ -322,6 +330,15 @@ class QMP:
             raise failure(ExitCode.TARGET_MISMATCH, "INSTALLER_CONSOLE_REQUIRED", "Bootstrap actions require the verified official installer console")
         command = BOOTSTRAP_CONSOLE
         operation = "repair" if repair else "audit" if audit else "finish" if finish else "bootstrap"
+        if qualification is not None:
+            from .acceptance import console_command, WRONG_SERIAL
+            command = console_command(config, record, qualification)
+            serial = WRONG_SERIAL if qualification == "wrong-disk" else DISK_SERIAL
+            required = [f"virtio-blk-pci,drive=rootdisk,serial={serial},bootindex=2",
+                        f"if=none,id=seed,media=cdrom,readonly=on,file={record['seed_iso']}"]
+            if any(argument not in self.process["arguments"] for argument in required):
+                raise failure(ExitCode.TARGET_MISMATCH, "QUALIFICATION_LAUNCH_MISMATCH", "Disposable launch does not match its registered case")
+            operation = "qualification-" + qualification
         if repair:
             command = repair_console_command(config, record)
         if audit:
@@ -355,13 +372,16 @@ class QMP:
                 # QEMU accepts one QMP client on this endpoint. Release it while
                 # the installer runs so read-only console captures stay usable.
                 self.close()
-                deadline = time.monotonic() + 3600
+                deadline = time.monotonic() + (300 if qualification is not None else 3600)
+                ready_deadline = time.monotonic() + 45
                 trailing = b""
                 while time.monotonic() < deadline:
                     verify_process(self.process)
                     try:
                         chunk = serial.recv(65536)
                     except socket.timeout:
+                        if qualification is not None and payload is not None and time.monotonic() > ready_deadline:
+                            raise failure(ExitCode.TIMEOUT, "CONSOLE_NOT_READY", "Disposable installer did not acknowledge the registered operation; inspect retained evidence before retry")
                         continue
                     if not chunk:
                         raise failure(ExitCode.VERIFICATION_FAILURE, "BOOTSTRAP_CONSOLE_CLOSED", "Bootstrap serial channel closed before completion")
@@ -372,11 +392,11 @@ class QMP:
                     if payload is not None and b"AIOS_CONSOLE_READY\n" in trailing:
                         serial.sendall(payload)
                         payload = None
-                    sentinel = b"AIOS_REPAIR_EXIT" if repair else b"AIOS_AUDIT_EXIT" if audit else b"AIOS_FINISH_EXIT" if finish else b"AIOS_BOOTSTRAP_EXIT"
+                    sentinel = b"AIOS_QUALIFICATION_EXIT" if qualification is not None else b"AIOS_REPAIR_EXIT" if repair else b"AIOS_AUDIT_EXIT" if audit else b"AIOS_FINISH_EXIT" if finish else b"AIOS_BOOTSTRAP_EXIT"
                     match = re.search(rb"(?:^|[\r\n])" + sentinel + rb"=([0-9]+)[\r\n]", trailing)
                     if match:
                         status = int(match[1])
-                        if status == 0 and not audit and not repair:
+                        if status == 0 and not audit and not repair and qualification is None:
                             record = load_record(config)
                             receipt_name = "bootstrap-finish.json" if finish else "bootstrap-result.json"
                             write_json_new(config.root / ".local/vm" / receipt_name, {
@@ -388,9 +408,9 @@ class QMP:
                                 "serial_path": str(path), "serial_sha256": digest_file(path),
                                 "process": self.process,
                             })
-                        state = "access-repaired" if repair else "audited" if audit else "setup-finished" if finish else "installer-finished"
+                        state = "guard-qualified" if qualification is not None else "access-repaired" if repair else "audited" if audit else "setup-finished" if finish else "installer-finished"
                         return (ExitCode.SUCCESS if status == 0 else ExitCode.OPERATION_FAILURE), {"state": state if status == 0 else "bootstrap-failed", "upstream_exit": status, "artifact_path": str(path), "guest_identity_verified": False}
-                raise failure(ExitCode.TIMEOUT, "BOOTSTRAP_TIMEOUT", "Bootstrap did not finish in one hour; no retry or disk reset attempted")
+                raise failure(ExitCode.TIMEOUT, "BOOTSTRAP_TIMEOUT", "Registered console operation exceeded its deadline; no retry or disk reset attempted")
 
     def inspect_console(self, config):
         verify_block(self, config)
@@ -413,7 +433,7 @@ def verify_block(client, config):
         raise failure(ExitCode.TARGET_MISMATCH, "VM_DISK_MISMATCH", "QMP root disk does not match the configured virtual disk")
 
 
-def start(config, display, bootstrap):
+def start(config, display, bootstrap, *, qualification=None):
     record = load_record(config)
     if not bootstrap:
         from .guest import load_trust
@@ -431,7 +451,7 @@ def start(config, display, bootstrap):
         raise failure(ExitCode.TARGET_MISMATCH, "EXISTING_VM_CONTROL", "Refusing to attach to or overwrite existing VM control artifacts")
     if tcp_probe(config.values["ssh_host"], config.values["ssh_port"])["reachable"] is not False:
         raise failure(ExitCode.UNMET_PREREQUISITE, "PORT_UNAVAILABLE", "Cannot prove the configured loopback port is free")
-    args = qemu_arguments(config, record, display, bootstrap=bootstrap)
+    args = qemu_arguments(config, record, display, bootstrap=bootstrap, qualification=qualification)
     run(args, timeout=15)
     pid = int(pidfile.read_text().strip())
     process = process_identity(pid)
@@ -448,7 +468,9 @@ def start(config, display, bootstrap):
     return ExitCode.SUCCESS, {"state": "bootstrap-running" if bootstrap else "installed-running", "guest_identity_verified": False, "qmp_uuid_verified": True, "pid": pid, "qemu_status": status, "display": display, "message": "Verify/enroll guest SSH identity before guest operations."}
 
 
-def console(config, *, capture=False, bootstrap_run=False, bootstrap_inspect=False, bootstrap_recover=False, bootstrap_finish=False, bootstrap_audit=False, bootstrap_repair=False):
+def console(config, *, capture=False, bootstrap_run=False, bootstrap_inspect=False, bootstrap_recover=False, bootstrap_finish=False, bootstrap_audit=False, bootstrap_repair=False, qualification=None):
+    if sum((capture, bootstrap_run, bootstrap_inspect, bootstrap_recover, bootstrap_finish, bootstrap_audit, bootstrap_repair, qualification is not None)) > 1:
+        raise invalid("Choose one registered console operation")
     record = load_record(config)
     process = read_json(project_path(config.root, ".local/vm/process.json", ".local/vm"))
     client = QMP(config, process, record["plan"]["guest_uuid"])
@@ -457,8 +479,8 @@ def console(config, *, capture=False, bootstrap_run=False, bootstrap_inspect=Fal
         if capture:
             path = client.capture(config)
             return ExitCode.SUCCESS, {"guest_uuid": record["plan"]["guest_uuid"], "artifact_path": str(path), "guest_identity_verified": False}
-        if bootstrap_run or bootstrap_recover or bootstrap_finish or bootstrap_audit or bootstrap_repair:
-            return client.bootstrap_console(config, resume=bootstrap_recover, finish=bootstrap_finish, audit=bootstrap_audit, repair=bootstrap_repair)
+        if bootstrap_run or bootstrap_recover or bootstrap_finish or bootstrap_audit or bootstrap_repair or qualification is not None:
+            return client.bootstrap_console(config, resume=bootstrap_recover, finish=bootstrap_finish, audit=bootstrap_audit, repair=bootstrap_repair, qualification=qualification)
         if bootstrap_inspect:
             client.inspect_console(config)
             return ExitCode.SUCCESS, {"state": "bootstrap-inspection-submitted", "guest_identity_verified": False}

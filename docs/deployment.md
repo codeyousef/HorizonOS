@@ -119,6 +119,21 @@ deployment and journal operations remain unsupported until their registered
 providers exist. The fixed 30-second `jobs probe` is labeled as a supervision
 fixture for disconnect/cancellation checks; it is never a CPU benchmark.
 
+`test --suite integration --bootstrap-case all` explicitly selects the disposable
+installer guard qualification. A single case may be selected with `wrong-disk`,
+`wrong-dmi`, `wrong-authorization` or `reinstall`. The host verifies the enrolled
+development guest, copies only public source into isolated workspaces under
+`.local/a`, and launches fresh headless KVM guests with separate disks, firmware,
+UUIDs, keys, ports and control sockets. Registered console actions verify the
+official ISO/seed and actual guest DMI, virtualization and virtio disk before
+running the real installer denial cases. Whole-disk SHA256 digests before and
+after a denial must match. Reinstall uses synthetic existing Btrfs data on its
+fresh disposable disk. Reports label this scope explicitly; default integration
+and desktop suites still require their full providers. Each disposable VM stops
+through its verified QMP endpoint, retaining its disk and evidence for review.
+No host Nix driver, nested KVM, host mounts or caller-supplied guest commands are
+used, and the development VM remains running.
+
 For a bootstrap access failure, the host can return to the verified installer and
 run `vm console --bootstrap-audit`: it mounts the installed subvolumes read-only,
 checks installation/role identity, and inspects public key metadata/account status

@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import guest, jobs, provision, sync, vm
+from . import acceptance, guest, jobs, provision, sync, vm
 
 
 class Parser(argparse.ArgumentParser):
@@ -57,6 +57,7 @@ def parser() -> Parser:
     test = commands.add_parser("test")
     test.add_argument("--suite", choices=("unit", "integration", "desktop"), required=True)
     test.add_argument("--detach", action="store_true")
+    test.add_argument("--bootstrap-case", choices=("all", *acceptance.CASES), help="run only the named disposable installer guard qualification")
     controls = commands.add_parser("jobs").add_subparsers(dest="operation", required=True)
     for action in ("status", "cancel"):
         controls.add_parser(action).add_argument("--job", required=True)
@@ -92,8 +93,13 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         if args.package is not None and args.target != "packages":
             raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Package selection requires the packages build target")
         return jobs.start(load_config(args.workspace), "build-" + args.target, package=args.package, detach=args.detach)
-    if args.command == "test" and args.suite == "unit":
-        return jobs.start(load_config(args.workspace), "test-unit", detach=args.detach)
+    if args.command == "test":
+        if args.bootstrap_case is not None:
+            if args.suite != "integration" or args.detach:
+                raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Bootstrap cases require integration scope without --detach")
+            return acceptance.run_bootstrap_guards(load_config(args.workspace), None if args.bootstrap_case == "all" else args.bootstrap_case)
+        if args.suite == "unit":
+            return jobs.start(load_config(args.workspace), "test-unit", detach=args.detach)
     if args.command == "jobs":
         if args.operation == "probe":
             return jobs.start(load_config(args.workspace), "supervision-probe", detach=args.detach)
@@ -148,7 +154,7 @@ def main(argv=None) -> int:
     result = {
         "schema_version": 1,
         "command": " ".join(filter(None, (getattr(args, "command", None), getattr(args, "operation", None)))),
-        "target": "host" if args and (args.command == "vm" or args.command == "doctor" and args.host) else "guest",
+        "target": "host" if args and (args.command == "vm" or args.command == "doctor" and args.host or args.command == "test" and args.bootstrap_case is not None) else "guest",
         "release_digest": data.get("release_digest") if data else None, "artifact_path": data.get("artifact_path") if data else None,
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "exit_status": int(code), "status": "ok" if code == ExitCode.SUCCESS else "error",
