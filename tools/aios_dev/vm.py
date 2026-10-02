@@ -464,6 +464,9 @@ def verify_block(client, config):
 
 
 def start(config, display, bootstrap, *, qualification=None):
+    pending = config.root / '.local/vm/restore-pending.json'
+    if pending.exists() or pending.is_symlink():
+        raise failure(ExitCode.VERIFICATION_FAILURE, 'RESTORE_INCOMPLETE', 'Complete the interrupted explicit restore before starting the VM')
     record = load_record(config)
     if not bootstrap:
         from .guest import load_trust

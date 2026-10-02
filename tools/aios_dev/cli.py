@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import acceptance, guest, jobs, provision, sync, vm
+from . import acceptance, guest, jobs, provision, snapshots, sync, vm
 
 
 class Parser(argparse.ArgumentParser):
@@ -42,8 +42,10 @@ def parser() -> Parser:
     console.add_argument("--bootstrap-inspect", action="store_true")
     console.add_argument("--follow", type=int, metavar="SECONDS")
     vm.add_parser("stop").add_argument("--graceful", action="store_true", help="request ACPI shutdown and refuse force-off on timeout")
-    for action in ("snapshot", "restore"):
-        vm.add_parser(action).add_argument("--name", required=True)
+    vm.add_parser("snapshot").add_argument("--name", required=True)
+    restore = vm.add_parser("restore")
+    restore.add_argument("--name", required=True)
+    restore.add_argument("--discard-guest-changes", action="store_true")
     enrollment = commands.add_parser("enroll").add_mutually_exclusive_group()
     enrollment.add_argument("--pin-console-only", action="store_true")
     enrollment.add_argument("--trust-file", metavar="LOCAL_CONSOLE_JSON")
@@ -106,10 +108,15 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         return jobs.control(load_config(args.workspace), args.operation, args.job)
     if args.command == "artifacts":
         return jobs.pull(load_config(args.workspace), args.job)
-    if args.command == "vm" and args.operation in ("create", "start", "console", "stop"):
+    if args.command == "vm" and args.operation in ("create", "start", "console", "stop", "snapshot", "restore"):
         config = load_config(args.workspace)
         if config.values["provider"] != "qemu":
             raise DevctlError(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "External provider has no verified power/provisioning adapter")
+        if args.operation in ("snapshot", "restore"):
+            with provision.operation_lock(config.root):
+                if args.operation == "snapshot":
+                    return snapshots.snapshot(config, args.name)
+                return snapshots.restore(config, args.name, args.discard_guest_changes)
         if args.operation == "create":
             if args.refresh_seed:
                 return provision.refresh_seed(config)
