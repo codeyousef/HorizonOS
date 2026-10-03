@@ -16,6 +16,9 @@ Restart=on-failure
 RestartSec=5
 TimeoutStartSec=60
 TimeoutStopSec=10
+# Only fixed startup stages/finite error codes are emitted by the broker.
+StandardOutput=journal+console
+StandardError=journal+console
 NoNewPrivileges=true
 # Native peer/service executable identity requires readonly proc inspection.
 CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE

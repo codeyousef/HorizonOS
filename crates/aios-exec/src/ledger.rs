@@ -341,6 +341,31 @@ pub struct Ledger {
     directory: Option<File>,
     target: Option<crate::native::VerifiedTarget>,
 }
+fn open_pinned_database(
+    path: &std::path::Path,
+    directory: &File,
+    file: &File,
+    flags: rusqlite::OpenFlags,
+) -> Result<Connection> {
+    let verify = || -> Result<()> {
+        let parent = std::fs::symlink_metadata(path.parent().ok_or(Error::Invalid)?)?;
+        let database = std::fs::symlink_metadata(path)?;
+        let expected_parent = directory.metadata()?;
+        let expected_database = file.metadata()?;
+        if !parent.is_dir() || !database.is_file()
+            || (parent.dev(), parent.ino()) != (expected_parent.dev(), expected_parent.ino())
+            || (database.dev(), database.ino()) != (expected_database.dev(), expected_database.ino())
+            || database.nlink() != 1
+        {
+            return Err(Error::Integrity);
+        }
+        Ok(())
+    };
+    verify()?;
+    let connection = Connection::open_with_flags(path, flags)?;
+    verify()?;
+    Ok(connection)
+}
 impl Ledger {
     /// No path/connection selector is exposed by the product. The administrator
     /// module creates the 0700 root directory; SQLite cannot follow a DB symlink.
@@ -386,7 +411,11 @@ impl Ledger {
         let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
             | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
             | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
-        let connection = Connection::open_with_flags(db, flags)?;
+        // SQLite NOFOLLOW rejects every symlink component, including our own
+        // /proc/self/fd anchor. Open only the fixed, independently protected
+        // canonical name; keep both anchors pinned and verify their inodes.
+        let canonical_db = path.join("ledger.sqlite");
+        let connection = open_pinned_database(&canonical_db, &directory, &file, flags)?;
         target.recheck()?;
         let mut ledger = Self::initialize(connection)?;
         ledger.durable_file = Some(file);

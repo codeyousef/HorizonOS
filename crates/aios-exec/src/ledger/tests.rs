@@ -6,6 +6,32 @@ use crate::candidate::{
 };
 use aios_state::{DatabaseData, PreparationGrants};
 use uuid::Uuid;
+#[test]
+fn native_sqlite_open_retains_nofollow_and_pinned_inodes() {
+    use std::os::fd::AsRawFd;
+    let directory = std::env::temp_dir().join(format!("aios-ledger-open-{}", Uuid::new_v4()));
+    std::fs::create_dir(&directory).unwrap();
+    let directory = directory.canonicalize().unwrap();
+    let anchor = File::open(&directory).unwrap();
+    let path = directory.join("ledger.sqlite");
+    let file = OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(&path).unwrap();
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let alias = std::path::PathBuf::from(format!("/proc/self/fd/{}/ledger.sqlite", anchor.as_raw_fd()));
+    assert!(Connection::open_with_flags(alias, flags).is_err());
+    let connection = open_pinned_database(&path, &anchor, &file, flags).unwrap();
+    connection.execute_batch("CREATE TABLE real_commit (id INTEGER); INSERT INTO real_commit VALUES (1)").unwrap();
+    drop(connection);
+    let reopened = open_pinned_database(&path, &anchor, &file, flags).unwrap();
+    assert_eq!(reopened.query_row("SELECT id FROM real_commit", [], |row| row.get::<_,i64>(0)).unwrap(), 1);
+    drop(reopened);
+    std::fs::rename(&path, directory.join("prior.sqlite")).unwrap();
+    std::fs::write(&path, b"replacement").unwrap();
+    assert!(matches!(open_pinned_database(&path, &anchor, &file, flags), Err(Error::Integrity)));
+    std::fs::remove_file(&path).unwrap();
+    std::os::unix::fs::symlink(directory.join("prior.sqlite"), &path).unwrap();
+    assert!(matches!(open_pinned_database(&path, &anchor, &file, flags), Err(Error::Integrity)));
+    std::fs::remove_dir_all(directory).unwrap();
+}
 fn closure(label: &str) -> String {
     format!("/nix/store/{}-{label}", "a".repeat(32))
 }

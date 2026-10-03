@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import snapshot
 import installed_runtime_smoke
 
@@ -15,7 +16,14 @@ def main():
     argv = ["nix", "develop", "--no-update-lock-file", "--no-write-lock-file", "path:" + str(release),
         "--command", "cargo", "test", "--locked", "-p", "aios-exec", "--test", "installed_transport",
         "--", "--ignored", "--nocapture"]
-    result = subprocess.run(argv, capture_output=True, timeout=600, check=False)
+    # Published sources are immutable. Keep Cargo output/cache separate, and
+    # retain this foreground login while the actual native caller is checked.
+    with tempfile.TemporaryDirectory(prefix="aios-executor-qualification-") as temporary:
+        work = Path(temporary)
+        environment = {"HOME":os.environ["HOME"],"PATH":"/run/current-system/sw/bin","LANG":"C.UTF-8",
+            "CARGO_TARGET_DIR":str(work / "cargo-target"),"CARGO_HOME":str(work / "cargo-home"),
+            "XDG_CACHE_HOME":str(work / "cache"),"TMPDIR":str(work)}
+        result = subprocess.run(argv, cwd=release, env=environment, capture_output=True, timeout=600, check=False)
     if snapshot.identity() != identity:
         raise ValueError("runtime target changed during installed transport check")
     if len(result.stdout) + len(result.stderr) > 1024 * 1024:

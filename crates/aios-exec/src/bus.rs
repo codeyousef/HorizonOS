@@ -194,13 +194,20 @@ struct Runtime {
 }
 impl Runtime {
     fn open() -> crate::Result<Self> {
-        let authorizer = Authorizer::open()?;
-        let mut ledger = Ledger::open()?;
+        // Startup diagnostics contain fixed stages and finite internal errors,
+        // never caller requests, plans or evidence.
+        let diagnostic = |stage: &str, error: Error| {
+            eprintln!("{}", json!({"schema_version":1,"error":"BROKER_RUNTIME_INIT_FAILED",
+                "stage":stage,"reason":format!("{error:?}")}));
+            error
+        };
+        let authorizer = Authorizer::open().map_err(|e| diagnostic("native-authorizer", e))?;
+        let mut ledger = Ledger::open().map_err(|e| diagnostic("durable-ledger", e))?;
         // A new bus connection cannot resurrect old volatile caller authority.
         // Durable pre-effect plans are cancelled; BUILDING keeps its slot until
         // a verified worker-stop adapter reconciles it.
-        ledger.cancel_abandoned_pre_effects()?;
-        let candidates = CandidateStore::open()?;
+        ledger.cancel_abandoned_pre_effects().map_err(|e| diagnostic("orphan-reconciliation", e))?;
+        let candidates = CandidateStore::open().map_err(|e| diagnostic("candidate-store", e))?;
         Ok(Self {
             authorizer,
             ledger,
