@@ -1,4 +1,4 @@
-{ config, pkgs, lib, aiosPackages, ... }:
+{ config, pkgs, lib, aiosPackages, aiosStateContract, ... }:
 let
   enrollmentPath = ./enrollment.json;
   enrollment = if builtins.pathExists enrollmentPath
@@ -19,7 +19,15 @@ let
   '';
   serviceUsers = [ "aios-state" "aios-observer" "aios-builder" "aios-model" ];
 in {
-  imports = [ ../../modules/aios ];
+  imports = [ ../../modules/aios ] ++ lib.optional (builtins.pathExists ../../../managed.json) (
+    assert builtins.pathExists ../../../catalog.json;
+    assert builtins.readFile ../../../catalog.json == builtins.toJSON aiosStateContract.catalog;
+    import ../../state/managed.nix {
+      catalog = aiosStateContract.catalog;
+      managedJSON = builtins.readFile ../../../managed.json;
+      installationStateVersion = "26.05";
+    }
+  );
   assertions = [ { assertion = valid; message = "Development enrollment must match the fixed schema and management identity."; } ];
   nixpkgs.hostPlatform = "x86_64-linux";
   system.stateVersion = "26.05";

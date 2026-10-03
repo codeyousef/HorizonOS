@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import snapshot as source
 
 
@@ -120,11 +121,65 @@ def main():
         if response.get("error") != "INVALID_PREVIEW_REQUEST":
             raise RuntimeError("offline preview accepted caller authorization/data evidence")
         previews.append({"name":name,"exit":2,"response":response})
+    # Exercise the actual development machine importer inside a pure source
+    # fixture. Only public source/enrollment and compiled managed/catalog data are
+    # copied; no activation or root registration takes place.
+    import build_system
+    source_manifest = source.decode((release / source.MANIFEST).read_bytes())
+    source.verify_tree(release, source_manifest, published=True)
+    machine_checks = []
+    with tempfile.TemporaryDirectory(prefix="managed-machine-", dir=environment.get("TMPDIR")) as directory:
+        working = Path(directory)
+        try:
+            for item in source_manifest["files"]:
+                data, mode = source.read_regular(release, item["path"], published=True)
+                if hashlib.sha256(data).hexdigest() != item["sha256"] or mode != item["mode"]:
+                    raise RuntimeError("machine fixture source changed")
+                target = working / item["path"]
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                target.chmod(0o555 if mode == 0o755 else 0o444)
+            enrolled = build_system.enrollment(identity, build_system.read_enrolled_key())
+            (working / build_system.ENROLLMENT).write_bytes(source.canonical(enrolled))
+            managed = copy.deepcopy(defaults)
+            managed["system_packages"] = ["kate", "kcalc"]
+            compact = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+            (working / "managed.json").write_bytes(compact(managed))
+            (working / "catalog.json").write_bytes(compact(contract["catalog"]))
+            for parent, _, names in os.walk(working):
+                for name in names:
+                    path = Path(parent) / name
+                    path.chmod(0o555 if path.stat().st_mode & 0o111 else 0o444)
+                Path(parent).chmod(0o555)
+            machine_reference = "path:" + str(working)
+            attr = machine_reference + '#nixosConfigurations.aios-dev.config.environment.etc."aios/managed.json".text'
+            actual = json.loads(run(["nix", "eval", "--json", *locked, *pure, attr]))
+            if actual.encode() != compact(managed):
+                raise RuntimeError("actual development machine did not consume candidate managed data")
+            machine_checks.append({"name":"managed-file-consumed-in-pure-machine", "manifest_sha256":hashlib.sha256(actual.encode()).hexdigest()})
+            attrs = (("ssh-protected", "services.openssh.enable", True),
+                     ("firewall-protected", "services.openssh.openFirewall", True),
+                     ("baseline-preserved", "system.stateVersion", "26.05"))
+            for name, attribute, expected in attrs:
+                value = json.loads(run(["nix", "eval", "--json", *locked, *pure, machine_reference + "#nixosConfigurations.aios-dev.config." + attribute]))
+                if value != expected:
+                    raise RuntimeError("managed machine changed protected transport/baseline")
+                machine_checks.append({"name":name,"value":value})
+            # Changing the frozen catalog must fail before consuming managed data.
+            catalog_file = working / "catalog.json"
+            catalog_file.chmod(0o600)
+            catalog_file.write_bytes(b"{}")
+            catalog_file.chmod(0o444)
+            run(["nix", "eval", "--json", *locked, *pure, attr], expected=1)
+            machine_checks.append({"name":"mismatched-frozen-catalog-denied","exit":1})
+        finally:
+            for parent, _, _ in os.walk(working):
+                Path(parent).chmod(0o700)
     closure = json.loads(run(["nix","path-info","--json","--recursive",package]))
     if source.identity() != identity:
         raise RuntimeError("guest identity changed after managed-state checks")
     print("AIOS_MANAGED_STATE " + json.dumps({"evidence_kind":"real-guest-locked-catalog-module-and-package-with-fixture-manifests",
-        "target_identity":identity,"catalog":contract["catalog"],"module_cases":cases,"checks":checks,"previews":previews,
+        "target_identity":identity,"catalog":contract["catalog"],"module_cases":cases,"checks":checks,"previews":previews,"machine_candidate_checks":machine_checks,
         "package":package,"executable_sha256":hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
         "runtime_closure":closure,"commands":commands,"root_candidate_registration_verified":False,
         "system_activation_verified":False,"application_capabilities_verified":False,"postgresql_readiness_verified":False,

@@ -39,7 +39,7 @@
         nixpkgsRevision = nixpkgs.rev;
         lockSha256 = builtins.hashFile "sha256" ./flake.lock;
         baseTemplateRevision = builtins.hashString "sha256" (builtins.concatStringsSep "\n" (map builtins.readFile [
-          ./nix/state/catalog.nix ./nix/state/managed.nix ./nix/machines/aios-dev/default.nix
+          ./flake.nix ./nix/state/catalog.nix ./nix/state/managed.nix ./nix/machines/aios-dev/default.nix
           ./crates/aios-state/src/lib.rs ./crates/aios-state/src/main.rs ./crates/aios-state/Cargo.toml
           ./crates/aios-protocol/src/contracts.rs ./Cargo.lock
         ]));
@@ -58,6 +58,10 @@
         nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
         buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
       });
+      executor = (productPackage "aios-exec" "aios-exec" "aios-execd").overrideAttrs (old: {
+        nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
+        buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
+      });
       model = (productPackage "aios-model" "aios-model" "aios-modeld").overrideAttrs (old: {
         AIOS_LLAMA_BRIDGE = "${llamaBridge}";
         postInstall = (old.postInstall or "") + ''
@@ -69,13 +73,13 @@
     in {
       nixosConfigurations.aios-dev = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs.aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; };
+        specialArgs = { aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ];
       };
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios;
       nixosModules.production = import ./nix/modules/aios/production.nix;
-      packages.${system} = { aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
+      packages.${system} = { aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system}.host-unit = devTools;
       lib.stateContract = stateContract;
       lib.managedState = import ./tests/nix/managed.nix { inherit nixpkgs stateContract; };

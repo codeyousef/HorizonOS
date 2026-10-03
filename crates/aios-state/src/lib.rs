@@ -527,14 +527,15 @@ pub enum DatabaseData {
 pub struct PreparationGrants {
     pub acknowledged_unfree_ids: BTreeSet<String>,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Change {
     pub field: String,
     pub before: serde_json::Value,
     pub after: serde_json::Value,
 }
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Validator {
     DesktopCapability {
         package_id: String,
@@ -545,17 +546,18 @@ pub enum Validator {
     PostgresqlStopped,
     PowerProfileSupportedAndApplied,
 }
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Risk {
     R0,
     R2,
 }
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Recovery {
     RestoreExactPriorConfigurationDataMayRemain,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Preview {
     pub schema_version: u32,
     pub baseline_manifest_sha256: String,
