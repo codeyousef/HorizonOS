@@ -43,7 +43,27 @@ def installed_diagnostics():
             mismatches.append(entry["path"])
     observed = {str(path.relative_to(template)) for path in template.rglob("*") if not path.is_dir()}
     wanted = {entry["path"] for entry in manifest["files"]} | {"template.json"}
+    policy = records["approval-authority.json"]["value"]
+    package = Path(policy["polkit_package"])
+    if package.parent != Path("/nix/store") or package.is_symlink():
+        raise ValueError("polkit package is not a direct store object")
+    policy_inventory = []
+    for directory in (Path("/etc/polkit-1/rules.d"),
+                      Path("/run/current-system/sw/share/polkit-1/rules.d"),
+                      Path("/run/current-system/sw/share/polkit-1/actions"),
+                      package / "share/polkit-1/rules.d", package / "share/polkit-1/actions"):
+        files = []
+        if directory.exists():
+            entries = list(directory.iterdir())
+            if len(entries) > 4096:
+                raise ValueError("policy inventory observation limit")
+            for path in sorted(entries):
+                info = path.stat()
+                files.append({"name":path.name,"size":info.st_size,"regular":stat.S_ISREG(info.st_mode),
+                    "uid":info.st_uid,"mode":stat.S_IMODE(info.st_mode)})
+        policy_inventory.append({"path":str(directory),"exists":directory.exists(),"files":files})
     return {"evidence_kind":"read-only-installed-public-records", "records":records,
+        "policy_inventory":policy_inventory,
         "template_manifest_sha256":hashlib.sha256(data).hexdigest(),
         "template_manifest_matches_authority":hashlib.sha256(data).hexdigest() == authority["manifest_sha256"],
         "template_manifest_canonical":snapshot.canonical(manifest) == data,
