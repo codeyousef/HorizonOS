@@ -131,6 +131,31 @@ class SystemCandidateTests(unittest.TestCase):
         self.assertIn("allow-import-from-derivation", args)
         self.assertEqual(args[-1], "path:/home/dev/candidate#nixosConfigurations.aios-dev.config.system.build.toplevel")
 
+    def approval(self):
+        executor = "/nix/store/" + "a"*32 + "-executor"
+        polkit = "/nix/store/" + "b"*32 + "-polkit"
+        record = {"schema_version":1,"polkit_uid":26,"polkit_package":polkit,"policy_path":executor+"/share/aios/system-approval.json",
+                  "action_path":executor+"/share/polkit-1/actions/org.aios.executor.policy","policy_sha256":"1"*64,"action_sha256":"2"*64}
+        manifest = {"files":[{"path":"crates/aios-exec/policy/system-approval.json","sha256":"1"*64},
+                              {"path":"crates/aios-exec/policy/org.aios.executor.policy","sha256":"2"*64}]}
+        return record, manifest, executor, polkit
+
+    def test_built_approval_policy_binds_exact_executor_and_frozen_files(self):
+        record, manifest, executor, polkit = self.approval()
+        self.assertEqual(builder.approval_paths(record, manifest), (executor,polkit))
+        for field, value in (("policy_sha256","3"*64),("action_sha256","3"*64),("action_path",polkit+"/share/polkit-1/actions/org.aios.executor.policy"),
+                             ("policy_path","/tmp/client.json"),("polkit_package",polkit+"/../other")):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                builder.approval_paths({**record,field:value},manifest)
+
+    def test_built_approval_policy_denies_forged_uid_fields_and_missing_source(self):
+        record, manifest, _, _ = self.approval()
+        for value in (0,True,-1,2**32-1,"26"):
+            with self.subTest(uid=value), self.assertRaises(ValueError):
+                builder.approval_paths({**record,"polkit_uid":value},manifest)
+        with self.assertRaises(ValueError):builder.approval_paths({**record,"approved":True},manifest)
+        with self.assertRaises(ValueError):builder.approval_paths(record,{"files":[]})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -176,6 +176,19 @@ def main():
                 "root_partition":"vda2","root_filesystem":"btrfs","management_channel":"ssh-development"}
             if target_authority != expected_target:
                 raise RuntimeError("native target authority differs from enrolled machine")
+            approval_attr = machine_reference + '#nixosConfigurations.aios-dev.config.environment.etc."aios/approval-authority.json".text'
+            approval_bytes = json.loads(run(["nix", "eval", "--json", *locked, *pure, approval_attr])).encode()
+            approval_authority = json.loads(approval_bytes)
+            expected_approval_fields = {"schema_version","policy_path","policy_sha256","action_path","action_sha256","polkit_uid","polkit_package"}
+            if set(approval_authority) != expected_approval_fields or compact(approval_authority) != approval_bytes or approval_authority["schema_version"] != 1 or type(approval_authority["polkit_uid"]) is not int or approval_authority["polkit_uid"] <= 0:
+                raise RuntimeError("installed approval authority schema differs")
+            for field, original in (("policy_sha256", "system-approval.json"), ("action_sha256", "org.aios.executor.policy")):
+                if approval_authority[field] != hashlib.sha256((release / "crates/aios-exec/policy" / original).read_bytes()).hexdigest():
+                    raise RuntimeError("installed approval authority differs from compiled source")
+            approval_module = json.loads(run(["nix", "eval", "--json", *locked, *pure, machine_reference + "#nixosConfigurations.aios-dev.config",
+                "--apply", "c: { enabled = c.security.polkit.enable; debug = c.security.polkit.debug; uid = c.users.users.polkituser.uid; links = c.environment.pathsToLink; }"]))
+            if not approval_module["enabled"] or approval_module["debug"] or approval_module["uid"] != approval_authority["polkit_uid"] or "/share/polkit-1" not in approval_module["links"]:
+                raise RuntimeError("native polkit module does not consume approval authority")
             authority_bytes = json.loads(run(["nix", "eval", "--json", *locked, *pure, authority_attr])).encode()
             authority = json.loads(authority_bytes)
             template_outputs = json.loads(run(["nix", "build", "--json", "--no-link", *locked, *pure,
@@ -222,6 +235,7 @@ def main():
                 raise RuntimeError("packaged template changed code/catalog identity")
             template_evidence = {"path":str(template_path), "authority":authority,
                 "target_authority":target_authority,"native_target_runtime_verified":False,
+                "approval_authority":approval_authority,"approval_module":approval_module,"native_approval_runtime_verified":False,
                 "manifest":manifest,"root_owned_readonly_inventory_verified":True,
                 "pure_packaged_catalog_verified":True,"installed_running_authority_verified":False,
                 "source_file_count":len(listed), "runtime_closure":json.loads(run(["nix","path-info","--json","--recursive",str(template_path)]))}

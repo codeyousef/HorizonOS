@@ -48,12 +48,12 @@ impl CallerIdentity {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ServiceIdentity {
-    sender: String,
-    uid: u32,
-    pid: u32,
-    start_ticks: u64,
-    boot_id: String,
+pub(crate) struct ServiceIdentity {
+    pub(crate) sender: String,
+    pub(crate) uid: u32,
+    pub(crate) pid: u32,
+    pub(crate) start_ticks: u64,
+    pub(crate) boot_id: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Snapshot {
@@ -81,6 +81,44 @@ pub struct SystemBus {
     epoch: uuid::Uuid,
 }
 impl SystemBus {
+    pub(crate) fn target(&self) -> &VerifiedTarget {
+        &self.target
+    }
+    pub(crate) fn polkit_connection(&self) -> Result<Connection> {
+        self.target.recheck()?;
+        let connection = connect_native_timeout(Duration::from_secs(120))?;
+        if bus_id(&bus(&connection)?)? != bus_id(&bus(&self.connection)?)? {
+            return Err(Error::TargetChanged);
+        }
+        self.target.recheck()?;
+        Ok(connection)
+    }
+    pub(crate) fn polkit_owner(
+        &self,
+        authority: &crate::approval::policy::Authority,
+    ) -> Result<ServiceIdentity> {
+        self.target.recheck()?;
+        start_polkit(&self.connection)?;
+        let observed = observe_service(
+            &self.connection,
+            "org.freedesktop.PolicyKit1",
+            authority.polkit_uid,
+        )?;
+        let actual =
+            fs::read_link(format!("/proc/{}/exe", observed.pid)).map_err(|_| Error::Authority)?;
+        if actual.to_str() != Some(authority.daemon().as_str())
+            || observed.boot_id != self.target.target().boot_id
+            || observe_service(
+                &self.connection,
+                "org.freedesktop.PolicyKit1",
+                authority.polkit_uid,
+            )? != observed
+        {
+            return Err(Error::TargetChanged);
+        }
+        self.target.recheck()?;
+        Ok(observed)
+    }
     pub fn connect() -> Result<Self> {
         let target = VerifiedTarget::enroll()?;
         let connection = connect_native()?;
@@ -123,6 +161,13 @@ impl SystemBus {
 }
 
 fn connect_native() -> Result<Connection> {
+    connect_native_timeout(Duration::from_secs(2))
+}
+#[cfg(test)]
+pub(crate) fn read_only_test_connection() -> Result<Connection> {
+    connect_native()
+}
+fn connect_native_timeout(timeout: Duration) -> Result<Connection> {
     // Do not honor DBUS_SYSTEM_BUS_ADDRESS or connect to a caller-supplied bus.
     for path in ["/", "/run", "/run/dbus"] {
         let m = fs::symlink_metadata(path).map_err(|_| Error::Authority)?;
@@ -136,7 +181,7 @@ fn connect_native() -> Result<Connection> {
     }
     zbus::blocking::connection::Builder::address(ADDRESS)
         .map_err(|_| Error::Authority)?
-        .method_timeout(Duration::from_secs(2))
+        .method_timeout(timeout)
         .max_queued(32)
         .build()
         .map_err(|_| Error::Authority)
@@ -205,6 +250,44 @@ fn service(bus: &Proxy<'_>) -> Result<ServiceIdentity> {
         start_ticks,
         boot_id,
     })
+}
+pub(crate) fn observe_service(
+    connection: &Connection,
+    name: &str,
+    uid: u32,
+) -> Result<ServiceIdentity> {
+    if !matches!(
+        name,
+        "org.freedesktop.PolicyKit1" | "org.freedesktop.login1"
+    ) {
+        return Err(Error::Authority);
+    }
+    let bus = bus(connection)?;
+    let sender: String = bus
+        .call("GetNameOwner", &(name,))
+        .map_err(|_| Error::Authority)?;
+    let (actual_uid, pid) = credentials(&bus, &sender)?;
+    if uid != actual_uid {
+        return Err(Error::Ownership);
+    }
+    let (start_ticks, boot_id) = process(pid, uid)?;
+    Ok(ServiceIdentity {
+        sender,
+        uid,
+        pid,
+        start_ticks,
+        boot_id,
+    })
+}
+pub(crate) fn start_polkit(connection: &Connection) -> Result<()> {
+    // Native installed D-Bus service activation only; no authentication or action.
+    let result: u32 = bus(connection)?
+        .call("StartServiceByName", &("org.freedesktop.PolicyKit1", 0u32))
+        .map_err(|_| Error::AuthRequired)?;
+    if !matches!(result, 1 | 2) {
+        return Err(Error::Authority);
+    }
+    Ok(())
 }
 fn capture(connection: &Connection, sender: &str) -> Result<Snapshot> {
     let bus = bus(connection)?;

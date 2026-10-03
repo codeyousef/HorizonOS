@@ -6,7 +6,8 @@ D-Bus endpoint, construct worker verification proofs, obtain polkit approval or
 activate systems. The packaged `aios-execd` refuses all runtime requests while
 those adapters remain unavailable. Non-root callers cannot gain authority through
 command-line arguments, environment variables or fixture switches.
-Root daemon startup runs the fixed native target, installed-template and system-bus preflight;
+Root daemon startup runs the native target, installed-template, system-bus and
+installed approval-policy/polkit-owner preflight;
 failure returns `BROKER_NATIVE_PREFLIGHT_FAILED`. A successful preflight still
 returns the unavailable-runtime response until authenticated request/approval
 adapters exist. Startup does not create candidate directories or a SQLite ledger.
@@ -83,8 +84,47 @@ capture. Revalidation requires the exact snapshot and broker connection epoch;
 reconnect, process reuse, boot/bus/logind restart, and changed session properties
 invalidate the capability. This does not establish sandbox/application isolation
 against same-UID unsandboxed malware. It confers neither authenticated user intent
-nor plan approval. An originating user-daemon association, native polkit, exact-plan
-volatile authorization and executor method adapters remain required integrations.
+nor plan approval. An originating user-daemon association and executor method
+adapters remain required integrations.
+
+## Exact-plan system authorization
+
+The executor package installs two dedicated polkit actions for ordinary and
+reboot-requiring exact plans. Every default requires fresh administrator
+authentication (`auth_admin`); there are no retained defaults, implied actions,
+pkexec routes or blanket authorization rules. The administrator module links these
+actions and installs a separate immutable approval-authority record. Its package,
+UID and policy/action hashes must match the reviewed compiled files. Polkit debug
+logging is disallowed in this configuration.
+
+The native authorizer fingerprints the current system, installed authority,
+protected polkit rule/action directories and local account/group files. Policy
+content changes invalidate the prepared policy revision and live receipts.
+The fixed installed polkit service may be D-Bus activated. Its unique owner must
+match installed UID, kernel PID/start/boot and exact installed executable path.
+Rechecks reject owner replacement, restart, target drift and policy drift.
+
+Only a native authenticated caller can select its root-ledger final artifact.
+The caller, current target/policy/template authority, immutable final hash, exact
+closure and five-minute window must all match. Native polkit uses the requester's
+actual `system-bus-name` subject and fixed action/details. Cached or implicit
+authorization is rejected; a fresh uncached native challenge must succeed.
+The cancellation ID stays internal and errors produce no authority proof.
+
+`TrustedConfirmation` is a separate non-deserializable, single-use capability.
+It currently has **no production constructor**: the qualified immutable UI/TTY
+confirmation adapter must be connected before authorization can run. There is no
+`approved=true` path. Fixture confirmations and polkit results are not evidence of
+native administrator authentication or human confirmation.
+
+Receipts and their random nonces exist only in broker memory. They bind caller
+process/session/bus/boot, exact final hash/closure/target, policy, polkit owner and
+expiry. Consumption removes the receipt once; replay, drift and expiration fail.
+No receipt/token appears in public status, persisted plans, filenames or logs.
+`CLOCK_BOOTTIME` drives the native expiry window. Restart/cold restore reconstructs
+an empty cache; the native target gate independently rejects boot changes.
+The independent guard must still verify preconditions and perform exact effects;
+system authorization alone never claims an activation or committed installation.
 
 The template manifest lists bounded, normalized paths, modes, sizes and hashes.
 It must contain the fixed flake, lock and generated catalog. Reserved managed/
@@ -134,6 +174,9 @@ Build permission is distinct from final activation approval: it binds requester,
 boot, plan/candidate digest, approved cache, integer cost ceilings, recovery reserve
 and expiry. The worker must enforce those limits; this core only validates and
 records permission. Repeated build preparation cannot replace an existing grant.
+Resource expiry prevents starting a new build. A verified build which finishes
+later can receive a fresh final preview and its separate five-minute approval
+window; this cannot start a new build with expired resource consent.
 
 Build result/worker-stop capabilities cannot be deserialized or manufactured by
 clients. Their production constructors remain absent until the privileged adapter
@@ -175,3 +218,11 @@ runtime adapters. Host private keys and credentials remain outside all candidate
 Separate read-only tests query the actual guest system bus, kernel and logind for
 the dev process, and verify two real connections, disconnect and forged-owner
 denials. They do not mint production `VerifiedCaller` or approval capabilities.
+The polkit observation test checks native service availability first. Absence
+must return `AuthRequired` and is reported as unavailable, without claiming
+daemon owner or action-catalog verification. When installed, the test activates
+the native daemon if needed and reads its owner/process/action catalog, without
+calling `CheckAuthorization` or
+opening a credential prompt. Package/build evidence verifies the policy files and
+installed-record/closure retention, rather than native approval or running image
+activation.

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD polkit Policy Configuration 1.0//EN" "http://www.freedesktop.org/software/polkit/policyconfig-1.dtd">
+<policyconfig>
+  <vendor>Horizon OS</vendor>
+  <action id="org.aios.executor.activate-exact-plan">
+    <description>Apply the exact Horizon OS system plan</description>
+    <message>Authenticate to apply the exact system plan shown by Horizon OS.</message>
+    <defaults><allow_any>auth_admin</allow_any><allow_inactive>auth_admin</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
+  <action id="org.aios.executor.activate-exact-plan-elevated">
+    <description>Apply the exact Horizon OS system plan requiring a reboot</description>
+    <message>Authenticate to apply the exact system plan and boot changes shown by Horizon OS.</message>
+    <defaults><allow_any>auth_admin</allow_any><allow_inactive>auth_admin</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
+</policyconfig>

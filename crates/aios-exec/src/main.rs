@@ -5,7 +5,7 @@ fn main() {
         let preflight = (|| -> aios_exec::Result<()> {
             let target = aios_exec::native::VerifiedTarget::enroll()?;
             let _template = aios_exec::candidate::InstalledTemplate::from_installed()?;
-            let _system_bus = aios_exec::caller::SystemBus::connect()?;
+            let _approval_engine = aios_exec::approval::Authorizer::open()?;
             target.recheck()
         })();
         if let Err(reason) = preflight {

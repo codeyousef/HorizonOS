@@ -128,7 +128,7 @@ fn normalized(path: &Path) -> Result<PathBuf> {
 }
 /// Every traversed object is administrator/kernel owned. Only the sticky Nix
 /// store can be writable by another UID; its existing readonly objects stay safe.
-fn resolved(path: &Path, scope: &Path) -> Result<PathBuf> {
+pub(crate) fn resolved(path: &Path, scope: &Path) -> Result<PathBuf> {
     let mut selected = normalized(path)?;
     for _ in 0..32 {
         let mut cursor = PathBuf::from("/");
@@ -206,7 +206,7 @@ fn resolved(path: &Path, scope: &Path) -> Result<PathBuf> {
     }
     Err(Error::Integrity)
 }
-fn read(path: &Path, scope: &Path, immutable: bool, max: u64) -> Result<Vec<u8>> {
+pub(crate) fn read(path: &Path, scope: &Path, immutable: bool, max: u64) -> Result<Vec<u8>> {
     let selected = resolved(path, scope)?;
     let before = fs::symlink_metadata(&selected)?;
     let file = OpenOptions::new()
@@ -253,14 +253,14 @@ fn text(path: &str, scope: &str) -> Result<String> {
         .map(|s| s.trim().to_owned())
         .map_err(|_| Error::Invalid)
 }
-fn running() -> Result<PathBuf> {
+pub(crate) fn running() -> Result<PathBuf> {
     let value = resolved(Path::new("/run/current-system"), Path::new("/nix/store"))?;
     if !store(value.to_str().ok_or(Error::Invalid)?) {
         return Err(Error::Integrity);
     }
     Ok(value)
 }
-fn installed<T: for<'a> Deserialize<'a> + Serialize>(name: &str) -> Result<T> {
+pub(crate) fn installed<T: for<'a> Deserialize<'a> + Serialize>(name: &str) -> Result<T> {
     let bytes = read(
         &running()?.join("etc/aios").join(name),
         Path::new("/nix/store"),

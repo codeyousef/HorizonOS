@@ -1,0 +1,305 @@
+//! Volatile, single-use exact-plan system authorization. No RPC or activation.
+pub(crate) mod policy;
+mod polkit;
+use crate::{
+    Error, Result,
+    caller::{CallerIdentity, ServiceIdentity, SystemBus, VerifiedCaller},
+    canonical,
+    ledger::{Ledger, Target},
+    sha256,
+};
+use serde::Serialize;
+use std::collections::BTreeMap;
+
+/// Minting requires a qualified trusted confirmation adapter. No native
+/// constructor exists until the immutable UI/TTY confirmation path is connected.
+/// Neither model output nor a caller-supplied approved=true can produce this.
+pub struct TrustedConfirmation {
+    binding_sha256: String,
+}
+/// Internal receipt only; no serialization, debug output or public constructors.
+/// The independent guard must still verify preconditions and execute exact effects.
+pub struct VerifiedSystemAuthorization {
+    binding: Binding,
+}
+impl VerifiedSystemAuthorization {
+    pub fn plan_id(&self) -> &str {
+        &self.binding.plan_id
+    }
+    pub fn plan_hash(&self) -> &str {
+        &self.binding.plan_hash
+    }
+    pub fn closure(&self) -> &str {
+        &self.binding.closure
+    }
+}
+#[derive(Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AuthorizationStatus {
+    SystemAuthorized,
+}
+#[derive(Clone, PartialEq, Eq)]
+struct Binding {
+    plan_id: String,
+    plan_hash: String,
+    caller: CallerIdentity,
+    target: Target,
+    closure: String,
+    policy_revision: String,
+    action: String,
+    frozen_at: u64,
+    expires_at: u64,
+}
+impl Binding {
+    fn confirmation_digest(&self) -> Result<String> {
+        // Final plan's canonical hash transitively binds prepared intent/actions,
+        // target, arguments, baseline, exact result, impact, recovery and expiry.
+        Ok(sha256(&canonical(&(
+            self.plan_id.as_str(),
+            self.plan_hash.as_str(),
+            &self.target,
+            self.policy_revision.as_str(),
+            self.caller.uid,
+            self.caller.pid,
+            self.caller.start_ticks,
+            self.caller.sender.as_str(),
+            self.caller.bus_id.as_str(),
+            self.caller.boot_id.as_str(),
+            self.caller
+                .session
+                .as_ref()
+                .map(|s| (&s.id, s.remote, &s.kind, &s.class, &s.state, s.active)),
+            self.closure.as_str(),
+            self.action.as_str(),
+            self.frozen_at,
+            self.expires_at,
+        ))?))
+    }
+    fn validate_time(&self, now: u64) -> Result<()> {
+        if self.expires_at.checked_sub(self.frozen_at) != Some(policy::EXPIRY_MS) {
+            return Err(Error::Integrity);
+        }
+        if now < self.frozen_at || now >= self.expires_at {
+            return Err(Error::Expired);
+        }
+        Ok(())
+    }
+}
+struct Receipt {
+    binding: Binding,
+    issued_at: u64,
+    nonce: uuid::Uuid,
+    polkit_owner: ServiceIdentity,
+}
+#[derive(Default)]
+struct Volatile {
+    receipts: BTreeMap<String, Receipt>,
+}
+impl Volatile {
+    fn issue(
+        &mut self,
+        binding: Binding,
+        confirmation: TrustedConfirmation,
+        native: polkit::NativeAuthentication,
+        now: u64,
+    ) -> Result<()> {
+        binding.validate_time(now)?;
+        if confirmation.binding_sha256 != binding.confirmation_digest()? {
+            return Err(Error::Integrity);
+        }
+        self.receipts
+            .retain(|_, receipt| now >= receipt.issued_at && now < receipt.binding.expires_at);
+        if self.receipts.contains_key(&binding.plan_id) {
+            return Err(Error::Conflict);
+        }
+        if self.receipts.len() >= 16 {
+            return Err(Error::Conflict);
+        }
+        self.receipts.insert(
+            binding.plan_id.clone(),
+            Receipt {
+                binding,
+                issued_at: now,
+                nonce: uuid::Uuid::new_v4(),
+                polkit_owner: native.owner,
+            },
+        );
+        Ok(())
+    }
+    fn consume(
+        &mut self,
+        current: &Binding,
+        owner: &ServiceIdentity,
+        now: u64,
+    ) -> Result<VerifiedSystemAuthorization> {
+        let receipt = self
+            .receipts
+            .get(&current.plan_id)
+            .ok_or(Error::AuthRequired)?;
+        // Foreign subjects cannot destroy the owner's receipt by probing its ID.
+        if receipt.binding.caller != current.caller {
+            return Err(Error::Authority);
+        }
+        if current.validate_time(now).is_err()
+            || now < receipt.issued_at
+            || receipt.binding != *current
+            || receipt.polkit_owner != *owner
+        {
+            self.receipts.remove(&current.plan_id);
+            return Err(Error::Expired);
+        }
+        let receipt = self
+            .receipts
+            .remove(&current.plan_id)
+            .ok_or(Error::AuthRequired)?;
+        if receipt.nonce.is_nil() {
+            return Err(Error::Integrity);
+        }
+        Ok(VerifiedSystemAuthorization {
+            binding: receipt.binding,
+        })
+    }
+}
+pub struct Authorizer {
+    bus: SystemBus,
+    volatile: Volatile,
+}
+impl Authorizer {
+    pub fn open() -> Result<Self> {
+        let bus = SystemBus::connect()?;
+        let policy = policy::InstalledPolicy::load(bus.target())?;
+        bus.polkit_owner(&policy.authority)?;
+        Ok(Self {
+            bus,
+            volatile: Volatile::default(),
+        })
+    }
+    pub fn authenticate(&self, header: &zbus::message::Header<'_>) -> Result<VerifiedCaller> {
+        self.bus.authenticate(header)
+    }
+    pub fn policy_revision(&self) -> Result<String> {
+        Ok(policy::InstalledPolicy::load(self.bus.target())?.revision)
+    }
+    fn binding(
+        &self,
+        ledger: &Ledger,
+        caller: &VerifiedCaller,
+        id: &str,
+        hash: &str,
+    ) -> Result<(Binding, policy::InstalledPolicy)> {
+        self.bus.recheck(caller)?;
+        let (prepared, plan, actual_hash) = ledger.approval_snapshot(id, caller.identity().uid)?;
+        let policy = policy::InstalledPolicy::load(self.bus.target())?;
+        let identity = caller.identity();
+        if actual_hash != hash
+            || prepared.policy_revision != policy.revision
+            || prepared.target != *self.bus.target().target()
+        {
+            return Err(Error::TargetChanged);
+        }
+        if prepared.requester.uid != identity.uid
+            || prepared.requester.bus_sender != identity.sender
+            || identity.session.as_ref().map(|s| s.id.as_str())
+                != Some(prepared.requester.logind_session.as_str())
+        {
+            return Err(Error::Authority);
+        }
+        if prepared.preview.risk != aios_state::Risk::R2 {
+            return Err(Error::Authority);
+        }
+        let authority = self.bus.target().authority()?;
+        if prepared.template_sha256 != authority.manifest_sha256 {
+            return Err(Error::TargetChanged);
+        }
+        let binding = Binding {
+            plan_id: id.into(),
+            plan_hash: hash.into(),
+            caller: identity.clone(),
+            target: prepared.target,
+            closure: plan.build.closure,
+            policy_revision: policy.revision.clone(),
+            action: if plan.reboot_required {
+                policy::ELEVATED_ACTION
+            } else {
+                policy::ACTION
+            }
+            .into(),
+            frozen_at: plan.frozen_at_monotonic_ms,
+            expires_at: plan.approval_expires_monotonic_ms,
+        };
+        binding.validate_time(boottime_ms()?)?;
+        self.bus.recheck(caller)?;
+        Ok((binding, policy))
+    }
+    pub fn authorize(
+        &mut self,
+        ledger: &Ledger,
+        caller: &VerifiedCaller,
+        id: &str,
+        hash: &str,
+        confirmation: TrustedConfirmation,
+    ) -> Result<AuthorizationStatus> {
+        let (binding, policy) = self.binding(ledger, caller, id, hash)?;
+        if confirmation.binding_sha256 != binding.confirmation_digest()? {
+            return Err(Error::Integrity);
+        }
+        if self.volatile.receipts.contains_key(id) {
+            return Err(Error::Conflict);
+        }
+        let native = polkit::authenticate(&self.bus, caller, &policy, &binding)?;
+        let (current, current_policy) = self.binding(ledger, caller, id, hash)?;
+        if current != binding || current_policy.revision != policy.revision {
+            return Err(Error::TargetChanged);
+        }
+        self.volatile
+            .issue(binding, confirmation, native, boottime_ms()?)?;
+        Ok(AuthorizationStatus::SystemAuthorized)
+    }
+    pub fn consume(
+        &mut self,
+        ledger: &Ledger,
+        caller: &VerifiedCaller,
+        id: &str,
+        hash: &str,
+    ) -> Result<VerifiedSystemAuthorization> {
+        let (binding, policy) = match self.binding(ledger, caller, id, hash) {
+            Ok(context) => context,
+            Err(error) => {
+                if self
+                    .volatile
+                    .receipts
+                    .get(id)
+                    .is_some_and(|r| r.binding.caller == *caller.identity())
+                {
+                    self.volatile.receipts.remove(id);
+                }
+                return Err(error);
+            }
+        };
+        let owner = self.bus.polkit_owner(&policy.authority)?;
+        self.volatile.consume(&binding, &owner, boottime_ms()?)
+    }
+    /// Trusted broker shutdown/policy revocation only; nothing is persisted.
+    pub fn revoke_all(&mut self) {
+        self.volatile.receipts.clear();
+    }
+}
+pub fn boottime_ms() -> Result<u64> {
+    let mut value = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    if unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut value) } != 0
+        || value.tv_sec < 0
+        || !(0..1000000000).contains(&value.tv_nsec)
+    {
+        return Err(Error::Io);
+    }
+    (value.tv_sec as u64)
+        .checked_mul(1000)
+        .and_then(|v| v.checked_add(value.tv_nsec as u64 / 1000000))
+        .ok_or(Error::Invalid)
+}
+
+#[cfg(test)]
+mod tests;

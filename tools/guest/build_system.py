@@ -222,9 +222,54 @@ def verify_template(realized, closure, enrolled, source_manifest, expected_locks
     catalog = source.decode(read_template_file(template, "catalog.json"))
     if authority["lock_sha256"] != expected_locks["flake.lock"] or catalog["catalog_revision"] != authority["catalog_revision"] or catalog["content"]["base_template_revision"] != authority["base_template_revision"]:
         raise ValueError("built template catalog/lock identity differs")
+    approval = verify_approval(realized, closure, source_manifest)
     return {"authority": authority, "target_authority":target_authority,"native_target_runtime_verified":False,
+            "approval_policy":approval,
             "manifest": manifest, "root_owned_readonly_inventory_verified": True,
             "retained_in_system_closure_verified": True, "running_installed_authority_verified": False}
+
+
+def approval_paths(record, source_manifest):
+    """Validate built public policy data, without granting runtime authorization."""
+    keys = {"schema_version","policy_path","policy_sha256","action_path","action_sha256","polkit_uid","polkit_package"}
+    if set(record) != keys or record["schema_version"] != 1 or type(record["polkit_uid"]) is not int or not 0 < record["polkit_uid"] < 2**32 - 1:
+        raise ValueError("invalid built approval authority schema")
+    suffix = "/share/aios/system-approval.json"
+    if not isinstance(record["policy_path"], str) or not record["policy_path"].endswith(suffix):
+        raise ValueError("invalid built approval policy path")
+    executor = store_path(record["policy_path"][:-len(suffix)])
+    if record["action_path"] != executor + "/share/polkit-1/actions/org.aios.executor.policy":
+        raise ValueError("built action policy differs from executor")
+    polkit = store_path(record["polkit_package"])
+    expected = {item["path"]:item for item in source_manifest["files"]}
+    for field, relative in (("policy_sha256", "system-approval.json"), ("action_sha256", "org.aios.executor.policy")):
+        entry = expected.get("crates/aios-exec/policy/" + relative)
+        if entry is None or record[field] != entry["sha256"]:
+            raise ValueError("built approval policy differs from frozen source")
+    return executor, polkit
+
+
+def verify_approval(realized, closure, source_manifest):
+    record_bytes = (Path(realized) / "etc/aios/approval-authority.json").read_bytes()
+    record = source.decode(record_bytes)
+    if source.canonical(record) != record_bytes:
+        raise ValueError("built approval authority bytes are not canonical")
+    executor, polkit = approval_paths(record, source_manifest)
+    if executor not in closure or polkit not in closure:
+        raise ValueError("built system does not retain executor/polkit authority")
+    policy_bytes = read_template_file(Path(executor), "share/aios/system-approval.json")
+    action_bytes = read_template_file(Path(executor), "share/polkit-1/actions/org.aios.executor.policy")
+    if hashlib.sha256(policy_bytes).hexdigest() != record["policy_sha256"] or hashlib.sha256(action_bytes).hexdigest() != record["action_sha256"]:
+        raise ValueError("realized approval policy bytes differ")
+    import xml.etree.ElementTree as ET
+    actions = ET.fromstring(action_bytes).findall("action")
+    if [a.attrib["id"] for a in actions] != ["org.aios.executor.activate-exact-plan", "org.aios.executor.activate-exact-plan-elevated"]:
+        raise ValueError("realized approval actions differ")
+    for action in actions:
+        if action.findall("annotate") or any(action.findtext("defaults/" + key) != "auth_admin" for key in ("allow_any","allow_inactive","allow_active")):
+            raise ValueError("realized approval policy caches or implies authorization")
+    return {"authority":record,"root_owned_readonly_policy_verified":True,"retained_in_system_closure_verified":True,
+            "native_polkit_runtime_verified":False,"trusted_confirmation_ui_verified":False}
 
 
 def main():

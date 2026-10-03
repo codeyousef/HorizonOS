@@ -61,6 +61,10 @@
       executor = (productPackage "aios-exec" "aios-exec" "aios-execd").overrideAttrs (old: {
         nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
         buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
+        postInstall = (old.postInstall or "") + ''
+          install -Dm644 ${./crates/aios-exec/policy/org.aios.executor.policy} "$out/share/polkit-1/actions/org.aios.executor.policy"
+          install -Dm644 ${./crates/aios-exec/policy/system-approval.json} "$out/share/aios/system-approval.json"
+        '';
       });
       model = (productPackage "aios-model" "aios-model" "aios-modeld").overrideAttrs (old: {
         AIOS_LLAMA_BRIDGE = "${llamaBridge}";
@@ -73,7 +77,7 @@
     in {
       nixosConfigurations.aios-dev = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
+        specialArgs = { aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ];
       };
       nixosModules.default = import ./nix/modules/aios;

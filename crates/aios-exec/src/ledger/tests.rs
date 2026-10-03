@@ -298,6 +298,34 @@ fn sqlite_abort_cannot_publish_success_and_failure_preserves_record() {
     assert_eq!(l.history(&p.plan_id, 1000).unwrap().len(), 3);
 }
 #[test]
+fn long_verified_build_gets_a_fresh_final_window_without_reusing_expired_build_consent() {
+    let f = fixture();
+    let (mut l, p, _) = building(&f);
+    l.record_build(&p.plan_id, 1000, &built(&p), &p.target, &p.baseline)
+        .unwrap();
+    let frozen = l.freeze(&p.plan_id, 1000, 900000, false).unwrap();
+    assert_eq!(frozen.frozen_at_monotonic_ms, 900000);
+    assert_eq!(frozen.approval_expires_monotonic_ms, 1200000);
+    assert_eq!(
+        l.approval_snapshot(&p.plan_id, 1000).err(),
+        Some(Error::Authority)
+    );
+    let f = fixture();
+    let (mut l, p, _) = registered(&f);
+    assert!(
+        l.start_build(
+            &p.plan_id,
+            1000,
+            &p.target,
+            &p.baseline,
+            &permission(&p),
+            900000
+        )
+        .is_err()
+    );
+    assert_eq!(l.status(&p.plan_id, 1000).unwrap().state, State::Planned);
+}
+#[test]
 fn validation_crash_can_resume_without_replaying_effects() {
     let f = fixture();
     let (mut l, (p, c)) = (ledger(&f), prepare(&f));

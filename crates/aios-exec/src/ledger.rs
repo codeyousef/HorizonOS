@@ -753,7 +753,9 @@ impl Ledger {
         if s.state != State::Built {
             return Err(Error::State);
         }
-        if now < plan.prepared_at_monotonic_ms || now >= plan.preparation_expires_monotonic_ms {
+        // Resource consent gates starting the build, not the lifetime of a verified
+        // built artifact. Final approval starts its separate five-minute window.
+        if now < plan.prepared_at_monotonic_ms {
             return Err(Error::Expired);
         }
         let bytes: Vec<u8> =
@@ -809,6 +811,27 @@ impl Ledger {
             return Err(Error::Integrity);
         }
         Ok(plan)
+    }
+    pub(crate) fn approval_snapshot(
+        &self,
+        id: &str,
+        uid: u32,
+    ) -> Result<(PreparedPlan, FinalPlan, String)> {
+        if self.target.is_none() {
+            return Err(Error::Authority);
+        }
+        let prepared = self.get_plan(id, uid)?;
+        self.verify_plan_target(&prepared)?;
+        let status = self.status(id, uid)?;
+        if status.state != State::AwaitingApproval || status.cancel_requested {
+            return Err(Error::State);
+        }
+        let final_plan = self.final_plan(id, uid)?;
+        let hash = sha256(&canonical(&final_plan)?);
+        if status.final_plan_sha256.as_deref() != Some(hash.as_str()) {
+            return Err(Error::Integrity);
+        }
+        Ok((prepared, final_plan, hash))
     }
     /// This preparation core cannot mint an activation receipt or execute. The
     /// qualified approval/guard adapter must be connected before this can succeed.

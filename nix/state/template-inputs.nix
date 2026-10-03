@@ -13,7 +13,9 @@ let
     ) (builtins.attrNames entries);
   paths = builtins.sort builtins.lessThan (
     [ "flake.nix" "flake.lock" "Cargo.toml" "Cargo.lock" "dev/vm.example.json"
-      "models/lock.json" "models/source-lock.json" ]
+      "models/lock.json" "models/source-lock.json"
+      "crates/aios-exec/policy/system-approval.json"
+      "crates/aios-exec/policy/org.aios.executor.policy" ]
     ++ tree "crates" [ "[.]rs" "[.]toml" ]
     ++ tree "native" [ "[.]cpp" "[.]h" "[.]cmake" "CMakeLists[.]txt" ]
     ++ tree "nix" [ "[.]nix" "[.]service" "[.]socket" ]
