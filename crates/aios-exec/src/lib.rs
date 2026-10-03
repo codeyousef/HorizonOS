@@ -1,4 +1,5 @@
 //! Deterministic broker preparation. No model shell, arbitrary Nix, or activation.
+pub mod caller;
 pub mod candidate;
 pub mod ledger;
 pub mod native;

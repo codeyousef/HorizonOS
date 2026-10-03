@@ -6,7 +6,7 @@ D-Bus endpoint, construct worker verification proofs, obtain polkit approval or
 activate systems. The packaged `aios-execd` refuses all runtime requests while
 those adapters remain unavailable. Non-root callers cannot gain authority through
 command-line arguments, environment variables or fixture switches.
-Root daemon startup runs the fixed native target and installed-template preflight;
+Root daemon startup runs the fixed native target, installed-template and system-bus preflight;
 failure returns `BROKER_NATIVE_PREFLIGHT_FAILED`. A successful preflight still
 returns the unavailable-runtime response until authenticated request/approval
 adapters exist. Startup does not create candidate directories or a SQLite ledger.
@@ -55,8 +55,36 @@ New plans and build/finalization operations must match the live verified target.
 Old plan inspection can expose historical data after reboot without authorizing
 another build. Host-side pinned SSH verification remains the development transport
 gate. This local code does not replace authenticated system-bus/logind subjects;
-those adapters and native running/profile/boot-selected baseline capture are still
-required before runtime endpoints can be enabled.
+the native caller capability described below and native running/profile/boot-selected
+baseline capture must be connected before runtime endpoints can be enabled.
+
+## Native requesting subject
+
+`SystemBus` requires the installed `VerifiedTarget` before opening the fixed
+`/run/dbus/system_bus_socket`. Its protected root-owned ancestors and socket are
+checked; caller-controlled bus addresses are ignored. `VerifiedCaller` has private
+fields and no serialization or public identity constructor. Only a root broker's
+injected D-Bus method-call header can supply its unique sender to this intake.
+Root/service identity does not become an authenticated original user by proxying
+a user request; requester UID zero is denied.
+
+The bus supplies UID/PID. Bounded kernel proc reads check all four process UIDs,
+PID and process start ticks against those credentials. Boot and bus-instance IDs
+are recorded. The logind unique owner must have actual root bus credentials and
+matching kernel process/boot identity. Session lookup uses this owner and the
+requester's PID; the returned session UID must match. Session ID, remote status,
+type, class, state and activity are read directly without property caches. Closing
+sessions are rejected. A missing PID/session association remains absent: there is
+no fallback to the newest desktop, inferred session, or client-supplied session ID.
+Desktop availability is an observation and grants no UI permission.
+
+Credentials, kernel process, bus instance and logind owner are checked again during
+capture. Revalidation requires the exact snapshot and broker connection epoch;
+reconnect, process reuse, boot/bus/logind restart, and changed session properties
+invalidate the capability. This does not establish sandbox/application isolation
+against same-UID unsandboxed malware. It confers neither authenticated user intent
+nor plan approval. An originating user-daemon association, native polkit, exact-plan
+volatile authorization and executor method adapters remain required integrations.
 
 The template manifest lists bounded, normalized paths, modes, sizes and hashes.
 It must contain the fixed flake, lock and generated catalog. Reserved managed/
@@ -140,7 +168,10 @@ python3 tools/devctl.py test --suite unit --detach --json
 The registered provider runs actual Rust filesystem/SQLite tests and builds/runs
 the executor package for non-root denials. Tests use dev-owned fixture directories,
 fixture templates/targets/grants/build outputs and SQL-abort injection. They do not
-prove root installation, native guest/peer verification, enforced worker quotas,
+prove root installation, native root caller intake, enforced worker quotas,
 real disk-full recovery, polkit, guard survival, activation or boot. These remain
 required, including installed template qualification, root GC retention and native
 runtime adapters. Host private keys and credentials remain outside all candidates.
+Separate read-only tests query the actual guest system bus, kernel and logind for
+the dev process, and verify two real connections, disconnect and forged-owner
+denials. They do not mint production `VerifiedCaller` or approval capabilities.

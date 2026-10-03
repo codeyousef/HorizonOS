@@ -35,16 +35,20 @@ def main():
     relatives = ("crates/aios-exec/src/lib.rs", "crates/aios-exec/src/main.rs",
         "crates/aios-exec/src/candidate.rs", "crates/aios-exec/src/ledger.rs",
         "crates/aios-exec/src/candidate/tests.rs", "crates/aios-exec/src/ledger/tests.rs",
-        "crates/aios-state/src/lib.rs", "crates/aios-exec/src/native.rs", "crates/aios-exec/src/native/tests.rs")
+        "crates/aios-state/src/lib.rs", "crates/aios-exec/src/native.rs", "crates/aios-exec/src/native/tests.rs",
+        "crates/aios-exec/src/caller.rs", "crates/aios-exec/src/caller/tests.rs")
     for relative in relatives:
         data = (release / relative).read_bytes()
         out = run(["nix", "develop", *locked, reference, "--command", "rustfmt", "--edition", "2024", "--emit", "stdout", "--config", "skip_children=true"], data)
         formatted.append({"path": relative, "source_sha256": hashlib.sha256(data).hexdigest(),
                           "formatted_sha256": hashlib.sha256(out).hexdigest(), "formatted_source": out.decode()})
     print("AIOS_BROKER_PREPARATION_FORMAT " + json.dumps(formatted, sort_keys=True), flush=True)
-    unit = run(["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-exec", "--lib"], timeout=180)
-    if b"34 passed; 0 failed" not in unit:
+    unit = run(["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-exec", "--lib", "--", "--nocapture"], timeout=180)
+    if b"44 passed; 0 failed" not in unit:
         raise RuntimeError("broker fixture test count changed")
+    observations = [json.loads(line.split("AIOS_BROKER_CALLER_OBSERVATIONS ", 1)[1]) for line in unit.decode().splitlines() if "AIOS_BROKER_CALLER_OBSERVATIONS " in line]
+    if len(observations) != 1 or observations[0]["uid"] != os.getuid() or observations[0]["boot_id"] != identity["boot_id"] or observations[0]["logind_uid"] != 0:
+        raise RuntimeError("native read-only caller observations missing or mismatched")
     outputs = json.loads(run(["nix", "build", "--json", "--no-link", *locked,
         "--option", "pure-eval", "true", "--option", "allow-import-from-derivation", "false",
         "--option", "substituters", "https://cache.nixos.org", reference + "#aios-exec"], timeout=600))
@@ -65,12 +69,13 @@ def main():
     closure = json.loads(run(["nix","path-info","--json","--recursive",package]))
     print("AIOS_BROKER_PREPARATION " + json.dumps({"evidence_kind":"real-guest-rust-filesystem-sqlite-fixtures-and-package-denials",
         "target_identity":identity,"package":package,"executable_sha256":hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
-        "fixture_tests_passed":34,"denials":denials,"runtime_closure":closure,"commands":commands,
+        "fixture_tests_passed":42,"actual_read_only_bus_tests_passed":2,"native_caller_observations":observations[0],"denials":denials,"runtime_closure":closure,"commands":commands,
         "installed_root_template_verified":False,"root_candidate_registration_verified":False,
         "root_ledger_execution_verified":False,"native_target_runtime_verified":False,"authenticated_bus_peer_verified":False,"isolated_worker_verified":False,"system_activation_verified":False,
         "limitations":["Filesystem/SQLite tests execute the real library as the dev UID with fixture templates, grants and build output.",
         "Production constructors have no fixture/environment override; actual root runtime remains unavailable.",
-        "Native target/config intake is implemented but root runtime remains unqualified; bus peer identity, builder output/stop proofs, polkit, guard and recovery remain to connect/qualify."]}, sort_keys=True))
+        "Actual dev-UID bus credentials/process/logind and connection-change denials are read-only checks; no production root VerifiedCaller is minted.",
+        "Native target/config and caller intake are implemented but root runtime remains unqualified; original user-daemon forwarding, builder output/stop proofs, polkit, guard and recovery remain to connect/qualify."]}, sort_keys=True))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 uuid = { version = "=1.26.1", features = ["v4"] }
+zbus = { version = "5.19", features = ["blocking-api"] }
 
 [[bin]]
 name = "aios-execd"
