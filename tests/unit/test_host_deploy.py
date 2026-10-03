@@ -91,6 +91,15 @@ class HostDeploymentTests(unittest.TestCase):
         self.assertEqual(caught.exception.exit_code, 4)
         self.exchange.assert_not_called()
 
+    def test_reinstalled_target_cannot_reuse_previous_registration(self):
+        self.call()
+        self.exchange.reset_mock()
+        self.enrolled_identity.return_value=(self.trust,{**IDENTITY,"installation_uuid":"55555555-5555-4555-8555-555555555555"})
+        with self.assertRaises(DevctlError) as caught:
+            self.call("status")
+        self.assertEqual(caught.exception.code,"DEPLOYMENT_TARGET_CHANGED")
+        self.exchange.assert_not_called()
+
     def test_product_role_wrong_disk_and_channel_are_denied(self):
         for key, value in (("guest_role", "production"), ("disk_serial", "wrong"), ("management_channel", "other")):
             self.enrolled_identity.return_value = (self.trust, {**IDENTITY, key: value})

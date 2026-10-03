@@ -90,6 +90,29 @@ delivery alone is not success. Evidence and receipts stay in private `.local`
 paths under the checkout. Console pinning checks media/seed/target identity,
 evidence digest, public key encoding and matching fingerprint before writing the
 private known_hosts file. Host-key scans alone do not establish trust.
+For a deliberately replaced installation, run full re-enrollment with the exact
+prior installation UUID; ordinary `enroll` never accepts a changed key/target:
+
+```fish
+python3 tools/devctl.py enroll --re-enroll PRIOR_INSTALLATION_UUID --json
+```
+
+Managed QEMU uses the new successful verified bootstrap console receipt. An
+external provider also requires `--trust-file .local/ssh/reinstalled-console.json`,
+using the same explicit console material schema as initial adoption. The new
+installation UUID must differ. Re-enrollment does not install or erase a disk;
+destructive reinstallation is a separately authorized operation. Configure the
+new SSH endpoint/key and optional expected UUIDs explicitly before re-enrollment.
+The dedicated private key stays on the host. The tool authenticates the new fixed
+identity endpoint with staged console-pinned trust before replacing active files.
+It preserves prior trust/identity evidence and rejects old deployment intents
+through their exact installation/boot/key/configuration bindings.
+
+An interrupted multi-file trust update blocks normal guest operations. Resume
+the same command with unchanged console material and prior UUID; the staged
+receipt and hashes prevent an unrelated update from replacing it. No old
+approval, task grant or deployment authorization is restored.
+
 After enrollment, each guest operation checks NixOS, installation/DMI UUIDs and
 role; mutations additionally check disk and management identity. SSH exposes the
 read-only identity endpoint and a registered unprivileged source receiver through

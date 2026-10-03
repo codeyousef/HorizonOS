@@ -41,7 +41,7 @@ def public_key(value):
     return " ".join(words[:2]), fingerprint
 
 
-def pin_console(config):
+def console_material(config):
     from .vm import load_record
     record = load_record(config)
     receipt_path = project_path(config.root, ".local/vm/bootstrap-result.json", ".local/vm")
@@ -69,13 +69,18 @@ def pin_console(config):
     key, fingerprint = public_key(keys[0])
     if fingerprint not in text:
         raise failure(ExitCode.VERIFICATION_FAILURE, "CONSOLE_FINGERPRINT_MISMATCH", "Console key/fingerprint disagree")
-    return install_trust(config, key, fingerprint, {
+    return key, fingerprint, {
         "guest_uuid": plan["guest_uuid"], "installation_uuid": plan["installation_uuid"], "guest_role": "development",
         "disk_serial": DISK_SERIAL, "management_channel": "ssh-development",
-    }, {"kind": "verified-qemu-console", "serial_sha256": receipt["serial_sha256"]})
+    }, {"kind": "verified-qemu-console", "serial_sha256": receipt["serial_sha256"]}
+
+
+def pin_console(config):
+    return install_trust(config, *console_material(config))
 
 
 def install_trust(config, key, fingerprint, expected, source):
+    require_complete_enrollment(config)
     private_directory(config.root, ".local/ssh")
     private_file(config.paths["identity_file"])
     known = config.paths["known_hosts_file"]
@@ -98,7 +103,14 @@ def install_trust(config, key, fingerprint, expected, source):
     return trust
 
 
+def require_complete_enrollment(config):
+    pending = config.root / ".local/ssh/re-enrollment-pending.json"
+    if pending.exists() or pending.is_symlink():
+        raise failure(ExitCode.UNMET_PREREQUISITE, "REENROLLMENT_INCOMPLETE", "Resume the explicit re-enrollment before guest operations")
+
+
 def load_trust(config):
+    require_complete_enrollment(config)
     path = project_path(config.root, ".local/ssh/trust.json", ".local/ssh")
     if not path.exists():
         raise failure(ExitCode.UNMET_PREREQUISITE, "GUEST_NOT_ENROLLED", "Guest has no console-rooted SSH trust")
@@ -112,7 +124,7 @@ def load_trust(config):
     return trust
 
 
-def pin_external(config, relative):
+def external_material(config, relative):
     if config.values["provider"] != "external":
         raise invalid("Operator console trust files are for external-provider adoption")
     path = project_path(config.root, relative, ".local/ssh")
@@ -136,7 +148,11 @@ def pin_external(config, relative):
         if field in config.values and config.values[field] != value[field]:
             raise failure(ExitCode.TARGET_MISMATCH, "EXTERNAL_TARGET_MISMATCH", "Configured identity differs from operator console trust")
     expected = {field: value[field] for field in ("guest_uuid", "installation_uuid", "guest_role", "disk_serial", "management_channel")}
-    return install_trust(config, key, fingerprint, expected, {"kind": "operator-console", "trust_material_sha256": digest_file(path)})
+    return key, fingerprint, expected, {"kind": "operator-console", "trust_material_sha256": digest_file(path)}
+
+
+def pin_external(config, relative):
+    return install_trust(config, *external_material(config, relative))
 
 
 def ssh_arguments(config):

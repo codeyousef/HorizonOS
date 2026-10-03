@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import acceptance, deploy, guest, jobs, provision, snapshots, sync, vm
+from . import acceptance, deploy, guest, jobs, provision, reenrollment, snapshots, sync, vm
 
 
 class Parser(argparse.ArgumentParser):
@@ -46,7 +46,9 @@ def parser() -> Parser:
     restore = vm.add_parser("restore")
     restore.add_argument("--name", required=True)
     restore.add_argument("--discard-guest-changes", action="store_true")
-    enrollment = commands.add_parser("enroll").add_mutually_exclusive_group()
+    enrollment_parser = commands.add_parser("enroll")
+    enrollment_parser.add_argument("--re-enroll", metavar="PRIOR_INSTALLATION_UUID")
+    enrollment = enrollment_parser.add_mutually_exclusive_group()
     enrollment.add_argument("--pin-console-only", action="store_true")
     enrollment.add_argument("--trust-file", metavar="LOCAL_CONSOLE_JSON")
     commands.add_parser("sync")
@@ -84,6 +86,10 @@ def dispatch(args) -> tuple[ExitCode, dict]:
     if args.command == "doctor" and args.guest:
         return guest.doctor(load_config(args.workspace))
     if args.command == "enroll":
+        if args.re_enroll is not None:
+            if args.pin_console_only:
+                raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Re-enrollment requires full verified identity, not pin-only mode")
+            return reenrollment.run(load_config(args.workspace), args.re_enroll, args.trust_file)
         if args.pin_console_only:
             config = load_config(args.workspace)
             if config.values["provider"] != "qemu":
