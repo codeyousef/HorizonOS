@@ -19,6 +19,23 @@ PROFILE = "synthetic-disposable-plasma-wayland-v1"
 PROBE = Path(__file__).resolve().parents[1] / "guest/desktop_probe.py"
 
 
+def read_binding_record(path):
+    # The binding includes a source manifest, whose bound differs from the
+    # small VM configuration. Keep the configuration reader's 64 KiB limit.
+    guest.private_file(path)
+    limit = sync.contract.MAX_HEADER + 4096
+    if path.stat().st_size > limit:
+        raise invalid("Desktop source binding exceeds its manifest limit")
+    with path.open("rb") as handle:
+        data = handle.read(limit + 1)
+    if len(data) > limit:
+        raise invalid("Desktop source binding exceeds its manifest limit")
+    try:
+        return sync.contract.decode(data)
+    except (ValueError, UnicodeError) as error:
+        raise invalid("Invalid desktop source binding JSON") from error
+
+
 def identifier(value):
     try:
         parsed = uuid.UUID(value)
@@ -33,8 +50,7 @@ def binding(owner, run_id):
     directory = owner.root / ".local/d" / identifier(run_id).hex[:8]
     config = load_config(directory)
     path = directory / ".local/desktop.json"
-    guest.private_file(path)
-    value = read_json(path)
+    value = read_binding_record(path)
     if set(value) != {"schema_version", "run_id", "owner_workspace", "configuration", "guest_uuid", "installation_uuid", "disk_device", "disk_inode", "manifest", "snapshot_digest"} or value["schema_version"] != 1 or value["run_id"] != run_id or value["owner_workspace"] != str(owner.root) or value["configuration"] != config.values:
         raise invalid("Desktop fixture binding mismatch")
     if not owner.root.is_relative_to(acceptance.STORAGE_ROOT) or directory.resolve() != directory or config.values["guest_build_target"] != "aios-desktop-test":

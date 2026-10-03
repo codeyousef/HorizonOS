@@ -1,8 +1,8 @@
 //! Real standard user-bus introspection and unique-sender authorization in guest.
 use aios_session::{State, bus::{self, NAME, PATH, INTERFACE}};
 use serde_json::{Value, json};
-use std::{fs, os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt}, sync::{Arc, Mutex}, time::Duration};
-use zbus::blocking::{Connection, Proxy};
+use std::{fs, os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt}, sync::{Arc, Mutex, mpsc}, time::Duration};
+use zbus::blocking::{Connection, MessageIterator, Proxy};
 
 fn connect() -> Connection {
     let address = format!("unix:path=/run/user/{}/bus", nix::unistd::geteuid());
@@ -30,6 +30,31 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
         .custom_flags(nix::libc::O_NOFOLLOW).open(directory.join("public-session.lock")).unwrap();
     lock.lock().unwrap();
     let server = bus::export_user_bus(Arc::new(Mutex::new(State::default()))).unwrap();
+    // A normal subscriber (not an eavesdropping monitor) listens to ALL signals
+    // from this unique server owner. Test-only public fences delimit the real
+    // lifecycle calls; any intervening broadcast fails the privacy check.
+    let listener = connect();
+    let rule = zbus::MatchRule::builder().msg_type(zbus::message::Type::Signal)
+        .sender(server.unique_name().unwrap().clone()).unwrap().build();
+    let mut signals = MessageIterator::for_match_rule(rule, &listener, Some(64)).unwrap();
+    let fence = uuid::Uuid::new_v4().to_string(); let expected_fence = fence.clone();
+    let (completed, observed) = mpsc::sync_channel(1);
+    let listener_thread = std::thread::spawn(move || {
+        let mut started = false; let mut broadcasts = 0;
+        for _ in 0..64 {
+            let message = signals.next().expect("live signal listener").unwrap();
+            let header = message.header();
+            if header.interface().is_some_and(|name| name.as_str() == "org.aios.TestQualification1")
+                && header.member().is_some_and(|name| name.as_str() == "Fence") {
+                let (phase, token): (String, String) = message.body().deserialize().unwrap();
+                assert_eq!(token, expected_fence);
+                if phase == "begin" { assert!(!started); started = true; }
+                else { assert_eq!(phase, "end"); assert!(started); completed.send(broadcasts).unwrap(); return; }
+            } else if started { broadcasts += 1; }
+        }
+        panic!("bounded signal listener exceeded its message limit");
+    });
+    server.emit_signal(None::<&str>, PATH, "org.aios.TestQualification1", "Fence", &("begin", fence.as_str())).unwrap();
     let conn = connect(); let api = proxy(&conn);
     let introspection = Proxy::new(&conn, NAME, PATH, "org.freedesktop.DBus.Introspectable").unwrap();
     let xml: String = introspection.call("Introspect", &()).unwrap();
@@ -78,7 +103,12 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let deleted: String = api.call("Forget", &(task.as_str(),)).unwrap();
     assert_eq!(serde_json::from_str::<Value>(&deleted).unwrap()["deleted"],true);
     code(api.call::<_,_,String>("GetStatus", &(task.as_str(),)).unwrap_err(), "TARGET_NOT_FOUND");
+    server.emit_signal(None::<&str>, PATH, "org.aios.TestQualification1", "Fence", &("end", fence.as_str())).unwrap();
+    let private_broadcasts = observed.recv_timeout(Duration::from_secs(5)).expect("signal fences must be delivered");
+    listener_thread.join().unwrap(); assert_eq!(private_broadcasts, 0, "task lifecycle broadcast a signal");
+    println!("AIOS_PRIVATE_SIGNAL_LISTENER=passed; actual unique-owner subscription; no lifecycle broadcasts between public test fences");
     println!("AIOS_DBUS_VERIFIED={}",json!({"server_unique_name":server.unique_name().unwrap().as_str(),
         "client_unique_name":conn.unique_name().unwrap().as_str(),"other_client_unique_name":other.unique_name().unwrap().as_str(),
-        "uid":nix::unistd::geteuid().as_raw(),"private_events":true,"ui_enabled":false,"actual_user_bus":true}));
+        "uid":nix::unistd::geteuid().as_raw(),"private_events":true,"ui_enabled":false,"actual_user_bus":true,
+        "actual_signal_listener":true,"lifecycle_broadcast_signal_count":private_broadcasts}));
 }

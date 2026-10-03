@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 from aios_dev import desktop, sync
 from aios_dev.cli import main
-from aios_dev.config import VMConfig
+from aios_dev.config import VMConfig, read_json
 from aios_dev.errors import DevctlError, ExitCode
 
 EXAMPLE = json.loads((ROOT / "dev/vm.example.json").read_text())
@@ -59,6 +59,19 @@ class DesktopTests(unittest.TestCase):
         for value in ("../../root", "", None, "ABCDEF00-1111-4111-8111-111111111111"):
             with self.assertRaises(DevctlError):
                 desktop.identifier(value)
+
+    def test_source_binding_uses_manifest_bound_without_enlarging_configurations(self):
+        path = self.config.root / "binding.json"
+        value = {"manifest": {"files": [{"path": "fixture" + str(i), "sha256": "a" * 64} for i in range(1000)]}}
+        path.write_text(json.dumps(value)); path.chmod(0o600)
+        self.assertGreater(path.stat().st_size, 65536)
+        self.assertEqual(desktop.read_binding_record(path), value)
+        with self.assertRaises(DevctlError): read_json(path)
+        path.write_bytes(b" " * (sync.contract.MAX_HEADER + 4097))
+        with self.assertRaises(DevctlError): desktop.read_binding_record(path)
+        for payload in (b'{"schema_version":1,"schema_version":2}', b'{"invalid":NaN}'):
+            path.write_bytes(payload)
+            with self.assertRaises(DevctlError): desktop.read_binding_record(path)
 
     def test_unregistered_workspace_cannot_be_used(self):
         with self.assertRaises((DevctlError, FileNotFoundError)), patch("aios_dev.vm.start") as start:
