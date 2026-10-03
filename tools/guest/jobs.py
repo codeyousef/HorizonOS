@@ -92,7 +92,7 @@ def process_matches(record):
         return False
 
 
-def commands(kind, release, package=None):
+def commands(kind, release, package=None, job_directory=None):
     reference = "path:" + str(release)
     locked = ["--no-update-lock-file", "--no-write-lock-file"]
     if kind == "build-packages":
@@ -101,7 +101,9 @@ def commands(kind, release, package=None):
             raise ValueError("unregistered package")
         return [["nix", "build", "--json", "--no-link", *locked, *[reference + "#" + name for name in names]]]
     if kind == "build-system":
-        return [["nix", "build", "--json", "--no-link", *locked, reference + "#nixosConfigurations.aios-dev.config.system.build.toplevel"]]
+        if job_directory is None:
+            raise ValueError("system build requires its registered job directory")
+        return [["python3", str(release / "tools/guest/build_system.py"), str(job_directory)]]
     if kind == "test-unit":
         return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "--workspace"],
                 ["python3", "-m", "unittest", "discover", "-s", "tests/unit", "-q"]]
@@ -226,7 +228,7 @@ def worker(directory):
                            "XDG_CACHE_HOME": str(cache), "CARGO_TARGET_DIR": str(directory / "cargo-target"),
                            "CARGO_HOME": str(directory / "cargo-home"), "TMPDIR": str(cache)}
             code = 0
-            for arguments in commands(request["kind"], working, request["package"]):
+            for arguments in commands(request["kind"], working, request["package"], directory):
                 entry = {"argv": arguments, "started_at": stamp(), "evidence_kind": "guest-supervision-fixture" if request["kind"] == "supervision-probe" else "real-guest-command"}
                 status, out, err, reason = invoke(arguments, working, environment)
                 entry.update(upstream_exit=status, finished_at=stamp(), termination_reason=reason)
@@ -238,6 +240,17 @@ def worker(directory):
                 if reason or status:
                     code = 7 if reason == "timeout" else 6
                     break
+                if request["kind"] == "build-system":
+                    evidence_path = directory / "system-build.json"
+                    info = evidence_path.lstat()
+                    if not evidence_path.is_file() or evidence_path.is_symlink() or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o777 != 0o600 or info.st_size > 768 * 1024:
+                        raise ValueError("unsafe system build evidence")
+                    evidence = source.decode(evidence_path.read_bytes())
+                    output = evidence.get("built_output")
+                    if evidence.get("state") != "succeeded" or evidence.get("source_digest") != request["snapshot_digest"] or evidence.get("identity") != request["identity"] or evidence.get("activation_performed") is not False or not isinstance(output, str) or not re.fullmatch(r"/nix/store/[a-z0-9]{32}-[A-Za-z0-9._+-]+", output) or source.validate_manifest(evidence["candidate_manifest"]) != evidence["candidate_digest"]:
+                        raise ValueError("system build evidence differs from its registered job")
+                    report["built_outputs"] = [output]
+                    report["system_build"] = evidence
                 if arguments[:2] == ["nix", "build"]:
                     outputs = source.decode(out)
                     if not isinstance(outputs, list) or not outputs:

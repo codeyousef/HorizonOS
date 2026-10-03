@@ -115,8 +115,9 @@ to update them. The host never runs Nix or Cargo.
 `build --target packages` selects all five required non-image AIOS packages;
 missing outputs fail rather than silently reducing the target. An explicitly
 selected package such as `--package aios-dev-tools` supports an upstream smoke
-build. `build --target system` selects the aios-dev system output without
-activation. `test --suite unit` runs locked Rust workspace tests in the guest
+build. `build --target system` prepares the enrolled development candidate and
+builds `nixosConfigurations.aios-dev` without activation. See the system candidate
+contract below. `test --suite unit` runs locked Rust workspace tests in the guest
 Nix development shell and host-tool Python fixtures in the guest. Their results
 do not establish provider or model acceptance. Integration/desktop, benchmark,
 deployment and journal operations remain unsupported until their registered
@@ -173,3 +174,47 @@ on the virtual disk stored there; installer `/run` is guest runtime memory.
 
 When using the packaged `devctl`, specify `--workspace /path/to/checkout` before
 the command; the package's own Nix store path is not a writable VM workspace.
+
+## Enrolled development system candidate
+
+`nixosConfigurations.aios-dev` uses the administrator-owned development machine
+module. It describes the enrolled Btrfs subvolumes/EFI layout, key-only SSH,
+non-wheel developer account, root-only Nix trust, Plasma 6 on Wayland and the
+packaged CLI/session/model/guard executables. The VM-only developer helper is
+enabled with the exact installation and DMI identities. Its guarded test/commit
+operations remain unavailable until the activation adapter is qualified. The
+incomplete product control plane and model services remain disabled.
+
+The registered system-build job captures the already enrolled guest identity and
+administrator-owned public SSH enrollment key. It copies the verified source
+into its private job directory, adds `nix/machines/aios-dev/enrollment.json`, hashes
+the complete candidate and makes all files/directories read-only before Nix
+evaluation. The generated enrollment file is installation-local and ignored by
+Git. A source tree cannot override it. The flake reads only data inside this
+frozen candidate; it never reads live `/etc`, host credentials or mutable
+`/var/lib` during evaluation. Direct builds without enrollment fail explicitly.
+The subprocess ignores user Nix configuration, uses the system daemon, requires
+pure evaluation, disallows import-from-derivation and selects the approved
+`cache.nixos.org` substituter. Neither lock can be updated or rewritten.
+
+The job checks an 8 GiB store recovery reserve before and after building, adds development-user GC roots
+for the prior running/profile/booted closures and roots the exact build output.
+It checks built enrollment, both unchanged locks, source integrity, current
+identity and unchanged running/profile/booted pointers after the build. Reports
+include candidate/source/enrollment digests, exact subprocess exits and an
+inventory-based closure diff with NAR sizes. NAR size is not a download estimate
+or a filesystem-space guarantee. Booted state is distinct from the selected boot
+default; the unprivileged job does not claim to inspect protected boot metadata.
+
+This is the development build route. Production still requires the Rust
+`aios-buildd` worker, root broker registration/retention, trusted template/catalog
+validation, semantic previews and enforced resource/download permissions. A
+successful build does not prove boot, graphical login, service isolation or
+rollback and does not authorize activation of a client-provided store path.
+
+```fish
+cd /mnt/Storage/Projects/HorizonOS
+python3 tools/devctl.py build --target system --detach --json
+python3 tools/devctl.py jobs status --job JOB_UUID --json
+python3 tools/devctl.py artifacts pull --job JOB_UUID --json
+```

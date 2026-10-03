@@ -1,4 +1,5 @@
 .local/
+nix/machines/aios-dev/enrollment.json
 .agents/
 .aws/
 .codex/

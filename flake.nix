@@ -54,6 +54,11 @@
         '';
       });
     in {
+      nixosConfigurations.aios-dev = nixpkgs.lib.nixosSystem {
+        inherit system;
+        specialArgs.aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; };
+        modules = [ ./nix/machines/aios-dev ];
+      };
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios;
       nixosModules.production = import ./nix/modules/aios/production.nix;
