@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.boots:data:v1",
+  "title": "system.boots data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "boots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "started_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ended_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "boot_id",
+          "started_at",
+          "ended_at",
+          "outcome"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 10
+    }
+  },
+  "required": [
+    "boots"
+  ]
+}

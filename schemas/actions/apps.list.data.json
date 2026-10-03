@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:apps.list:data:v1",
+  "title": "apps.list data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "apps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "desktop_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "minItems": 0,
+            "maxItems": 64
+          }
+        },
+        "required": [
+          "app_id",
+          "name",
+          "desktop_id",
+          "capabilities"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 100
+    }
+  },
+  "required": [
+    "apps"
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.logs:arguments:v1",
+  "title": "system.logs arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "service_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "kernel",
+        "system",
+        "user"
+      ]
+    },
+    "boot_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry",
+      "default": "current"
+    },
+    "since": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "format": "date-time"
+    },
+    "until": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "format": "date-time"
+    },
+    "priority_max": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 7,
+      "default": 7
+    },
+    "max_entries": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 20
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "query-bound-cursor"
+    }
+  },
+  "required": [],
+  "anyOf": [
+    {
+      "required": [
+        "service_id"
+      ]
+    },
+    {
+      "required": [
+        "source"
+      ]
+    }
+  ],
+  "x-aios-time-default": "recent-ten-minutes"
+}

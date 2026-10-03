@@ -32,7 +32,7 @@ fn main() {
                 println!("{}", serde_json::to_string(&result).expect("typed result serializes"));
                 std::process::exit(status);
             },
-            Ok(Action::SystemServiceStatus(_)) => std::process::exit(2),
+            Ok(_) => std::process::exit(2),
             Err(_) => std::process::exit(2),
         }
     }

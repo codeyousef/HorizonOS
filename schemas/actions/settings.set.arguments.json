@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:settings.set:arguments:v1",
+  "title": "settings.set arguments v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "const": "desktop.theme_mode"
+        },
+        "value": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark"
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "const": "display.idle_seconds"
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 3600
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "const": "keyboard.backlight_percent"
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ]
+    }
+  ]
+}

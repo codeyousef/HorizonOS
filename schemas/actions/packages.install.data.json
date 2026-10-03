@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:packages.install:data:v1",
+  "title": "packages.install data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "requires_approval": {
+      "type": "boolean"
+    },
+    "impact": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "recovery_limits": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      },
+      "minItems": 0,
+      "maxItems": 32
+    },
+    "package_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9-]{0,127}$",
+        "x-aios-resource": "installed-catalog"
+      },
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true
+    },
+    "managed_patch": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "add",
+              "remove",
+              "replace"
+            ]
+          },
+          "value": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "path",
+          "operation",
+          "value"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 64
+    }
+  },
+  "required": [
+    "plan_id",
+    "requires_approval",
+    "impact",
+    "recovery_limits",
+    "package_ids",
+    "managed_patch"
+  ]
+}

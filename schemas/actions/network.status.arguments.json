@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:network.status:arguments:v1",
+  "title": "network.status arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "interface_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    }
+  },
+  "required": []
+}

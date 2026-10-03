@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:automation.enable:arguments:v1",
+  "title": "automation.enable arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    }
+  },
+  "required": [
+    "rule_id"
+  ]
+}

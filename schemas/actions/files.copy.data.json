@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:files.copy:data:v1",
+  "title": "files.copy data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "transaction_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "failed",
+            "pending",
+            "unknown"
+          ]
+        },
+        "check_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "outcome",
+        "check_id",
+        "evidence_ids",
+        "explanation"
+      ]
+    },
+    "file_handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "destination_handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "basename": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "source_retained": {
+      "const": true
+    }
+  },
+  "required": [
+    "operation_id",
+    "transaction_id",
+    "verification",
+    "file_handle",
+    "destination_handle",
+    "basename",
+    "source_retained"
+  ]
+}

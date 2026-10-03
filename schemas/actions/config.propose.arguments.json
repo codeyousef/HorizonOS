@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:config.propose:arguments:v1",
+  "title": "config.propose arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "changes": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "option_id": {
+                "const": "services.postgresql.enabled"
+              },
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "option_id",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "option_id": {
+                "const": "services.postgresql.package_id"
+              },
+              "value": {
+                "const": "postgresql-17"
+              }
+            },
+            "required": [
+              "option_id",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "option_id": {
+                "const": "services.postgresql.listen_mode"
+              },
+              "value": {
+                "const": "unix-only"
+              }
+            },
+            "required": [
+              "option_id",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "option_id": {
+                "const": "services.openssh.enabled"
+              },
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "option_id",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "option_id": {
+                "const": "services.openssh.open_firewall"
+              },
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "option_id",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "option_id": {
+                "const": "power_policy.profile_on_ac"
+              },
+              "value": {
+                "type": "string",
+                "enum": [
+                  "power-saver",
+                  "balanced",
+                  "performance"
+                ]
+              }
+            },
+            "required": [
+              "option_id",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "option_id": {
+                "const": "power_policy.profile_on_battery"
+              },
+              "value": {
+                "type": "string",
+                "enum": [
+                  "power-saver",
+                  "balanced",
+                  "performance"
+                ]
+              }
+            },
+            "required": [
+              "option_id",
+              "value"
+            ]
+          }
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 20
+    }
+  },
+  "required": [
+    "changes"
+  ]
+}

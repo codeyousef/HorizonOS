@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.services:arguments:v1",
+  "title": "system.services arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "type": "string",
+      "enum": [
+        "system",
+        "user"
+      ],
+      "default": "system"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "all",
+        "active",
+        "failed",
+        "inactive"
+      ],
+      "default": "all"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 100
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "query-bound-cursor"
+    }
+  },
+  "required": []
+}

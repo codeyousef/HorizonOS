@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:packages.upgrade_plan:data:v1",
+  "title": "packages.upgrade_plan data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "requires_approval": {
+      "type": "boolean"
+    },
+    "impact": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "recovery_limits": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      },
+      "minItems": 0,
+      "maxItems": 32
+    },
+    "catalog_revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "x-aios-resource": "approved-revision"
+    },
+    "full_state_digest": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "x-aios-resource": "approved-revision"
+    }
+  },
+  "required": [
+    "plan_id",
+    "requires_approval",
+    "impact",
+    "recovery_limits",
+    "catalog_revision",
+    "full_state_digest"
+  ]
+}

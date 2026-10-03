@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:apps.launch:arguments:v1",
+  "title": "apps.launch arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "app_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "file_handles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "x-aios-resource": "scope-owner-expiry"
+      },
+      "minItems": 0,
+      "maxItems": 20
+    }
+  },
+  "required": [
+    "app_id"
+  ]
+}

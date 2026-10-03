@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:files.search:arguments:v1",
+  "title": "files.search arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "root_handles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "x-aios-resource": "scope-owner-expiry"
+      },
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true
+    },
+    "mime_types": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "minItems": 0,
+      "maxItems": 10
+    },
+    "modified_after": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "format": "date-time"
+    },
+    "modified_before": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "format": "date-time"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 20
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "query-bound-cursor"
+    }
+  },
+  "required": [
+    "query",
+    "root_handles"
+  ]
+}

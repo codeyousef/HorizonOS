@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:network.set_wifi_enabled:arguments:v1",
+  "title": "network.set_wifi_enabled arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "enabled"
+  ]
+}

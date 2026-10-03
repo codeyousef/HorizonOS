@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.logs:data:v1",
+  "title": "system.logs data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "format": "date-time"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          },
+          "service_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-aios-resource": "scope-owner-expiry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "kernel",
+              "system",
+              "user"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 4096
+          },
+          "evidence_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "redacted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "timestamp",
+          "priority",
+          "service_id",
+          "source",
+          "message",
+          "evidence_id",
+          "redacted"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 200
+    },
+    "missing_scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      },
+      "minItems": 0,
+      "maxItems": 32
+    }
+  },
+  "required": [
+    "entries",
+    "missing_scope"
+  ]
+}

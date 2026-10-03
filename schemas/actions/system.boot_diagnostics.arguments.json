@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.boot_diagnostics:arguments:v1",
+  "title": "system.boot_diagnostics arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "boot_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    }
+  },
+  "required": [
+    "boot_id"
+  ]
+}

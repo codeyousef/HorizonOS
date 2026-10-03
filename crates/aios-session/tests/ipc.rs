@@ -35,6 +35,7 @@ fn real_service_handle_and_task_lifecycle() {
     assert!(resolved.error.is_none(),"service resolve: {:?}",resolved.error);
     let id = resolved.data.unwrap()["service_id"].as_str().unwrap().to_owned();
     let result = client.call(json!({"kind":"invoke","tool_call":{"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":id}}})).unwrap().data.unwrap();
+    aios_protocol::validation::validate_result("system.service_status", &serde_json::to_vec(&result).unwrap()).unwrap();
     assert_eq!(result["status"],"ok"); assert_eq!(result["data"]["active_state"],"active");
     assert_eq!(result["data"]["unit_name"],"sshd.service"); assert_eq!(result["data"]["scope"],"system");
     assert_eq!(result["data"]["boot_id"], fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim());
@@ -79,4 +80,27 @@ fn handle_and_task_ownership_do_not_follow_a_supplied_identity() {
     for other in [aios_session::identity::Peer{uid:1001,..peer.clone()},aios_session::identity::Peer{start_ticks:4,..peer.clone()},aios_session::identity::Peer{pid:201,..peer.clone()}] {
         assert_eq!(state.dispatch(&other,aios_session::Operation::GetStatus{task_id:task.clone()}).unwrap_err(),aios_protocol::contracts::ErrorCode::PermissionDenied);
     }
+}
+
+#[test]
+fn fail03_unreviewed_and_malformed_tools_never_change_the_service() {
+    use aios_protocol::contracts::ErrorCode;
+    let server=Server::start();let mut client=server.client();
+    let id=client.call(json!({"kind":"resolve_service","unit_name":"sshd.service"})).unwrap().data.unwrap()["service_id"].as_str().unwrap().to_owned();
+    let read=json!({"kind":"invoke","tool_call":{"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":id}}});
+    let before=client.call(read.clone()).unwrap().data.unwrap();
+    for(id,args,code)in [
+        ("shell.run",json!({"command":"reboot"}),ErrorCode::UnknownCapability),
+        ("system.service_restart",json!({"service_id":id,"approved":true}),ErrorCode::InvalidArgument),
+        ("system.service_restart",json!({"service_id":id}),ErrorCode::UnsupportedCapability),
+        ("files.copy",json!({"source_handle":"invented","destination_handle":"invented","basename":"a","collision_policy":"fail"}),ErrorCode::UnsupportedCapability),
+        ("system.logs",json!({"source":"system","max_entries":201}),ErrorCode::InvalidArgument),
+        ("packages.install",json!({"package_ids":["invented"]}),ErrorCode::UnsupportedCapability),
+    ]{
+        let result=client.call(json!({"kind":"invoke","tool_call":{"kind":"tool_call","action_id":id,"arguments":args}})).unwrap();
+        assert_eq!(result.error.unwrap().code,code,"{id}");
+    }
+    let after=client.call(read).unwrap().data.unwrap();
+    for field in ["main_pid","restart_count","boot_id","active_state","sub_state"]{assert_eq!(before["data"][field],after["data"][field],"{field} changed");}
+    println!("AIOS_FAIL03_REAL_SOCKET=passed; unknown/malformed/unimplemented actions denied; service PID, restart count and boot unchanged");
 }

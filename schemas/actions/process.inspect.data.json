@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:process.inspect:data:v1",
+  "title": "process.inspect data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "process_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "start_time_ticks": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "executable_identity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu_time_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "rss_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "cpu_time_ms",
+        "rss_bytes",
+        "threads"
+      ]
+    }
+  },
+  "required": [
+    "process_id",
+    "pid",
+    "start_time_ticks",
+    "executable_identity",
+    "metrics"
+  ]
+}

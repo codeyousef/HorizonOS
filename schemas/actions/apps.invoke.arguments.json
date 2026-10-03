@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:apps.invoke:arguments:v1",
+  "title": "apps.invoke arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "app_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "action_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "arguments": {
+      "type": "object",
+      "maxProperties": 64,
+      "x-aios-dynamic-schema": "registered-app-action"
+    }
+  },
+  "required": [
+    "app_id",
+    "action_id",
+    "arguments"
+  ]
+}

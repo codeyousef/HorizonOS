@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:files.summarize:data:v1",
+  "title": "files.summarize data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "file_handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 65536
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "x-aios-resource": "scope-owner-expiry"
+      },
+      "minItems": 1,
+      "maxItems": 128
+    },
+    "missing_scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      },
+      "minItems": 0,
+      "maxItems": 32
+    }
+  },
+  "required": [
+    "file_handle",
+    "summary",
+    "evidence_ids",
+    "missing_scope"
+  ]
+}

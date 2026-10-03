@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.boot_diagnostics:data:v1",
+  "title": "system.boot_diagnostics data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "boot_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stage": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "duration_ms": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-aios-resource": "scope-owner-expiry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-aios-resource": "scope-owner-expiry"
+            },
+            "minItems": 0,
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "stage",
+          "duration_ms",
+          "unit_id",
+          "evidence_ids"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 200
+    },
+    "timing_limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      },
+      "minItems": 0,
+      "maxItems": 32
+    }
+  },
+  "required": [
+    "boot_id",
+    "stages",
+    "timing_limitations"
+  ]
+}

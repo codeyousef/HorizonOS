@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:settings.set:data:v1",
+  "title": "settings.set data v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        "transaction_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-aios-resource": "scope-owner-expiry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "verified",
+                "failed",
+                "pending",
+                "unknown"
+              ]
+            },
+            "check_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-aios-resource": "scope-owner-expiry"
+              },
+              "minItems": 0,
+              "maxItems": 64
+            },
+            "explanation": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "outcome",
+            "check_id",
+            "evidence_ids",
+            "explanation"
+          ]
+        },
+        "key": {
+          "const": "desktop.theme_mode"
+        },
+        "value": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark"
+          ]
+        },
+        "ownership": {
+          "type": "string",
+          "enum": [
+            "user",
+            "system"
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "transaction_id",
+        "verification",
+        "key",
+        "value",
+        "ownership"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        "transaction_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-aios-resource": "scope-owner-expiry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "verified",
+                "failed",
+                "pending",
+                "unknown"
+              ]
+            },
+            "check_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-aios-resource": "scope-owner-expiry"
+              },
+              "minItems": 0,
+              "maxItems": 64
+            },
+            "explanation": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "outcome",
+            "check_id",
+            "evidence_ids",
+            "explanation"
+          ]
+        },
+        "key": {
+          "const": "display.idle_seconds"
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 3600
+        },
+        "ownership": {
+          "type": "string",
+          "enum": [
+            "user",
+            "system"
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "transaction_id",
+        "verification",
+        "key",
+        "value",
+        "ownership"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        "transaction_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-aios-resource": "scope-owner-expiry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "verified",
+                "failed",
+                "pending",
+                "unknown"
+              ]
+            },
+            "check_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-aios-resource": "scope-owner-expiry"
+              },
+              "minItems": 0,
+              "maxItems": 64
+            },
+            "explanation": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "outcome",
+            "check_id",
+            "evidence_ids",
+            "explanation"
+          ]
+        },
+        "key": {
+          "const": "keyboard.backlight_percent"
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "ownership": {
+          "type": "string",
+          "enum": [
+            "user",
+            "system"
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "transaction_id",
+        "verification",
+        "key",
+        "value",
+        "ownership"
+      ]
+    }
+  ]
+}

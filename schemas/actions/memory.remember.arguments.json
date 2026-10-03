@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:memory.remember:arguments:v1",
+  "title": "memory.remember arguments v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "const": "answer.detail"
+        },
+        "value": {
+          "type": "string",
+          "enum": [
+            "brief",
+            "standard",
+            "detailed"
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "const": "answer.language"
+        },
+        "value": {
+          "type": "string",
+          "enum": [
+            "en",
+            "ar"
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "const": "audio.preferred_output"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ]
+    }
+  ]
+}

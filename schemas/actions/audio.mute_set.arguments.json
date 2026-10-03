@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:audio.mute_set:arguments:v1",
+  "title": "audio.mute_set arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "muted": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "node_id",
+    "muted"
+  ]
+}

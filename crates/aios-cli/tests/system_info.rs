@@ -7,6 +7,7 @@ use aios_system::SystemInfo;
 fn real_nixos_system_info() {
     let output = Command::new(env!("CARGO_BIN_EXE_aiosctl")).args(["system", "info", "--json"]).output().unwrap();
     assert!(output.status.success(), "provider failed: {}", String::from_utf8_lossy(&output.stderr));
+    aios_protocol::validation::validate_result("system.info", &output.stdout).unwrap();
     let result: ProviderResult<SystemInfo> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result.schema_version, 1);
     assert!(matches!(result.status, ResultStatus::Ok));

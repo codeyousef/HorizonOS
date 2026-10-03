@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.hardware:data:v1",
+  "title": "system.hardware data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "device_class": {
+            "type": "string",
+            "enum": [
+              "cpu",
+              "gpu",
+              "storage",
+              "network",
+              "audio",
+              "bluetooth"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "properties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "value": {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 1024
+                }
+              },
+              "required": [
+                "key",
+                "value"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 64
+          }
+        },
+        "required": [
+          "device_id",
+          "device_class",
+          "name",
+          "properties"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 100
+    },
+    "unsupported_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "minItems": 0,
+      "maxItems": 32
+    }
+  },
+  "required": [
+    "items",
+    "unsupported_fields"
+  ]
+}

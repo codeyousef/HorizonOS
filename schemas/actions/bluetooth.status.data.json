@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:bluetooth.status:data:v1",
+  "title": "bluetooth.status data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "adapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "adapter_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "powered": {
+            "type": "boolean"
+          },
+          "rfkill": {
+            "type": "string",
+            "enum": [
+              "blocked",
+              "unblocked",
+              "unknown"
+            ]
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "device_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-aios-resource": "scope-owner-expiry"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "connected": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "device_id",
+                "name",
+                "connected"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "adapter_id",
+          "name",
+          "powered",
+          "rfkill",
+          "devices"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 32
+    }
+  },
+  "required": [
+    "adapters"
+  ]
+}

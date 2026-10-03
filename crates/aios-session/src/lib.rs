@@ -140,6 +140,7 @@ impl State {
                     if handle.owner != *peer { return Err(ErrorCode::PermissionDenied); }
                     provider(service_result(&handle.unit, &args.service_id))
                 },
+                _ => Err(ErrorCode::UnsupportedCapability),
             },
             Operation::Submit { request } => {
                 if request.text.trim().is_empty() || request.text.len() > 60000 || request.client_nonce.is_empty() || request.client_nonce.len() > 128 {

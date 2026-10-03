@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:transactions.list:data:v1",
+  "title": "transactions.list data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "transactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "transaction_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "authorized",
+              "executing",
+              "verified",
+              "failed",
+              "cancelled",
+              "recovery_required"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "format": "date-time"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "transaction_id",
+          "status",
+          "created_at",
+          "summary"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 100
+    }
+  },
+  "required": [
+    "transactions"
+  ]
+}

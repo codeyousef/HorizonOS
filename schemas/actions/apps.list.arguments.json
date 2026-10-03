@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:apps.list:arguments:v1",
+  "title": "apps.list arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mime_type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 100
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "query-bound-cursor"
+    }
+  },
+  "required": []
+}

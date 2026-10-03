@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:files.restore:arguments:v1",
+  "title": "files.restore arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "receipt_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "collision_policy": {
+      "const": "fail"
+    }
+  },
+  "required": [
+    "receipt_id",
+    "collision_policy"
+  ]
+}

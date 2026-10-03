@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:ui.find:data:v1",
+  "title": "ui.find data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "matches": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "x-aios-resource": "scope-owner-expiry"
+      },
+      "minItems": 0,
+      "maxItems": 100
+    },
+    "ambiguous": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "matches",
+    "ambiguous"
+  ]
+}

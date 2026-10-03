@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:audio.default_get:arguments:v1",
+  "title": "audio.default_get arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "direction": {
+      "type": "string",
+      "enum": [
+        "input",
+        "output"
+      ]
+    }
+  },
+  "required": [
+    "direction"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.hardware:arguments:v1",
+  "title": "system.hardware arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "device_class": {
+      "type": "string",
+      "enum": [
+        "cpu",
+        "gpu",
+        "storage",
+        "network",
+        "audio",
+        "bluetooth",
+        "all"
+      ],
+      "default": "all"
+    }
+  },
+  "required": []
+}

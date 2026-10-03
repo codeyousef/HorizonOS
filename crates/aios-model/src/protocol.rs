@@ -114,6 +114,7 @@ ws ::= [ \t\n\r]*
                 let tool = match action {
                     aios_protocol::contracts::Action::SystemInfo => ReadTool::SystemInfo,
                     aios_protocol::contracts::Action::SystemServiceStatus(_) => ReadTool::SystemServiceStatus,
+                    _ => return Err(ErrorCode::ModelOutputInvalid),
                 };
                 if !self.allowed_tools.contains(&tool) { return Err(ErrorCode::ModelOutputInvalid); }
             },

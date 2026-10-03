@@ -1,0 +1,866 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:automation.propose:result:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "partial",
+        "error",
+        "pending",
+        "cancelled"
+      ]
+    },
+    "observed_at": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "provider_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "provider",
+        "provider_version"
+      ]
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "x-aios-resource": "scope-owner-expiry"
+      },
+      "minItems": 0,
+      "maxItems": 128
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "next_cursor": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "query-bound-cursor"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "data": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-aios-resource": "scope-owner-expiry"
+            },
+            "requires_approval": {
+              "type": "boolean"
+            },
+            "impact": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "recovery_limits": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "minItems": 0,
+              "maxItems": 32
+            },
+            "rule": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": {
+                  "const": 1
+                },
+                "enabled": {
+                  "const": false
+                },
+                "scope": {
+                  "const": "user"
+                },
+                "trigger": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "event_type": {
+                      "type": "string",
+                      "enum": [
+                        "power.ac_changed",
+                        "network.connectivity_changed",
+                        "device.disconnected",
+                        "service.failed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "event_type"
+                  ]
+                },
+                "predicates": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "field": {
+                            "const": "on_ac"
+                          },
+                          "operator": {
+                            "const": "eq"
+                          },
+                          "value": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "field",
+                          "operator",
+                          "value"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "field": {
+                            "const": "connected"
+                          },
+                          "operator": {
+                            "const": "eq"
+                          },
+                          "value": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "field",
+                          "operator",
+                          "value"
+                        ]
+                      }
+                    ]
+                  },
+                  "minItems": 0,
+                  "maxItems": 8
+                },
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "action_id": {
+                            "const": "power.profile_set"
+                          },
+                          "arguments": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "profile": {
+                                "type": "string",
+                                "enum": [
+                                  "power-saver",
+                                  "balanced",
+                                  "performance"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "profile"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "action_id",
+                          "arguments"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "action_id": {
+                            "const": "audio.default_set"
+                          },
+                          "arguments": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "direction": {
+                                "type": "string",
+                                "enum": [
+                                  "input",
+                                  "output"
+                                ]
+                              },
+                              "node_id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-aios-resource": "scope-owner-expiry"
+                              }
+                            },
+                            "required": [
+                              "direction",
+                              "node_id"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "action_id",
+                          "arguments"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "action_id": {
+                            "const": "audio.mute_set"
+                          },
+                          "arguments": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "node_id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "x-aios-resource": "scope-owner-expiry"
+                              },
+                              "muted": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "node_id",
+                              "muted"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "action_id",
+                          "arguments"
+                        ]
+                      }
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 8
+                },
+                "cooldown_seconds": {
+                  "type": "integer",
+                  "minimum": 30,
+                  "maximum": 86400
+                },
+                "maximum_executions_per_hour": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 60
+                },
+                "on_failure": {
+                  "const": "notify_and_disable_after_3"
+                }
+              },
+              "required": [
+                "schema_version",
+                "enabled",
+                "scope",
+                "trigger",
+                "predicates",
+                "actions",
+                "cooldown_seconds",
+                "maximum_executions_per_hour",
+                "on_failure"
+              ]
+            },
+            "affected_permissions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "minItems": 0,
+              "maxItems": 32
+            }
+          },
+          "required": [
+            "plan_id",
+            "requires_approval",
+            "impact",
+            "recovery_limits",
+            "rule",
+            "affected_permissions"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "INVALID_ARGUMENT",
+                "UNSUPPORTED_SCHEMA",
+                "UNKNOWN_CAPABILITY",
+                "UNSUPPORTED_CAPABILITY",
+                "TARGET_NOT_FOUND",
+                "TARGET_CHANGED",
+                "AUTH_REQUIRED",
+                "PERMISSION_DENIED",
+                "APPROVAL_EXPIRED",
+                "PLAN_CHANGED",
+                "POLICY_CHANGED",
+                "CONFLICT",
+                "STALE_EVIDENCE",
+                "SECRET_SCOPE_DENIED",
+                "INDEX_NOT_READY",
+                "MODEL_UNAVAILABLE",
+                "MODEL_CRASHED",
+                "MODEL_OUTPUT_INVALID",
+                "DEADLINE_EXCEEDED",
+                "CONTEXT_BUDGET_EXCEEDED",
+                "RESOURCE_EXHAUSTED",
+                "BUILD_FAILED",
+                "ACTIVATION_FAILED",
+                "HEALTH_CHECK_FAILED",
+                "ROLLBACK_FAILED",
+                "PARTIAL_RESULT",
+                "CANCELLED",
+                "NETWORK_REQUIRED",
+                "REBOOT_REQUIRED",
+                "RECOVERY_REQUIRED"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "details": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "resource_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-aios-resource": "scope-owner-expiry"
+                },
+                "missing_scope": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "actual": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "check_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "required": []
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "observed_at",
+    "source",
+    "evidence_ids",
+    "complete",
+    "next_cursor",
+    "data",
+    "error"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ok"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "complete": {
+            "const": true
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "plan_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-aios-resource": "scope-owner-expiry"
+              },
+              "requires_approval": {
+                "type": "boolean"
+              },
+              "impact": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "recovery_limits": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                },
+                "minItems": 0,
+                "maxItems": 32
+              },
+              "rule": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "schema_version": {
+                    "const": 1
+                  },
+                  "enabled": {
+                    "const": false
+                  },
+                  "scope": {
+                    "const": "user"
+                  },
+                  "trigger": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "event_type": {
+                        "type": "string",
+                        "enum": [
+                          "power.ac_changed",
+                          "network.connectivity_changed",
+                          "device.disconnected",
+                          "service.failed"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "event_type"
+                    ]
+                  },
+                  "predicates": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "field": {
+                              "const": "on_ac"
+                            },
+                            "operator": {
+                              "const": "eq"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "field",
+                            "operator",
+                            "value"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "field": {
+                              "const": "connected"
+                            },
+                            "operator": {
+                              "const": "eq"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "field",
+                            "operator",
+                            "value"
+                          ]
+                        }
+                      ]
+                    },
+                    "minItems": 0,
+                    "maxItems": 8
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "action_id": {
+                              "const": "power.profile_set"
+                            },
+                            "arguments": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "profile": {
+                                  "type": "string",
+                                  "enum": [
+                                    "power-saver",
+                                    "balanced",
+                                    "performance"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "profile"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "action_id",
+                            "arguments"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "action_id": {
+                              "const": "audio.default_set"
+                            },
+                            "arguments": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "direction": {
+                                  "type": "string",
+                                  "enum": [
+                                    "input",
+                                    "output"
+                                  ]
+                                },
+                                "node_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-aios-resource": "scope-owner-expiry"
+                                }
+                              },
+                              "required": [
+                                "direction",
+                                "node_id"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "action_id",
+                            "arguments"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "action_id": {
+                              "const": "audio.mute_set"
+                            },
+                            "arguments": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "node_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "x-aios-resource": "scope-owner-expiry"
+                                },
+                                "muted": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "node_id",
+                                "muted"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "action_id",
+                            "arguments"
+                          ]
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 8
+                  },
+                  "cooldown_seconds": {
+                    "type": "integer",
+                    "minimum": 30,
+                    "maximum": 86400
+                  },
+                  "maximum_executions_per_hour": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 60
+                  },
+                  "on_failure": {
+                    "const": "notify_and_disable_after_3"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "enabled",
+                  "scope",
+                  "trigger",
+                  "predicates",
+                  "actions",
+                  "cooldown_seconds",
+                  "maximum_executions_per_hour",
+                  "on_failure"
+                ]
+              },
+              "affected_permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "minItems": 0,
+                "maxItems": 32
+              }
+            },
+            "required": [
+              "plan_id",
+              "requires_approval",
+              "impact",
+              "recovery_limits",
+              "rule",
+              "affected_permissions"
+            ]
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "error",
+              "pending",
+              "cancelled"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "complete": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "error",
+              "cancelled"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_ARGUMENT",
+                  "UNSUPPORTED_SCHEMA",
+                  "UNKNOWN_CAPABILITY",
+                  "UNSUPPORTED_CAPABILITY",
+                  "TARGET_NOT_FOUND",
+                  "TARGET_CHANGED",
+                  "AUTH_REQUIRED",
+                  "PERMISSION_DENIED",
+                  "APPROVAL_EXPIRED",
+                  "PLAN_CHANGED",
+                  "POLICY_CHANGED",
+                  "CONFLICT",
+                  "STALE_EVIDENCE",
+                  "SECRET_SCOPE_DENIED",
+                  "INDEX_NOT_READY",
+                  "MODEL_UNAVAILABLE",
+                  "MODEL_CRASHED",
+                  "MODEL_OUTPUT_INVALID",
+                  "DEADLINE_EXCEEDED",
+                  "CONTEXT_BUDGET_EXCEEDED",
+                  "RESOURCE_EXHAUSTED",
+                  "BUILD_FAILED",
+                  "ACTIVATION_FAILED",
+                  "HEALTH_CHECK_FAILED",
+                  "ROLLBACK_FAILED",
+                  "PARTIAL_RESULT",
+                  "CANCELLED",
+                  "NETWORK_REQUIRED",
+                  "REBOOT_REQUIRED",
+                  "RECOVERY_REQUIRED"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "resource_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "x-aios-resource": "scope-owner-expiry"
+                  },
+                  "missing_scope": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024
+                    },
+                    "minItems": 1,
+                    "maxItems": 32
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "actual": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "check_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": []
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "retryable"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

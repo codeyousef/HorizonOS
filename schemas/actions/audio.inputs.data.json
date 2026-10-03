@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:audio.inputs:data:v1",
+  "title": "audio.inputs data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "muted": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "routing": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "node_id",
+          "name",
+          "available",
+          "muted",
+          "default",
+          "routing"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 100
+    }
+  },
+  "required": [
+    "devices"
+  ]
+}

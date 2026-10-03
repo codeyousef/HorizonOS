@@ -1,0 +1,1890 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "action_id": "apps.actions",
+      "arguments": {
+        "app_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "app_id": "fixture",
+          "actions": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "apps.invoke",
+      "arguments": {
+        "app_id": "fixture",
+        "action_id": "fixture",
+        "arguments": {}
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "app_id": "fixture",
+          "action_id": "fixture",
+          "postcondition_evidence_ids": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "apps.launch",
+      "arguments": {
+        "app_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "app_id": "fixture",
+          "process_id": "fixture",
+          "executable_identity": "fixture"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "apps.list",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "apps": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "audio.default_get",
+      "arguments": {
+        "direction": "input"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "direction": "input",
+          "node_id": "fixture",
+          "available": false
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "audio.default_set",
+      "arguments": {
+        "direction": "input",
+        "node_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "direction": "input",
+          "node_id": "fixture",
+          "available": false
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "audio.inputs",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "devices": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "audio.mute_set",
+      "arguments": {
+        "node_id": "fixture",
+        "muted": false
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "node_id": "fixture",
+          "muted": false
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "audio.outputs",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "devices": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "automation.disable",
+      "arguments": {
+        "rule_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "rule_id": "fixture",
+          "enabled": false,
+          "scheduler_receipt_id": "fixture"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "automation.enable",
+      "arguments": {
+        "rule_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "rule_id": "fixture",
+          "enabled": true,
+          "scheduler_receipt_id": "fixture"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "automation.propose",
+      "arguments": {
+        "rule": {
+          "schema_version": 1,
+          "enabled": false,
+          "scope": "user",
+          "trigger": {
+            "event_type": "power.ac_changed"
+          },
+          "predicates": [],
+          "actions": [
+            {
+              "action_id": "power.profile_set",
+              "arguments": {
+                "profile": "power-saver"
+              }
+            }
+          ],
+          "cooldown_seconds": 30,
+          "maximum_executions_per_hour": 1,
+          "on_failure": "notify_and_disable_after_3"
+        }
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "plan_id": "fixture",
+          "requires_approval": false,
+          "impact": "fixture",
+          "recovery_limits": [],
+          "rule": {
+            "schema_version": 1,
+            "enabled": false,
+            "scope": "user",
+            "trigger": {
+              "event_type": "power.ac_changed"
+            },
+            "predicates": [],
+            "actions": [
+              {
+                "action_id": "power.profile_set",
+                "arguments": {
+                  "profile": "power-saver"
+                }
+              }
+            ],
+            "cooldown_seconds": 30,
+            "maximum_executions_per_hour": 1,
+            "on_failure": "notify_and_disable_after_3"
+          },
+          "affected_permissions": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "bluetooth.set_enabled",
+      "arguments": {
+        "adapter_id": "fixture",
+        "enabled": false
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "adapter_id": "fixture",
+          "enabled": false,
+          "rfkill": "blocked"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "bluetooth.status",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "adapters": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "config.get",
+      "arguments": {
+        "option_id": "services.postgresql.enabled"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "option_id": "services.postgresql.enabled",
+          "intended": false,
+          "effective": false,
+          "ownership": "managed"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "config.propose",
+      "arguments": {
+        "changes": [
+          {
+            "option_id": "services.postgresql.enabled",
+            "value": false
+          }
+        ]
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "plan_id": "fixture",
+          "requires_approval": false,
+          "impact": "fixture",
+          "recovery_limits": [],
+          "changes": [
+            {
+              "option_id": "services.postgresql.enabled",
+              "value": false
+            }
+          ]
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "files.copy",
+      "arguments": {
+        "source_handle": "fixture",
+        "destination_handle": "fixture",
+        "basename": "fixture",
+        "collision_policy": "fail"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "file_handle": "fixture",
+          "destination_handle": "fixture",
+          "basename": "fixture",
+          "source_retained": true
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "files.metadata",
+      "arguments": {
+        "file_handle": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "file_handle": "fixture",
+          "path": "fixture",
+          "mime_type": "fixture",
+          "modified_at": "2026-10-03T00:00:00Z",
+          "created_at": "2026-10-03T00:00:00Z",
+          "size_bytes": 0,
+          "hash_state": "unavailable",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "files.move",
+      "arguments": {
+        "source_handle": "fixture",
+        "destination_handle": "fixture",
+        "basename": "fixture",
+        "collision_policy": "fail"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "file_handle": "fixture",
+          "destination_handle": "fixture",
+          "basename": "fixture",
+          "source_retained": false
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "files.read",
+      "arguments": {
+        "file_handle": "fixture",
+        "range": {
+          "kind": "lines",
+          "start": 1,
+          "end": 1
+        }
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "file_handle": "fixture",
+          "range": {
+            "kind": "lines",
+            "start": 1,
+            "end": 1
+          },
+          "content": "",
+          "bytes_read": 0,
+          "provenance": "fixture",
+          "missing_scope": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "files.restore",
+      "arguments": {
+        "receipt_id": "fixture",
+        "collision_policy": "fail"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "receipt_id": "fixture",
+          "file_handle": "fixture"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "files.search",
+      "arguments": {
+        "query": "fixture",
+        "root_handles": [
+          "fixture"
+        ]
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "hits": [],
+          "missing_scope": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "files.summarize",
+      "arguments": {
+        "file_handle": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "file_handle": "fixture",
+          "summary": "fixture",
+          "evidence_ids": [
+            "fixture"
+          ],
+          "missing_scope": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "files.trash",
+      "arguments": {
+        "file_handles": [
+          "fixture"
+        ]
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "receipts": [
+            {
+              "receipt_id": "fixture",
+              "original_file_handle": "fixture",
+              "original_path": "fixture",
+              "trashed_at": "2026-10-03T00:00:00Z",
+              "restore_metadata": "fixture"
+            }
+          ]
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "memory.forget",
+      "arguments": {
+        "memory_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "memory_id": "fixture",
+          "forgotten": true
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "memory.remember",
+      "arguments": {
+        "key": "answer.detail",
+        "value": "brief"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "memory_id": "fixture",
+          "key": "answer.detail",
+          "value": "brief"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "network.set_wifi_enabled",
+      "arguments": {
+        "enabled": false
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "enabled": false,
+          "transport_guarded": false
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "network.status",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "interfaces": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "packages.info",
+      "arguments": {
+        "package_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "package_id": "fixture",
+          "name": "fixture",
+          "version": "fixture",
+          "licenses": [],
+          "unfree": false,
+          "capabilities": [],
+          "catalog_revision": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "packages.install",
+      "arguments": {
+        "package_ids": [
+          "fixture"
+        ]
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "plan_id": "fixture",
+          "requires_approval": false,
+          "impact": "fixture",
+          "recovery_limits": [],
+          "package_ids": [
+            "fixture"
+          ],
+          "managed_patch": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "packages.installed",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "packages": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "packages.remove",
+      "arguments": {
+        "package_ids": [
+          "fixture"
+        ]
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "plan_id": "fixture",
+          "requires_approval": false,
+          "impact": "fixture",
+          "recovery_limits": [],
+          "package_ids": [
+            "fixture"
+          ],
+          "data_deleted": false,
+          "retained_data": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "packages.search",
+      "arguments": {
+        "query": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "matches": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "packages.upgrade_plan",
+      "arguments": {
+        "catalog_revision": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "plan_id": "fixture",
+          "requires_approval": false,
+          "impact": "fixture",
+          "recovery_limits": [],
+          "catalog_revision": "0000000000000000000000000000000000000000000000000000000000000000",
+          "full_state_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "power.profile_set",
+      "arguments": {
+        "profile": "power-saver"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "profile": "power-saver"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "power.status",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "on_ac": false,
+          "battery_percent": 0,
+          "profile": "power-saver",
+          "available_profiles": [],
+          "unsupported_fields": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "process.inspect",
+      "arguments": {
+        "process_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "process_id": "fixture",
+          "pid": 1,
+          "start_time_ticks": 0,
+          "executable_identity": "fixture",
+          "metrics": {
+            "cpu_time_ms": 0,
+            "rss_bytes": 0,
+            "threads": 0
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "process.list",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "processes": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "process.terminate",
+      "arguments": {
+        "process_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "process_id": "fixture",
+          "exited": false,
+          "graceful": true
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "settings.get",
+      "arguments": {
+        "key": "desktop.theme_mode"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "key": "desktop.theme_mode",
+          "value": "light",
+          "ownership": "user"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "settings.set",
+      "arguments": {
+        "key": "desktop.theme_mode",
+        "value": "light"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "key": "desktop.theme_mode",
+          "value": "light",
+          "ownership": "user"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "storage.status",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "mounts": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "system.boot_diagnostics",
+      "arguments": {
+        "boot_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "boot_id": "fixture",
+          "stages": [],
+          "timing_limitations": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "system.boots",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "boots": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "system.hardware",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "items": [],
+          "unsupported_fields": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "system.info",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "os_id": "nixos",
+          "os_version": "fixture",
+          "current_closure": "/nix/store/00000000000000000000000000000000-fixture-system",
+          "generation": 0,
+          "boot_id": "00000000-0000-0000-0000-000000000000",
+          "architecture": "fixture",
+          "virtualization": "fixture"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "system.logs",
+      "arguments": {
+        "source": "system"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "entries": [],
+          "missing_scope": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "system.service_restart",
+      "arguments": {
+        "service_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "service_id": "fixture",
+          "active_state": "fixture",
+          "sub_state": "fixture"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "system.service_status",
+      "arguments": {
+        "service_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "service_id": "fixture",
+          "unit_name": "fixture.service",
+          "scope": "system",
+          "manager_owner": ":fixture",
+          "manager_version": "fixture",
+          "boot_id": "00000000-0000-0000-0000-000000000000",
+          "load_state": "fixture",
+          "active_state": "fixture",
+          "sub_state": "fixture",
+          "result": "fixture",
+          "main_pid": 0,
+          "restart_count": 0,
+          "exec_main_code": -2147483648,
+          "exec_main_status": -2147483648,
+          "job": null
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "system.services",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "units": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "transactions.inspect",
+      "arguments": {
+        "transaction_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "transaction_id": "fixture",
+          "status": "prepared",
+          "preview": "fixture",
+          "execution": "",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "recovery_limits": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "transactions.list",
+      "arguments": {},
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "transactions": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "transactions.rollback_plan",
+      "arguments": {
+        "transaction_id": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "plan_id": "fixture",
+          "requires_approval": false,
+          "impact": "fixture",
+          "recovery_limits": [],
+          "transaction_id": "fixture"
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "ui.activate",
+      "arguments": {
+        "snapshot_id": "fixture",
+        "node_handle": "fixture",
+        "expected_action": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "snapshot_id": "fixture",
+          "node_handle": "fixture",
+          "ambiguous": false
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "ui.find",
+      "arguments": {
+        "snapshot_id": "fixture",
+        "selector": {
+          "name": "fixture"
+        }
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "snapshot_id": "fixture",
+          "matches": [],
+          "ambiguous": false
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "ui.select_text",
+      "arguments": {
+        "snapshot_id": "fixture",
+        "node_handle": "fixture",
+        "start_offset": 0,
+        "end_offset": 1
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "snapshot_id": "fixture",
+          "node_handle": "fixture",
+          "start_offset": 0,
+          "end_offset": 1
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "ui.set_value",
+      "arguments": {
+        "snapshot_id": "fixture",
+        "node_handle": "fixture",
+        "value": ""
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "snapshot_id": "fixture",
+          "node_handle": "fixture",
+          "read_back": ""
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "ui.snapshot",
+      "arguments": {
+        "window_handle": "fixture"
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "snapshot_id": "fixture",
+          "window_handle": "fixture",
+          "nodes": [],
+          "truncated": false
+        },
+        "error": null
+      }
+    },
+    {
+      "action_id": "ui.visual_step",
+      "arguments": {
+        "portal_session_handle": "fixture",
+        "frame_id": "fixture",
+        "window_handle": "fixture",
+        "action": {
+          "kind": "click",
+          "button": "left",
+          "x": 0,
+          "y": 0
+        }
+      },
+      "evidence_kind": "synthetic-contract-fixture",
+      "result": {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": "2026-10-03T00:00:00Z",
+        "source": {
+          "provider": "fixture",
+          "provider_version": "contract-v1"
+        },
+        "evidence_ids": [
+          "fixture-evidence"
+        ],
+        "complete": true,
+        "next_cursor": null,
+        "data": {
+          "operation_id": "fixture",
+          "transaction_id": "fixture",
+          "verification": {
+            "outcome": "verified",
+            "check_id": "fixture",
+            "evidence_ids": [],
+            "explanation": ""
+          },
+          "frame_id": "fixture",
+          "refreshed_frame_id": "fixture",
+          "window_handle": "fixture",
+          "ambiguous": false
+        },
+        "error": null
+      }
+    }
+  ]
+}

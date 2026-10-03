@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:files.search:data:v1",
+  "title": "files.search data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "metadata": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "file_handle": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-aios-resource": "scope-owner-expiry"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "mime_type": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "modified_at": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "created_at": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "hash_state": {
+                "type": "string",
+                "enum": [
+                  "unavailable",
+                  "pending",
+                  "verified"
+                ]
+              },
+              "sha256": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[0-9a-f]{64}$",
+                    "x-aios-resource": "approved-revision"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "file_handle",
+              "path",
+              "mime_type",
+              "modified_at",
+              "created_at",
+              "size_bytes",
+              "hash_state",
+              "sha256"
+            ]
+          },
+          "rank": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-aios-resource": "scope-owner-expiry"
+            },
+            "minItems": 0,
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "metadata",
+          "rank",
+          "evidence_ids"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 20
+    },
+    "missing_scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      },
+      "minItems": 0,
+      "maxItems": 32
+    }
+  },
+  "required": [
+    "hits",
+    "missing_scope"
+  ]
+}

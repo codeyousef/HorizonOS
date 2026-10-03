@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:packages.remove:arguments:v1",
+  "title": "packages.remove arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "package_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9-]{0,127}$",
+        "x-aios-resource": "installed-catalog"
+      },
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "package_ids"
+  ]
+}

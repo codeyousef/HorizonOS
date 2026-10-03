@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:packages.upgrade_plan:arguments:v1",
+  "title": "packages.upgrade_plan arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "catalog_revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "x-aios-resource": "approved-revision"
+    }
+  },
+  "required": [
+    "catalog_revision"
+  ]
+}

@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:files.trash:data:v1",
+  "title": "files.trash data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "transaction_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "failed",
+            "pending",
+            "unknown"
+          ]
+        },
+        "check_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "outcome",
+        "check_id",
+        "evidence_ids",
+        "explanation"
+      ]
+    },
+    "receipts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "original_file_handle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "original_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "trashed_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "format": "date-time"
+          },
+          "restore_metadata": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "receipt_id",
+          "original_file_handle",
+          "original_path",
+          "trashed_at",
+          "restore_metadata"
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 1000
+    }
+  },
+  "required": [
+    "operation_id",
+    "transaction_id",
+    "verification",
+    "receipts"
+  ]
+}

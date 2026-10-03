@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:transactions.inspect:data:v1",
+  "title": "transactions.inspect data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "transaction_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "prepared",
+        "authorized",
+        "executing",
+        "verified",
+        "failed",
+        "cancelled",
+        "recovery_required"
+      ]
+    },
+    "preview": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "execution": {
+      "type": "string",
+      "minLength": 0,
+      "maxLength": 4096
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "failed",
+            "pending",
+            "unknown"
+          ]
+        },
+        "check_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "outcome",
+        "check_id",
+        "evidence_ids",
+        "explanation"
+      ]
+    },
+    "recovery_limits": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      },
+      "minItems": 0,
+      "maxItems": 32
+    }
+  },
+  "required": [
+    "transaction_id",
+    "status",
+    "preview",
+    "execution",
+    "verification",
+    "recovery_limits"
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:ui.set_value:arguments:v1",
+  "title": "ui.set_value arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "node_handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "value": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      ],
+      "x-aios-dynamic-schema": "selected-node-value"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "node_handle",
+    "value"
+  ]
+}

@@ -10,3 +10,10 @@ aios-testkit = { path = "../aios-testkit" }
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
+
+time = { version = "0.3", features = ["parsing"] }
+jsonschema = { version = "=0.56.0", default-features = false }
+
+[build-dependencies]
+sha2 = "0.10"
+serde_json = "1.0"

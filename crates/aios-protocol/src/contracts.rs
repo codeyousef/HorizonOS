@@ -1,4 +1,4 @@
-//! Strict first provider contract. Registry growth must remain explicit.
+//! Strict generated contracts. Syntax never grants authority or enables a provider.
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, value::RawValue};
 use crate::MAX_TASK_BYTES;
@@ -55,33 +55,18 @@ struct ToolEnvelope {
     action_id: String,
     arguments: Box<RawValue>,
 }
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EmptyArguments {}
-
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ServiceStatusArguments { pub service_id: String }
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum Action { SystemInfo, SystemServiceStatus(ServiceStatusArguments) }
+include!(concat!(env!("OUT_DIR"), "/contracts.rs"));
 
 pub fn parse_tool_call(bytes: &[u8]) -> Result<Action, ErrorCode> {
     if bytes.is_empty() || bytes.len() > MAX_TASK_BYTES { return Err(ErrorCode::ResourceExhausted); }
     let envelope: ToolEnvelope = serde_json::from_slice(bytes).map_err(|_| ErrorCode::InvalidArgument)?;
     match envelope.kind { ToolKind::ToolCall => {} }
-    match envelope.action_id.as_str() {
-        "system.info" => {
-            serde_json::from_str::<EmptyArguments>(envelope.arguments.get()).map_err(|_| ErrorCode::InvalidArgument)?;
-            Ok(Action::SystemInfo)
-        }
-        "system.service_status" => {
-            let args: ServiceStatusArguments = serde_json::from_str(envelope.arguments.get()).map_err(|_| ErrorCode::InvalidArgument)?;
-            if args.service_id.is_empty() || args.service_id.chars().count() > 128 { return Err(ErrorCode::InvalidArgument); }
-            Ok(Action::SystemServiceStatus(args))
-        }
-        _ => Err(ErrorCode::UnknownCapability),
-    }
+    // Resolve the reviewed capability before interpreting arguments.
+    let schema = schema_source(&envelope.action_id,"arguments").ok_or(ErrorCode::UnknownCapability)?;
+    let value = super::validation::strict_json(envelope.arguments.get().as_bytes())?;
+    super::validation::validate(schema,&value)?;
+    super::validation::semantic_arguments(&envelope.action_id,&value)?;
+    typed_action(&envelope.action_id,value)
 }
 
 /// One integer-only canonical representation for security-sensitive values.

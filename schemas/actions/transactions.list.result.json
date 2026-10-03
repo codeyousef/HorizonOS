@@ -1,0 +1,454 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:transactions.list:result:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "partial",
+        "error",
+        "pending",
+        "cancelled"
+      ]
+    },
+    "observed_at": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "provider_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "provider",
+        "provider_version"
+      ]
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "x-aios-resource": "scope-owner-expiry"
+      },
+      "minItems": 0,
+      "maxItems": 128
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "next_cursor": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "query-bound-cursor"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "data": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "transactions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "transaction_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "x-aios-resource": "scope-owner-expiry"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "prepared",
+                      "authorized",
+                      "executing",
+                      "verified",
+                      "failed",
+                      "cancelled",
+                      "recovery_required"
+                    ]
+                  },
+                  "created_at": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "format": "date-time"
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                },
+                "required": [
+                  "transaction_id",
+                  "status",
+                  "created_at",
+                  "summary"
+                ]
+              },
+              "minItems": 0,
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "transactions"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "INVALID_ARGUMENT",
+                "UNSUPPORTED_SCHEMA",
+                "UNKNOWN_CAPABILITY",
+                "UNSUPPORTED_CAPABILITY",
+                "TARGET_NOT_FOUND",
+                "TARGET_CHANGED",
+                "AUTH_REQUIRED",
+                "PERMISSION_DENIED",
+                "APPROVAL_EXPIRED",
+                "PLAN_CHANGED",
+                "POLICY_CHANGED",
+                "CONFLICT",
+                "STALE_EVIDENCE",
+                "SECRET_SCOPE_DENIED",
+                "INDEX_NOT_READY",
+                "MODEL_UNAVAILABLE",
+                "MODEL_CRASHED",
+                "MODEL_OUTPUT_INVALID",
+                "DEADLINE_EXCEEDED",
+                "CONTEXT_BUDGET_EXCEEDED",
+                "RESOURCE_EXHAUSTED",
+                "BUILD_FAILED",
+                "ACTIVATION_FAILED",
+                "HEALTH_CHECK_FAILED",
+                "ROLLBACK_FAILED",
+                "PARTIAL_RESULT",
+                "CANCELLED",
+                "NETWORK_REQUIRED",
+                "REBOOT_REQUIRED",
+                "RECOVERY_REQUIRED"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "details": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "resource_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-aios-resource": "scope-owner-expiry"
+                },
+                "missing_scope": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "actual": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "check_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "required": []
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "observed_at",
+    "source",
+    "evidence_ids",
+    "complete",
+    "next_cursor",
+    "data",
+    "error"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ok"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "complete": {
+            "const": true
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "transactions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "transaction_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "x-aios-resource": "scope-owner-expiry"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "prepared",
+                        "authorized",
+                        "executing",
+                        "verified",
+                        "failed",
+                        "cancelled",
+                        "recovery_required"
+                      ]
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024
+                    }
+                  },
+                  "required": [
+                    "transaction_id",
+                    "status",
+                    "created_at",
+                    "summary"
+                  ]
+                },
+                "minItems": 0,
+                "maxItems": 100
+              }
+            },
+            "required": [
+              "transactions"
+            ]
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "error",
+              "pending",
+              "cancelled"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "complete": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "error",
+              "cancelled"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_ARGUMENT",
+                  "UNSUPPORTED_SCHEMA",
+                  "UNKNOWN_CAPABILITY",
+                  "UNSUPPORTED_CAPABILITY",
+                  "TARGET_NOT_FOUND",
+                  "TARGET_CHANGED",
+                  "AUTH_REQUIRED",
+                  "PERMISSION_DENIED",
+                  "APPROVAL_EXPIRED",
+                  "PLAN_CHANGED",
+                  "POLICY_CHANGED",
+                  "CONFLICT",
+                  "STALE_EVIDENCE",
+                  "SECRET_SCOPE_DENIED",
+                  "INDEX_NOT_READY",
+                  "MODEL_UNAVAILABLE",
+                  "MODEL_CRASHED",
+                  "MODEL_OUTPUT_INVALID",
+                  "DEADLINE_EXCEEDED",
+                  "CONTEXT_BUDGET_EXCEEDED",
+                  "RESOURCE_EXHAUSTED",
+                  "BUILD_FAILED",
+                  "ACTIVATION_FAILED",
+                  "HEALTH_CHECK_FAILED",
+                  "ROLLBACK_FAILED",
+                  "PARTIAL_RESULT",
+                  "CANCELLED",
+                  "NETWORK_REQUIRED",
+                  "REBOOT_REQUIRED",
+                  "RECOVERY_REQUIRED"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "resource_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "x-aios-resource": "scope-owner-expiry"
+                  },
+                  "missing_scope": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024
+                    },
+                    "minItems": 1,
+                    "maxItems": 32
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "actual": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "check_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": []
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "retryable"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

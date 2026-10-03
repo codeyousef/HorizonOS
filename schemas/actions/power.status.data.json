@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:power.status:data:v1",
+  "title": "power.status data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "on_ac": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "battery_percent": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "profile": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "power-saver",
+            "balanced",
+            "performance"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "available_profiles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "power-saver",
+          "balanced",
+          "performance"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 3,
+      "uniqueItems": true
+    },
+    "unsupported_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "minItems": 0,
+      "maxItems": 32
+    }
+  },
+  "required": [
+    "on_ac",
+    "battery_percent",
+    "profile",
+    "available_profiles",
+    "unsupported_fields"
+  ]
+}

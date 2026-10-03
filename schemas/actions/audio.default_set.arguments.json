@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:audio.default_set:arguments:v1",
+  "title": "audio.default_set arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "direction": {
+      "type": "string",
+      "enum": [
+        "input",
+        "output"
+      ]
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    }
+  },
+  "required": [
+    "direction",
+    "node_id"
+  ]
+}

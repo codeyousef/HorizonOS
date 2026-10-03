@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:network.status:data:v1",
+  "title": "network.status data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "interfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "interface_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "link_state": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "unknown"
+            ]
+          },
+          "connectivity": {
+            "type": "string",
+            "enum": [
+              "none",
+              "limited",
+              "full",
+              "unknown"
+            ]
+          },
+          "dns_state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "failed",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "interface_id",
+          "name",
+          "link_state",
+          "connectivity",
+          "dns_state"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 100
+    }
+  },
+  "required": [
+    "interfaces"
+  ]
+}

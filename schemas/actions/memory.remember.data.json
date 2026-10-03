@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:memory.remember:data:v1",
+  "title": "memory.remember data v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        "transaction_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-aios-resource": "scope-owner-expiry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "verified",
+                "failed",
+                "pending",
+                "unknown"
+              ]
+            },
+            "check_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-aios-resource": "scope-owner-expiry"
+              },
+              "minItems": 0,
+              "maxItems": 64
+            },
+            "explanation": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "outcome",
+            "check_id",
+            "evidence_ids",
+            "explanation"
+          ]
+        },
+        "memory_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        "key": {
+          "const": "answer.detail"
+        },
+        "value": {
+          "type": "string",
+          "enum": [
+            "brief",
+            "standard",
+            "detailed"
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "transaction_id",
+        "verification",
+        "memory_id",
+        "key",
+        "value"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        "transaction_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-aios-resource": "scope-owner-expiry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "verified",
+                "failed",
+                "pending",
+                "unknown"
+              ]
+            },
+            "check_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-aios-resource": "scope-owner-expiry"
+              },
+              "minItems": 0,
+              "maxItems": 64
+            },
+            "explanation": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "outcome",
+            "check_id",
+            "evidence_ids",
+            "explanation"
+          ]
+        },
+        "memory_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        "key": {
+          "const": "answer.language"
+        },
+        "value": {
+          "type": "string",
+          "enum": [
+            "en",
+            "ar"
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "transaction_id",
+        "verification",
+        "memory_id",
+        "key",
+        "value"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        "transaction_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-aios-resource": "scope-owner-expiry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "verified",
+                "failed",
+                "pending",
+                "unknown"
+              ]
+            },
+            "check_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "x-aios-resource": "scope-owner-expiry"
+              },
+              "minItems": 0,
+              "maxItems": 64
+            },
+            "explanation": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "outcome",
+            "check_id",
+            "evidence_ids",
+            "explanation"
+          ]
+        },
+        "memory_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        },
+        "key": {
+          "const": "audio.preferred_output"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-aios-resource": "scope-owner-expiry"
+        }
+      },
+      "required": [
+        "operation_id",
+        "transaction_id",
+        "verification",
+        "memory_id",
+        "key",
+        "value"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:files.copy:arguments:v1",
+  "title": "files.copy arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "source_handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "destination_handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "basename": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?!\\.{1,2}$)[^/\\u0000]+$"
+    },
+    "collision_policy": {
+      "const": "fail"
+    }
+  },
+  "required": [
+    "source_handle",
+    "destination_handle",
+    "basename",
+    "collision_policy"
+  ]
+}

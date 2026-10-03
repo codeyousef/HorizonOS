@@ -4,14 +4,15 @@
   "title": "system.service_status arguments v1",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "service_id"
-  ],
   "properties": {
     "service_id": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 128
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
     }
-  }
+  },
+  "required": [
+    "service_id"
+  ]
 }

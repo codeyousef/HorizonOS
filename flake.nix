@@ -22,6 +22,7 @@
       productSource = pkgs.lib.fileset.toSource {
         root = ./.;
         fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./crates
+          (pkgs.lib.fileset.fileFilter (file: file.hasExt "json") ./schemas)
           (pkgs.lib.fileset.fileFilter (file: file.hasExt "json") ./models) ];
       };
       productPackage = pname: package: program: pkgs.rustPlatform.buildRustPackage {

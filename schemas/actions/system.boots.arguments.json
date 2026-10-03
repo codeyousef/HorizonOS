@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.boots:arguments:v1",
+  "title": "system.boots arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 5
+    }
+  },
+  "required": []
+}

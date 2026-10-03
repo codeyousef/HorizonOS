@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:config.get:arguments:v1",
+  "title": "config.get arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "option_id": {
+      "type": "string",
+      "enum": [
+        "services.postgresql.enabled",
+        "services.postgresql.package_id",
+        "services.postgresql.listen_mode",
+        "services.openssh.enabled",
+        "services.openssh.open_firewall",
+        "power_policy.profile_on_ac",
+        "power_policy.profile_on_battery"
+      ]
+    }
+  },
+  "required": [
+    "option_id"
+  ]
+}

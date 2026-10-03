@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:ui.snapshot:arguments:v1",
+  "title": "ui.snapshot arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "window_handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "container_handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    }
+  },
+  "required": [
+    "window_handle"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:system.services:data:v1",
+  "title": "system.services data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "service_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "unit_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "system",
+              "user"
+            ]
+          },
+          "load_state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "active_state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "sub_state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "service_id",
+          "unit_name",
+          "scope",
+          "load_state",
+          "active_state",
+          "sub_state"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 100
+    }
+  },
+  "required": [
+    "units"
+  ]
+}

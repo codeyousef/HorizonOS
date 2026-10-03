@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:ui.visual_step:arguments:v1",
+  "title": "ui.visual_step arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "portal_session_handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "frame_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "window_handle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-aios-resource": "scope-owner-expiry"
+    },
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "click"
+            },
+            "button": {
+              "type": "string",
+              "enum": [
+                "left",
+                "right"
+              ]
+            },
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            }
+          },
+          "required": [
+            "kind",
+            "button",
+            "x",
+            "y"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "scroll"
+            },
+            "direction": {
+              "type": "string",
+              "enum": [
+                "up",
+                "down",
+                "left",
+                "right"
+              ]
+            },
+            "steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            }
+          },
+          "required": [
+            "kind",
+            "direction",
+            "steps"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "key"
+            },
+            "key": {
+              "type": "string",
+              "enum": [
+                "Tab",
+                "Shift+Tab",
+                "Enter",
+                "Escape",
+                "ArrowUp",
+                "ArrowDown",
+                "ArrowLeft",
+                "ArrowRight",
+                "PageUp",
+                "PageDown"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "key"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "text"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ]
+        }
+      ]
+    }
+  },
+  "required": [
+    "portal_session_handle",
+    "frame_id",
+    "window_handle",
+    "action"
+  ]
+}

@@ -82,3 +82,6 @@ mod tests {
 }
 
 pub mod contracts;
+
+pub mod validation;
+pub mod registry;

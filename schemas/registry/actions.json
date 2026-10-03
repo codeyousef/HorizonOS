@@ -1,0 +1,1644 @@
+{
+  "schema_version": 1,
+  "actions": [
+    {
+      "action_id": "apps.actions",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.apps.actions.v1",
+      "input_schema": "urn:aios:action:apps.actions:arguments:v1",
+      "output_schema": "urn:aios:action:apps.actions:result:v1",
+      "required_scopes": [
+        "apps.actions"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "apps.actions.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "79122be82e5697ceb62cd77e78e95ba64a100f513b4045c6b2ca8f6ad58da7c6",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "apps.invoke",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.apps.invoke.v1",
+      "input_schema": "urn:aios:action:apps.invoke:arguments:v1",
+      "output_schema": "urn:aios:action:apps.invoke:result:v1",
+      "required_scopes": [
+        "apps.invoke"
+      ],
+      "risk_class": "R3",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "apps.invoke.postcondition.v1",
+      "recovery_class": "non-reversible-external",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "5941ea70b66aa8d7ddde8f6b94cd661704bef2c26c36e287e97395ca41ab8d7b",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "apps.launch",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.apps.launch.v1",
+      "input_schema": "urn:aios:action:apps.launch:arguments:v1",
+      "output_schema": "urn:aios:action:apps.launch:result:v1",
+      "required_scopes": [
+        "apps.launch"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "apps.launch.postcondition.v1",
+      "recovery_class": "non-reversible-process-effect",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "d31ae7d5347e4adb4b3017c70b39ad7ceb109c0f31e54156f1956fc0c10ef4d1",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "apps.list",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.apps.list.v1",
+      "input_schema": "urn:aios:action:apps.list:arguments:v1",
+      "output_schema": "urn:aios:action:apps.list:result:v1",
+      "required_scopes": [
+        "apps.list"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "apps.list.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "0a14fec3c51d14562e752f7fc90c09f1ab7ba52452e8eaf9b39c73c95d7473e5",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "audio.default_get",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.audio.default_get.v1",
+      "input_schema": "urn:aios:action:audio.default_get:arguments:v1",
+      "output_schema": "urn:aios:action:audio.default_get:result:v1",
+      "required_scopes": [
+        "audio.default_get"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "audio.default_get.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "353891b61d51e6c539d889d99ef972b57e33b7da053c6213374afa27502bc7b2",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "audio.default_set",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.audio.default_set.v1",
+      "input_schema": "urn:aios:action:audio.default_set:arguments:v1",
+      "output_schema": "urn:aios:action:audio.default_set:result:v1",
+      "required_scopes": [
+        "audio.default_set"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "audio.default_set.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "audio.default_set.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": true,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "3cf03eaa4cbd143522b9714bdf5491906336e441a9018fea9c6ce9c3a3efc078",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "audio.inputs",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.audio.inputs.v1",
+      "input_schema": "urn:aios:action:audio.inputs:arguments:v1",
+      "output_schema": "urn:aios:action:audio.inputs:result:v1",
+      "required_scopes": [
+        "audio.inputs"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "audio.inputs.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "dcd74298dfe52fc7ae039df71e5a26fed42894333e0e7dae60bc2a2cb426a9a2",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "audio.mute_set",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.audio.mute_set.v1",
+      "input_schema": "urn:aios:action:audio.mute_set:arguments:v1",
+      "output_schema": "urn:aios:action:audio.mute_set:result:v1",
+      "required_scopes": [
+        "audio.mute_set"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "audio.mute_set.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "audio.mute_set.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": true,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "72421f71667e859a40af514f921c1b8e7436250d7618e816e048037e4a3a9ebd",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "audio.outputs",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.audio.outputs.v1",
+      "input_schema": "urn:aios:action:audio.outputs:arguments:v1",
+      "output_schema": "urn:aios:action:audio.outputs:result:v1",
+      "required_scopes": [
+        "audio.outputs"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "audio.outputs.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "7e025a8b6d6bd6a252f043a86e6b40c0fc50e44a0ac53d28a852db4944d4a6b7",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "automation.disable",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.automation.disable.v1",
+      "input_schema": "urn:aios:action:automation.disable:arguments:v1",
+      "output_schema": "urn:aios:action:automation.disable:result:v1",
+      "required_scopes": [
+        "automation.disable"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "automation.disable.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "automation.disable.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "b015d3f78d68a4fafe24987dd764d6ee929161f600af53b8027f833dcde402af",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "automation.enable",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.automation.enable.v1",
+      "input_schema": "urn:aios:action:automation.enable:arguments:v1",
+      "output_schema": "urn:aios:action:automation.enable:result:v1",
+      "required_scopes": [
+        "automation.enable"
+      ],
+      "risk_class": "R2",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "automation.enable.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "automation.enable.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "4cd2d2f21dd6687de81fefefa52fd92ea03f810d78621f8c156779b72dae3b91",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "automation.propose",
+      "api_version": 1,
+      "executor_kind": "plan",
+      "implementation_id": "aios.protocol.automation.propose.v1",
+      "input_schema": "urn:aios:action:automation.propose:arguments:v1",
+      "output_schema": "urn:aios:action:automation.propose:result:v1",
+      "required_scopes": [
+        "automation.propose"
+      ],
+      "risk_class": "R2",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "automation.propose.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "b10da4c018f874ead0ab03986eecc7ef45ef9c7fb88b767e8a2412ae2fd8275d",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "bluetooth.set_enabled",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.bluetooth.set_enabled.v1",
+      "input_schema": "urn:aios:action:bluetooth.set_enabled:arguments:v1",
+      "output_schema": "urn:aios:action:bluetooth.set_enabled:result:v1",
+      "required_scopes": [
+        "bluetooth.set_enabled"
+      ],
+      "risk_class": "R2",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "bluetooth.set_enabled.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "bluetooth.set_enabled.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "1e46bd3a82109c53265846e5f7cc3dfb0b54492dcd5e02e11ef85a30d32bbd1b",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "bluetooth.status",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.bluetooth.status.v1",
+      "input_schema": "urn:aios:action:bluetooth.status:arguments:v1",
+      "output_schema": "urn:aios:action:bluetooth.status:result:v1",
+      "required_scopes": [
+        "bluetooth.status"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "bluetooth.status.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "6adea810482220e138795477afb54f460e7cec0bf122145b047de00b5b781746",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "config.get",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.config.get.v1",
+      "input_schema": "urn:aios:action:config.get:arguments:v1",
+      "output_schema": "urn:aios:action:config.get:result:v1",
+      "required_scopes": [
+        "config.get"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "config.get.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "8adecbf978f02873571895ff2bc436611a0442b32a27f3c6726941cebc9d7914",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "config.propose",
+      "api_version": 1,
+      "executor_kind": "plan",
+      "implementation_id": "aios.protocol.config.propose.v1",
+      "input_schema": "urn:aios:action:config.propose:arguments:v1",
+      "output_schema": "urn:aios:action:config.propose:result:v1",
+      "required_scopes": [
+        "config.propose"
+      ],
+      "risk_class": "R2",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "config.propose.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "8e37dc62f68cc80b8349f6272b7017ae24cea30b5ed713b7863f15f7dad62823",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "files.copy",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.files.copy.v1",
+      "input_schema": "urn:aios:action:files.copy:arguments:v1",
+      "output_schema": "urn:aios:action:files.copy:result:v1",
+      "required_scopes": [
+        "files.copy"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "files.copy.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "files.copy.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "599ee3af96d483c1bce06a94246e1a17dc1508886a15e56b80bd23b634d1bdb5",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "files.metadata",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.files.metadata.v1",
+      "input_schema": "urn:aios:action:files.metadata:arguments:v1",
+      "output_schema": "urn:aios:action:files.metadata:result:v1",
+      "required_scopes": [
+        "files.metadata"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "files.metadata.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "64dc5793e47c2dc316b012445a591174266eb378d6074661f30d8b6c44a45fab",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "files.move",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.files.move.v1",
+      "input_schema": "urn:aios:action:files.move:arguments:v1",
+      "output_schema": "urn:aios:action:files.move:result:v1",
+      "required_scopes": [
+        "files.move"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "files.move.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "files.move.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "f5375007eb401c53774f98bacd1f8f50dd0e333993f417bf2c6b6a22a38abcfa",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "files.read",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.files.read.v1",
+      "input_schema": "urn:aios:action:files.read:arguments:v1",
+      "output_schema": "urn:aios:action:files.read:result:v1",
+      "required_scopes": [
+        "files.read"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "files.read.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "c72a02b7ec59bbce5d9f300bca9e087cd31c28a0c1111ce4f3520145cd45ec1e",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "files.restore",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.files.restore.v1",
+      "input_schema": "urn:aios:action:files.restore:arguments:v1",
+      "output_schema": "urn:aios:action:files.restore:result:v1",
+      "required_scopes": [
+        "files.restore"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "files.restore.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "files.restore.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "8b2007663df0b629c593cf6bbd8279781286cb735af3b524467f2f2a40ffab52",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "files.search",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.files.search.v1",
+      "input_schema": "urn:aios:action:files.search:arguments:v1",
+      "output_schema": "urn:aios:action:files.search:result:v1",
+      "required_scopes": [
+        "files.search"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "files.search.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "226aa4614f40fece19448a1fffd2910c65e483da33111fb43e28bfcbc62698a6",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "files.summarize",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.files.summarize.v1",
+      "input_schema": "urn:aios:action:files.summarize:arguments:v1",
+      "output_schema": "urn:aios:action:files.summarize:result:v1",
+      "required_scopes": [
+        "files.summarize"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 60000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "files.summarize.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "2095ac57e67b63993fb951594254f9a73adccf4dd0606913f05a438f4ecc6eb6",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "files.trash",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.files.trash.v1",
+      "input_schema": "urn:aios:action:files.trash:arguments:v1",
+      "output_schema": "urn:aios:action:files.trash:result:v1",
+      "required_scopes": [
+        "files.trash"
+      ],
+      "risk_class": "R2",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "files.trash.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "files.trash.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "eaab61e2391a851b700a0983f7f715f5010dbbb1b39952e4f0de0e85f32f9655",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "memory.forget",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.memory.forget.v1",
+      "input_schema": "urn:aios:action:memory.forget:arguments:v1",
+      "output_schema": "urn:aios:action:memory.forget:result:v1",
+      "required_scopes": [
+        "memory.forget"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "memory.forget.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "memory.forget.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "1a984821ccbc04186d65f65fc75201473f36f0c5c291a04e45238297b769c959",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "memory.remember",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.memory.remember.v1",
+      "input_schema": "urn:aios:action:memory.remember:arguments:v1",
+      "output_schema": "urn:aios:action:memory.remember:result:v1",
+      "required_scopes": [
+        "memory.remember"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "memory.remember.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "memory.remember.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "2cf789b7834ce456a5b5a9d861eae22ebcbf239736d0dc6d07b5415607e66ec0",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "network.set_wifi_enabled",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.network.set_wifi_enabled.v1",
+      "input_schema": "urn:aios:action:network.set_wifi_enabled:arguments:v1",
+      "output_schema": "urn:aios:action:network.set_wifi_enabled:result:v1",
+      "required_scopes": [
+        "network.set_wifi_enabled"
+      ],
+      "risk_class": "R3",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged",
+        "transport-guard"
+      ],
+      "verification_id": "network.set_wifi_enabled.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "network.set_wifi_enabled.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "125acbfb7983cd7fa5226c3683ebdecc4c264bac724a340731a7a9ca500150bf",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "network.status",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.network.status.v1",
+      "input_schema": "urn:aios:action:network.status:arguments:v1",
+      "output_schema": "urn:aios:action:network.status:result:v1",
+      "required_scopes": [
+        "network.status"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "network.status.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "3aa73c68c07fa9e50bf50fd4caceb93b11bbe46fb4106c19d5f8b2f95fe09b43",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "packages.info",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.packages.info.v1",
+      "input_schema": "urn:aios:action:packages.info:arguments:v1",
+      "output_schema": "urn:aios:action:packages.info:result:v1",
+      "required_scopes": [
+        "packages.info"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "packages.info.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "9b822429add42c5768e0d804167a16b96204bd73c4cd51b078648c04fe746c24",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "packages.install",
+      "api_version": 1,
+      "executor_kind": "plan",
+      "implementation_id": "aios.protocol.packages.install.v1",
+      "input_schema": "urn:aios:action:packages.install:arguments:v1",
+      "output_schema": "urn:aios:action:packages.install:result:v1",
+      "required_scopes": [
+        "packages.install"
+      ],
+      "risk_class": "R2",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "packages.install.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "0e4e4f4e47c3d1ad2f5d15a1f2a35ddb964881907a6d29c405f1c1d63358c76e",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "packages.installed",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.packages.installed.v1",
+      "input_schema": "urn:aios:action:packages.installed:arguments:v1",
+      "output_schema": "urn:aios:action:packages.installed:result:v1",
+      "required_scopes": [
+        "packages.installed"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "packages.installed.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "5de76c922ab756ac085494b9899a5eee17bd98cc85595c95ebfac47dbffd3de1",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "packages.remove",
+      "api_version": 1,
+      "executor_kind": "plan",
+      "implementation_id": "aios.protocol.packages.remove.v1",
+      "input_schema": "urn:aios:action:packages.remove:arguments:v1",
+      "output_schema": "urn:aios:action:packages.remove:result:v1",
+      "required_scopes": [
+        "packages.remove"
+      ],
+      "risk_class": "R2",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "packages.remove.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "99428d64454d5f1b0b1b97d606bfff6b8947ff6a9f365c733cdb204128160e29",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "packages.search",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.packages.search.v1",
+      "input_schema": "urn:aios:action:packages.search:arguments:v1",
+      "output_schema": "urn:aios:action:packages.search:result:v1",
+      "required_scopes": [
+        "packages.search"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "packages.search.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "21b91fc144de5302cc602ddc0090cab25c709a3e33f2241a6846ac4f4fd15d8a",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "packages.upgrade_plan",
+      "api_version": 1,
+      "executor_kind": "plan",
+      "implementation_id": "aios.protocol.packages.upgrade_plan.v1",
+      "input_schema": "urn:aios:action:packages.upgrade_plan:arguments:v1",
+      "output_schema": "urn:aios:action:packages.upgrade_plan:result:v1",
+      "required_scopes": [
+        "packages.upgrade_plan"
+      ],
+      "risk_class": "R2",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "packages.upgrade_plan.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "af7590a57f68d27ece300fd93e2008708183d48134da6cc50f4d230861385551",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "power.profile_set",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.power.profile_set.v1",
+      "input_schema": "urn:aios:action:power.profile_set:arguments:v1",
+      "output_schema": "urn:aios:action:power.profile_set:result:v1",
+      "required_scopes": [
+        "power.profile_set"
+      ],
+      "risk_class": "R2",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "power.profile_set.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "power.profile_set.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": true,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "138ef870a78879c8abbad0d19ea89544936199e1511c3e4a51c8f22a1cbfbbbc",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "power.status",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.power.status.v1",
+      "input_schema": "urn:aios:action:power.status:arguments:v1",
+      "output_schema": "urn:aios:action:power.status:result:v1",
+      "required_scopes": [
+        "power.status"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "power.status.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "25f97627dd8986441118cc5b480910671bd609ce9570ed524df237828a76b39f",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "process.inspect",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.process.inspect.v1",
+      "input_schema": "urn:aios:action:process.inspect:arguments:v1",
+      "output_schema": "urn:aios:action:process.inspect:result:v1",
+      "required_scopes": [
+        "process.inspect"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "process.inspect.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "49985df97eee92fc3480086ec442b4e57ed3d2856834dea17d2e23da4ea88530",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "process.list",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.process.list.v1",
+      "input_schema": "urn:aios:action:process.list:arguments:v1",
+      "output_schema": "urn:aios:action:process.list:result:v1",
+      "required_scopes": [
+        "process.list"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "process.list.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "f8c070c0f280037a32bcbfac552bf056a411203d9946145480ce70d269f8fe0c",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "process.terminate",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.process.terminate.v1",
+      "input_schema": "urn:aios:action:process.terminate:arguments:v1",
+      "output_schema": "urn:aios:action:process.terminate:result:v1",
+      "required_scopes": [
+        "process.terminate"
+      ],
+      "risk_class": "R2",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "process.terminate.postcondition.v1",
+      "recovery_class": "non-reversible-process-effect",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "8bceab7d6f02107907e78968960b1c0bf16aba8b4ca3a71856f5bce5631e78e3",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "settings.get",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.settings.get.v1",
+      "input_schema": "urn:aios:action:settings.get:arguments:v1",
+      "output_schema": "urn:aios:action:settings.get:result:v1",
+      "required_scopes": [
+        "settings.get"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "settings.get.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "0cb06005ebc63984b9497b2ce54409df586b286151b85edebbc926f4e33cc5d4",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "settings.set",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.settings.set.v1",
+      "input_schema": "urn:aios:action:settings.set:arguments:v1",
+      "output_schema": "urn:aios:action:settings.set:result:v1",
+      "required_scopes": [
+        "settings.set"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "settings.set.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "settings.set.compensation.v1",
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "7fb0cb03ff27358fb69c4aaaf6a25f7c6b35c5b3412f83dd2d11f5a541cbdf6a",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "storage.status",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.storage.status.v1",
+      "input_schema": "urn:aios:action:storage.status:arguments:v1",
+      "output_schema": "urn:aios:action:storage.status:result:v1",
+      "required_scopes": [
+        "storage.status"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "storage.status.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "78c1dfeddd2dd42f629ee691d3a1e5b13f968f62b822e943e210cd3c25805fee",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "system.boot_diagnostics",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.system.boot_diagnostics.v1",
+      "input_schema": "urn:aios:action:system.boot_diagnostics:arguments:v1",
+      "output_schema": "urn:aios:action:system.boot_diagnostics:result:v1",
+      "required_scopes": [
+        "system.boot_diagnostics"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "system.boot_diagnostics.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "44f314e152edb55a3ea63ffe6213306f3f224d62f015dc0154cc259096fc05a0",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "system.boots",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.system.boots.v1",
+      "input_schema": "urn:aios:action:system.boots:arguments:v1",
+      "output_schema": "urn:aios:action:system.boots:result:v1",
+      "required_scopes": [
+        "system.boots"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "system.boots.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "50d7d09c00a24087e11678a1bc98e0edfb512a232b46112c5a4bf5e9ca2b1c4a",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "system.hardware",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.system.hardware.v1",
+      "input_schema": "urn:aios:action:system.hardware:arguments:v1",
+      "output_schema": "urn:aios:action:system.hardware:result:v1",
+      "required_scopes": [
+        "system.hardware"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "system.hardware.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "f0fbe6bc87f5d78599fbc7a3fe27c08d804c2294612d17c999aad0e345db1497",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "system.info",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.system.info.v1",
+      "input_schema": "urn:aios:action:system.info:arguments:v1",
+      "output_schema": "urn:aios:action:system.info:result:v1",
+      "required_scopes": [
+        "system.info"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "system.info.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "abc35d2bc882edde32f6eed9e38effe8b255004521b9e238f1876e7aa209d947",
+      "availability": "implemented"
+    },
+    {
+      "action_id": "system.logs",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.system.logs.v1",
+      "input_schema": "urn:aios:action:system.logs:arguments:v1",
+      "output_schema": "urn:aios:action:system.logs:result:v1",
+      "required_scopes": [
+        "system.logs"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "system.logs.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "54aebad52a6e42ebdf05239e86270b381e1db847e3233478d6a31e1ce1b4efa0",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "system.service_restart",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.system.service_restart.v1",
+      "input_schema": "urn:aios:action:system.service_restart:arguments:v1",
+      "output_schema": "urn:aios:action:system.service_restart:result:v1",
+      "required_scopes": [
+        "system.service_restart"
+      ],
+      "risk_class": "R2",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "system.service_restart.postcondition.v1",
+      "recovery_class": "non-reversible-process-effect",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "16005f79a2b984f42c949d0c3dc80b4582b2b2863b74c77a036d07879069b0dc",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "system.service_status",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.system.service_status.v1",
+      "input_schema": "urn:aios:action:system.service_status:arguments:v1",
+      "output_schema": "urn:aios:action:system.service_status:result:v1",
+      "required_scopes": [
+        "system.service_status"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "system.service_status.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "b56b9471582c451351f9ed477bdd9c9b9b927572c8c5cc66af38110a998de433",
+      "availability": "implemented"
+    },
+    {
+      "action_id": "system.services",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.system.services.v1",
+      "input_schema": "urn:aios:action:system.services:arguments:v1",
+      "output_schema": "urn:aios:action:system.services:result:v1",
+      "required_scopes": [
+        "system.services"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "system.services.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "c24611750740071acf27e85d7844fece6f947c3ccf80759ce2f2b0b15839d36b",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "transactions.inspect",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.transactions.inspect.v1",
+      "input_schema": "urn:aios:action:transactions.inspect:arguments:v1",
+      "output_schema": "urn:aios:action:transactions.inspect:result:v1",
+      "required_scopes": [
+        "transactions.inspect"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "transactions.inspect.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "ecd95f0541b2a3619aaa06e20822749cb13b7d5768b9bbbe7016253da6f3ba26",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "transactions.list",
+      "api_version": 1,
+      "executor_kind": "system",
+      "implementation_id": "aios.protocol.transactions.list.v1",
+      "input_schema": "urn:aios:action:transactions.list:arguments:v1",
+      "output_schema": "urn:aios:action:transactions.list:result:v1",
+      "required_scopes": [
+        "transactions.list"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "transactions.list.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "b92233881987ab700a81f5abd38257ba11010f0de64479155c706f76bb417ca8",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "transactions.rollback_plan",
+      "api_version": 1,
+      "executor_kind": "plan",
+      "implementation_id": "aios.protocol.transactions.rollback_plan.v1",
+      "input_schema": "urn:aios:action:transactions.rollback_plan:arguments:v1",
+      "output_schema": "urn:aios:action:transactions.rollback_plan:result:v1",
+      "required_scopes": [
+        "transactions.rollback_plan"
+      ],
+      "risk_class": "R2",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "transactions.rollback_plan.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": false,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "fe724e5b7d5a5b8ec4c45c0fa0cc9c65a259f615cb79e2690d332f0192b6d6b0",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "ui.activate",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.ui.activate.v1",
+      "input_schema": "urn:aios:action:ui.activate:arguments:v1",
+      "output_schema": "urn:aios:action:ui.activate:result:v1",
+      "required_scopes": [
+        "ui.activate"
+      ],
+      "risk_class": "R3",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "ui.activate.postcondition.v1",
+      "recovery_class": "non-reversible-external",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": true,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "05bda970d43c47a573f3a643f6841abf4e72fbea0285d30e1777b92b66fb6550",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "ui.find",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.ui.find.v1",
+      "input_schema": "urn:aios:action:ui.find:arguments:v1",
+      "output_schema": "urn:aios:action:ui.find:result:v1",
+      "required_scopes": [
+        "ui.find"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "ui.find.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": true,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "41408646aff6eb8ec735cf3ed84384959da85d9b36f3fdbf144ecde39a09f135",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "ui.select_text",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.ui.select_text.v1",
+      "input_schema": "urn:aios:action:ui.select_text:arguments:v1",
+      "output_schema": "urn:aios:action:ui.select_text:result:v1",
+      "required_scopes": [
+        "ui.select_text"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "ui.select_text.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "ui.select_text.compensation.v1",
+      "requires_interactive_session": true,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "8d2eafd80858cfe8cd4361d82f45b4109f7938b4dd4c2bd49eb38d89539af6b9",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "ui.set_value",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.ui.set_value.v1",
+      "input_schema": "urn:aios:action:ui.set_value:arguments:v1",
+      "output_schema": "urn:aios:action:ui.set_value:result:v1",
+      "required_scopes": [
+        "ui.set_value"
+      ],
+      "risk_class": "R1",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged"
+      ],
+      "verification_id": "ui.set_value.postcondition.v1",
+      "recovery_class": "reversible-user-state",
+      "recovery_adapter_id": "ui.set_value.compensation.v1",
+      "requires_interactive_session": true,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "ea06eeed5fdf8fd3c9fa1f939d8d1f660bdb882cd624ee5f2aa1ea70e01bc7d0",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "ui.snapshot",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.ui.snapshot.v1",
+      "input_schema": "urn:aios:action:ui.snapshot:arguments:v1",
+      "output_schema": "urn:aios:action:ui.snapshot:result:v1",
+      "required_scopes": [
+        "ui.snapshot"
+      ],
+      "risk_class": "R0",
+      "read_only": true,
+      "idempotency_class": "observe",
+      "timeout_ms": 10000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current"
+      ],
+      "verification_id": "ui.snapshot.postcondition.v1",
+      "recovery_class": "none",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": true,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "7b8ba8a8303f75fbf9ca26645f15eb65079fef4630f3b5694ae3f8687203a640",
+      "availability": "contract-only"
+    },
+    {
+      "action_id": "ui.visual_step",
+      "api_version": 1,
+      "executor_kind": "session",
+      "implementation_id": "aios.protocol.ui.visual_step.v1",
+      "input_schema": "urn:aios:action:ui.visual_step:arguments:v1",
+      "output_schema": "urn:aios:action:ui.visual_step:result:v1",
+      "required_scopes": [
+        "ui.visual_step"
+      ],
+      "risk_class": "R3",
+      "read_only": false,
+      "idempotency_class": "prepared-operation",
+      "timeout_ms": 30000,
+      "preconditions": [
+        "authenticated-peer",
+        "scoped-resources-current",
+        "approved-exact-plan",
+        "live-baseline-unchanged",
+        "transport-guard"
+      ],
+      "verification_id": "ui.visual_step.postcondition.v1",
+      "recovery_class": "non-reversible-external",
+      "recovery_adapter_id": null,
+      "requires_interactive_session": true,
+      "supports_automation": false,
+      "source_revision": "aios-protocol-contracts-v1",
+      "implementation_hash": "fb91d242db737780b0d289ed3575ac503766485dfa68b18d9360c7e552fb52d9",
+      "availability": "contract-only"
+    }
+  ]
+}

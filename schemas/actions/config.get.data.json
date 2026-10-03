@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:config.get:data:v1",
+  "title": "config.get data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "option_id": {
+      "type": "string",
+      "enum": [
+        "services.postgresql.enabled",
+        "services.postgresql.package_id",
+        "services.postgresql.listen_mode",
+        "services.openssh.enabled",
+        "services.openssh.open_firewall",
+        "power_policy.profile_on_ac",
+        "power_policy.profile_on_battery"
+      ]
+    },
+    "intended": {
+      "oneOf": [
+        {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "maxLength": 128
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "effective": {
+      "oneOf": [
+        {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "maxLength": 128
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ownership": {
+      "type": "string",
+      "enum": [
+        "managed",
+        "template",
+        "unmanaged",
+        "unsupported"
+      ]
+    }
+  },
+  "required": [
+    "option_id",
+    "intended",
+    "effective",
+    "ownership"
+  ]
+}

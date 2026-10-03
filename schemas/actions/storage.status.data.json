@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:storage.status:data:v1",
+  "title": "storage.status data v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mount_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-aios-resource": "scope-owner-expiry"
+          },
+          "mount_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "source_identity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "capacity_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "free_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "read_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mount_id",
+          "mount_path",
+          "source_identity",
+          "capacity_bytes",
+          "free_bytes",
+          "read_only"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 100
+    }
+  },
+  "required": [
+    "mounts"
+  ]
+}

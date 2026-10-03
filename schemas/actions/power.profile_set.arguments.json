@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aios:action:power.profile_set:arguments:v1",
+  "title": "power.profile_set arguments v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "profile": {
+      "type": "string",
+      "enum": [
+        "power-saver",
+        "balanced",
+        "performance"
+      ]
+    }
+  },
+  "required": [
+    "profile"
+  ]
+}

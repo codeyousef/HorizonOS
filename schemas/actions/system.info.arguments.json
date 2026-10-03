@@ -3,6 +3,7 @@
   "$id": "urn:aios:action:system.info:arguments:v1",
   "title": "system.info arguments v1",
   "type": "object",
+  "additionalProperties": false,
   "properties": {},
-  "additionalProperties": false
+  "required": []
 }
