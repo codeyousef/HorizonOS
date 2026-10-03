@@ -15,6 +15,9 @@ sha256sum --check --strict manifest.sha256 || die 'Seed manifest failed'
 guest_uuid=$(cat guest.uuid)
 installation_uuid=$(cat installation.uuid)
 serial=$(cat disk.serial)
+image_target=aios-dev
+[[ ! -e image.target ]] || image_target=$(cat image.target)
+[[ $image_target == aios-dev || $image_target == aios-desktop-test ]] || die 'Unregistered image target'
 [[ $guest_uuid =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]] || die 'Invalid guest UUID'
 [[ $installation_uuid =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]] || die 'Invalid installation UUID'
 [[ $serial == AIOS_DEV_ROOT ]] || die 'Unexpected disk serial'
@@ -91,7 +94,7 @@ chmod -R u+w "$candidate"
 printf '{"authorized_key":"%s","disk_serial":"AIOS_DEV_ROOT","dmi_uuid":"%s","guest_role":"development","installation_uuid":"%s","management_channel":"ssh-development","schema_version":1}' \
   "$public_key" "$guest_uuid" "$installation_uuid" >"$candidate/nix/machines/aios-dev/enrollment.json"
 nixos-install --root /mnt --no-root-passwd --no-channel-copy \
-  --flake "path:$candidate#aios-dev" --no-update-lock-file --no-write-lock-file \
+  --flake "path:$candidate#$image_target" --no-update-lock-file --no-write-lock-file \
   --option pure-eval true --option allow-import-from-derivation false \
   --substituters https://cache.nixos.org --max-jobs 2 --cores 4
 cmp source/flake.lock "$candidate/flake.lock" || die 'Installer changed the Nix lock'

@@ -18,7 +18,7 @@ import uuid
 import snapshot as source
 
 PACKAGES = ("aios-core", "aios-model", "aios-desktop", "aios-cli", "aios-dev-tools")
-KINDS = {"resolve-lock", "build-packages", "build-system", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "model-inference-smoke", "model-service-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "supervision-probe"}
+KINDS = {"resolve-lock", "build-packages", "build-system", "build-desktop-test", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "model-inference-smoke", "model-service-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "supervision-probe"}
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 LIMIT = 4 * 1024**2
 cancelled = False
@@ -100,7 +100,7 @@ def commands(kind, release, package=None, job_directory=None):
         if any(name not in PACKAGES for name in names):
             raise ValueError("unregistered package")
         return [["nix", "build", "--json", "--no-link", *locked, *[reference + "#" + name for name in names]]]
-    if kind == "build-system":
+    if kind in {"build-system", "build-desktop-test"}:
         if job_directory is None:
             raise ValueError("system build requires its registered job directory")
         return [["python3", str(release / "tools/guest/build_system.py"), str(job_directory)]]
@@ -252,7 +252,7 @@ def worker(directory):
                 if reason or status:
                     code = 7 if reason == "timeout" else 6
                     break
-                if request["kind"] == "build-system":
+                if request["kind"] in {"build-system", "build-desktop-test"}:
                     evidence_path = directory / "system-build.json"
                     info = evidence_path.lstat()
                     if not evidence_path.is_file() or evidence_path.is_symlink() or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o777 != 0o600 or info.st_size > 768 * 1024:

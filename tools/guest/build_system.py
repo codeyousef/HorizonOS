@@ -23,11 +23,13 @@ RESERVE_BYTES = 8 * 1024**3
 LOCKED = ["--no-update-lock-file", "--no-write-lock-file"]
 
 
-def build_arguments(working, output_link):
+def build_arguments(working, output_link, target="aios-dev"):
+    if target not in {"aios-dev", "aios-desktop-test"}:
+        raise ValueError("unregistered image target")
     return ["nix", "build", "--json", "--out-link", str(output_link), *LOCKED,
             "--option", "pure-eval", "true", "--option", "allow-import-from-derivation", "false",
             "--option", "substituters", "https://cache.nixos.org",
-            "path:" + str(working) + "#nixosConfigurations.aios-dev.config.system.build.toplevel"]
+            "path:" + str(working) + "#nixosConfigurations." + target + ".config.system.build.toplevel"]
 
 
 def public_key(text):
@@ -281,8 +283,9 @@ def main():
         raise ValueError("unregistered system build directory")
     record = jobs.read_record(directory)
     request = record["request"]
-    if request["kind"] != "build-system" or source.identity() != request["identity"]:
+    if request["kind"] not in {"build-system", "build-desktop-test"} or source.identity() != request["identity"]:
         raise ValueError("system build target changed")
+    target = "aios-desktop-test" if request["kind"] == "build-desktop-test" else "aios-dev"
     release = Path(__file__).resolve().parents[2]
     manifest = source.decode((release / source.MANIFEST).read_bytes())
     if source.validate_manifest(manifest) != request["snapshot_digest"]:
@@ -297,7 +300,7 @@ def main():
     working = directory / "system-candidate"
     candidate, digest = prepare(release, working, manifest, enrolled)
     report = {"schema_version": 1, "evidence_kind": "real-development-system-build", "identity": request["identity"],
-              "source_digest": request["snapshot_digest"], "candidate_digest": digest, "candidate_manifest": candidate,
+              "image_target": target, "source_digest": request["snapshot_digest"], "candidate_digest": digest, "candidate_manifest": candidate,
               "enrollment_sha256": hashlib.sha256(source.canonical(enrolled)).hexdigest(),
               "lock_hashes": expected_locks, "prior_pointers": previous, "available_store_bytes_before": available, "recovery_reserve_bytes": RESERVE_BYTES,
               "commands": [], "activation_performed": False, "product_builder_authority_verified": False,
@@ -328,7 +331,7 @@ def main():
         for name, path in previous.items():
             run(["nix-store", "--add-root", str(directory / ("prior-" + name)), "--indirect", "--realise", path])
         # An out-link roots the result for this development job's lifetime.
-        outputs = run(build_arguments(working, directory / "candidate-root"), structured=True)
+        outputs = run(build_arguments(working, directory / "candidate-root", target), structured=True)
         if len(outputs) != 1 or set(outputs[0]["outputs"]) != {"out"}:
             raise ValueError("unexpected system output count")
         realized = store_path(outputs[0]["outputs"]["out"])

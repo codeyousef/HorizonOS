@@ -131,6 +131,13 @@ class SystemCandidateTests(unittest.TestCase):
         self.assertIn("allow-import-from-derivation", args)
         self.assertEqual(args[-1], "path:/home/dev/candidate#nixosConfigurations.aios-dev.config.system.build.toplevel")
 
+    def test_desktop_build_target_is_registered_and_arbitrary_targets_are_denied(self):
+        args = builder.build_arguments(Path("/home/dev/candidate"), Path("/home/dev/output-root"), "aios-desktop-test")
+        self.assertTrue(args[-1].endswith("#nixosConfigurations.aios-desktop-test.config.system.build.toplevel"))
+        for target in ("production", "aios-dev;sh", "../../host", None):
+            with self.assertRaises(ValueError):
+                builder.build_arguments(Path("/home/dev/candidate"), Path("/home/dev/output-root"), target)
+
     def approval(self):
         executor = "/nix/store/" + "a"*32 + "-executor"
         polkit = "/nix/store/" + "b"*32 + "-polkit"

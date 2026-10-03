@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import acceptance, deploy, guest, jobs, provision, reenrollment, snapshots, sync, vm
+from . import acceptance, deploy, desktop, guest, jobs, provision, reenrollment, snapshots, sync, vm
 
 
 class Parser(argparse.ArgumentParser):
@@ -55,12 +55,13 @@ def parser() -> Parser:
     lock = commands.add_parser("lock", help="generate Nix/Cargo locks inside a verified guest job")
     lock.add_argument("--detach", action="store_true")
     build = commands.add_parser("build")
-    build.add_argument("--target", choices=("packages", "system"), required=True)
+    build.add_argument("--target", choices=("packages", "system", "desktop-test"), required=True)
     build.add_argument("--package", choices=jobs.PACKAGES)
     build.add_argument("--detach", action="store_true")
     test = commands.add_parser("test")
     test.add_argument("--suite", choices=("unit", "integration", "desktop"), required=True)
     test.add_argument("--detach", action="store_true")
+    test.add_argument("--desktop-run", metavar="RUN_UUID", help="resume only the registered disposable desktop workspace")
     test.add_argument("--bootstrap-case", choices=("all", *acceptance.CASES), help="run only the named disposable installer guard qualification")
     test.add_argument("--provider", choices=("system-info", "service-inspection", "public-session", "model-compatibility", "model-inference", "model-service", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime", "installed-policy", "installed-development", "installed-guard"), help="run the named real product provider smoke in the verified guest")
     controls = commands.add_parser("jobs").add_subparsers(dest="operation", required=True)
@@ -108,6 +109,12 @@ def dispatch(args) -> tuple[ExitCode, dict]:
             raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Package selection requires the packages build target")
         return jobs.start(load_config(args.workspace), "build-" + args.target, package=args.package, detach=args.detach)
     if args.command == "test":
+        if args.desktop_run is not None and args.suite != "desktop":
+            raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Desktop run requires desktop scope")
+        if args.suite == "desktop":
+            if args.detach or args.provider is not None or args.bootstrap_case is not None:
+                raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Desktop runner requires its own scope without detach/provider/bootstrap case")
+            return desktop.run(load_config(args.workspace), args.desktop_run)
         if args.provider is not None:
             if args.suite != "integration" or args.bootstrap_case is not None:
                 raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Provider smoke requires integration scope without a bootstrap case")
@@ -180,7 +187,7 @@ def main(argv=None) -> int:
     result = {
         "schema_version": 1,
         "command": " ".join(filter(None, (getattr(args, "command", None), getattr(args, "operation", None)))),
-        "target": "host" if args and (args.command == "vm" or args.command == "doctor" and args.host or args.command == "test" and args.bootstrap_case is not None) else "guest",
+        "target": "host" if args and (args.command == "vm" or args.command == "doctor" and args.host or args.command == "test" and (args.bootstrap_case is not None or args.suite == "desktop")) else "guest",
         "release_digest": data.get("release_digest") if data else None, "artifact_path": data.get("artifact_path") if data else None,
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "exit_status": int(code), "status": "ok" if code == ExitCode.SUCCESS else "error",

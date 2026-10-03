@@ -80,8 +80,8 @@ def run(arguments, timeout=60):
 def prepare_plan(config: VMConfig) -> dict:
     if config.values["provider"] != "qemu":
         raise failure(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "External targets cannot be provisioned by QEMU")
-    if config.values["ssh_user"] != "dev" or config.values["guest_build_target"] != "aios-dev" or config.values.get("guest_role", "development") != "development":
-        raise invalid("The initial bootstrap provisions only the dev user and aios-dev development role")
+    if config.values["ssh_user"] != "dev" or config.values["guest_build_target"] not in ("aios-dev", "aios-desktop-test") or config.values.get("guest_role", "development") != "development":
+        raise invalid("Bootstrap requires the dev user, development role and a registered image target")
     private_directory(config.root, ".local")
     plan_path = project_path(config.root, ".local/provisioning-plan.json", ".local")
     if plan_path.exists():
@@ -252,7 +252,7 @@ def refresh_seed(config: VMConfig):
             write_new(target, (config.root / relative).read_bytes(), 0o644)
         plan = record["plan"]
         for name, value in (("guest.uuid", plan["guest_uuid"]), ("installation.uuid", plan["installation_uuid"]),
-                            ("disk.serial", DISK_SERIAL), ("authorized.uuid", record["authorized_uuid"]), ("dev.pub", public)):
+                            ("disk.serial", DISK_SERIAL), ("authorized.uuid", record["authorized_uuid"]), ("dev.pub", public), ("image.target", config.values["guest_build_target"])):
             write_new(seed / name, (value + "\n").encode(), 0o644)
         write_new(seed / "bootstrap.sh", (config.root / "dev/seed/bootstrap.sh").read_bytes(), 0o644)
         seed_manifest(seed)
@@ -326,7 +326,7 @@ def create_locked(config: VMConfig, authorization: str | None) -> tuple[ExitCode
         target = seed / "source" / relative
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         write_new(target, (config.root / relative).read_bytes(), 0o644)
-    for name, value in (("guest.uuid", plan["guest_uuid"]), ("installation.uuid", plan["installation_uuid"]), ("disk.serial", DISK_SERIAL), ("authorized.uuid", authorization), ("dev.pub", public)):
+    for name, value in (("guest.uuid", plan["guest_uuid"]), ("installation.uuid", plan["installation_uuid"]), ("disk.serial", DISK_SERIAL), ("authorized.uuid", authorization), ("dev.pub", public), ("image.target", config.values["guest_build_target"])):
         write_new(seed / name, (value + "\n").encode(), 0o644)
     write_new(seed / "bootstrap.sh", (config.root / "dev/seed/bootstrap.sh").read_bytes(), 0o644)
     seed_manifest(seed)

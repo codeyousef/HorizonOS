@@ -293,3 +293,33 @@ python3 tools/devctl.py build --target system --detach --json
 python3 tools/devctl.py jobs status --job JOB_UUID --json
 python3 tools/devctl.py artifacts pull --job JOB_UUID --json
 ```
+
+### Disposable desktop runner
+
+`test --suite desktop` creates a separate project-owned KVM guest below
+`.local/d/<run-prefix>` and stores reports below `.local/reports/<run-uuid>`.
+The dedicated `aios-desktop-test` image imports the enrolled development base
+and enables a synthetic tester Wayland autologin with no wheel membership.
+The normal development image keeps autologin disabled; production assertions
+reject acceptance autologin. No host private directory is mounted in the VM.
+
+The host controls the verified official installer, pins its console-published
+SSH key, boots the installed image, verifies installation/DMI/disk/management
+identity, and checks one active local tester Wayland session with live KWin and
+Plasma processes. It captures the synthetic desktop through QMP and requests
+graceful ACPI shutdown. The report qualifies this runner and base desktop only;
+product application actions and AI functionality have their own acceptance gates.
+
+The image can be built without activation in the verified development guest:
+
+```fish
+python3 tools/devctl.py build --target desktop-test --detach --json
+python3 tools/devctl.py test --suite desktop --json
+python3 tools/devctl.py test --suite desktop --desktop-run RUN_UUID --json
+```
+
+The resume command accepts only its registered workspace, source manifest and
+disk identity. Completed installer/setup receipts are reused. An attempted
+installation without a success receipt stops for inspection and never formats
+again, resets a disk or silently starts another guest. Evidence and VM images
+remain under `/mnt/Storage`; the runner requires a managed owner there.
