@@ -34,6 +34,19 @@
         doCheck = false;
         meta.mainProgram = program;
       };
+      stateContract = import ./nix/state/catalog.nix {
+        inherit pkgs;
+        nixpkgsRevision = nixpkgs.rev;
+        lockSha256 = builtins.hashFile "sha256" ./flake.lock;
+        baseTemplateRevision = builtins.hashString "sha256" (builtins.concatStringsSep "\n" (map builtins.readFile [
+          ./nix/state/catalog.nix ./nix/state/managed.nix ./nix/machines/aios-dev/default.nix
+          ./crates/aios-state/src/lib.rs ./crates/aios-state/src/main.rs ./crates/aios-state/Cargo.toml
+          ./crates/aios-protocol/src/contracts.rs ./Cargo.lock
+        ]));
+      };
+      state = (productPackage "aios-state" "aios-state" "aios-state-check").overrideAttrs (_: {
+        AIOS_STATE_CATALOG_JSON = builtins.toJSON stateContract.catalog;
+      });
       cli = productPackage "aios-cli" "aios-cli" "aiosctl";
       core = (productPackage "aios-core" "aios-session" "aios-sessiond").overrideAttrs (old: {
         postInstall = (old.postInstall or "") + ''
@@ -62,8 +75,10 @@
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios;
       nixosModules.production = import ./nix/modules/aios/production.nix;
-      packages.${system} = { aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
+      packages.${system} = { aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system}.host-unit = devTools;
+      lib.stateContract = stateContract;
+      lib.managedState = import ./tests/nix/managed.nix { inherit nixpkgs stateContract; };
       lib.developmentBoundary = import ./tests/nix/development.nix { inherit nixpkgs; };
       devShells.${system} = {
       lock-resolution = pkgs.mkShell { packages = [ pkgs.cargo pkgs.rustc ]; };

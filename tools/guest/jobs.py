@@ -18,7 +18,7 @@ import uuid
 import snapshot as source
 
 PACKAGES = ("aios-core", "aios-model", "aios-desktop", "aios-cli", "aios-dev-tools")
-KINDS = {"resolve-lock", "build-packages", "build-system", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "model-inference-smoke", "model-service-smoke", "development-boundary-smoke", "guard-state-smoke", "supervision-probe"}
+KINDS = {"resolve-lock", "build-packages", "build-system", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "model-inference-smoke", "model-service-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "supervision-probe"}
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 LIMIT = 4 * 1024**2
 cancelled = False
@@ -122,6 +122,8 @@ def commands(kind, release, package=None, job_directory=None):
         return [["nix", "develop", *locked, reference + "#model-conversion", "--command", "python3", str(release / "tools/guest/model_conversion.py")]]
     if kind == "model-inference-smoke":
         return [["python3",str(release / "tools/guest/model_inference_smoke.py")]]
+    if kind == "managed-state-smoke":
+        return [["python3", str(release / "tools/guest/managed_state_smoke.py")]]
     if kind == "guard-state-smoke":
         return [["python3", str(release / "tools/guest/guard_state_smoke.py")]]
     if kind == "development-boundary-smoke":

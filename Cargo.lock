@@ -63,6 +63,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aios-state"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "aios-system"
 version = "0.1.0"
 dependencies = [
