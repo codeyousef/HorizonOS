@@ -76,6 +76,72 @@ states or available actions. These library types accept no JSON authority.
 The provider bridge must authenticate the fixed broker before accepting an
 original connection FD; passing claimed UID/PID/session fields is insufficient.
 
+## Graphical provider and originating client
+
+The fixed `aios-ui-agent.service` belongs to `graphical-session.target`, requires
+that target to be active, and stops with it. It runs as the desktop user with
+no capabilities, no privilege escalation, only Unix socket address families,
+restricted system calls and namespace creation, and bounded memory and tasks.
+
+Native graphical-provider isolation has an explicit exception: mount/network
+namespace directives on an unprivileged user unit implicitly create a child
+user namespace, even when `PrivateUsers=no`. Linux then denies the native
+desktop `/proc/PID/exe` checks on which compositor, accessibility launcher and
+application authentication depend. The provider therefore uses the original
+user namespace and filesystem view; it does not claim a hidden home, private
+devices, a private temporary directory, or a read-only mount namespace.
+Ordinary native UID permissions still apply. It is a trusted native component
+with fixed operations and no model, arbitrary file/shell route or client-selected
+executable. The orchestration broker retains all its separate namespace,
+network, filesystem and process protections. Provider startup or identity
+failure denies graphical access; it never switches to a weaker identity check.
+The user manager also cannot drop a capability bounding set in the original
+namespace without `CAP_SETPCAP`. The provider first clears its own effective,
+permitted and inheritable sets (including a user manager's inherited
+`CAP_WAKE_ALARM`) through a fixed startup `capset`, then verifies its effective,
+permitted, inheritable and ambient sets are all zero and that `NoNewPrivileges`
+is already active before binding the endpoint. It cannot gain capabilities by
+executing a setuid or file-capability program. An empty kernel bounding set is
+not claimed for this native user process.
+
+The provider owns `/run/user/UID/aios-ui/provider.sock` (0600) in its unit-owned
+0700 runtime directory. Both ends authenticate the actual kernel peer and the
+root-managed `user@UID.service`, its configured immutable program and current
+invocation. The native user manager must identify that peer as the active main
+process of the fixed service with exactly the sibling immutable executable and
+no arguments. Broker authentication additionally requires ownership of
+`org.aios.Session1`. Each request rechecks this association; a service restart,
+changed invocation, disconnected socket or changed original peer invalidates
+the connection.
+
+The first byte is `0xa7` with exactly one `SCM_RIGHTS` descriptor: the broker's
+server end of the original client connection. The provider obtains the original
+UID, PID, process start, boot, logind association and socket cookie from that
+descriptor, not from serialized fields. Received descriptors are close-on-exec;
+missing, multiple and unexpected ancillary messages are rejected. The provider
+acknowledges only after authentication. Subsequent messages use the existing
+big-endian framing, schema version 1 and UUID correlation IDs, a 64 KiB request
+limit and 1 MiB response limit. Unknown operations, duplicate fields and extra
+fields are denied. There is no approval operation.
+
+The private client first selects an explicit native desktop, then requests
+window candidates. These names and titles grant no content access. Candidate
+handles last 30 seconds on that connection. `start_ui_read` proposes a named
+window and original goal in Ask or Diagnose mode through the fixed native
+dialog. Status, one-shot snapshot retrieval, Stop and Forget belong exclusively
+to the originating connection. Reconnecting requires fresh selection and
+consent. Stop withdraws the dialog independently of inspection and deletes
+cached content; Forget removes the task. Disconnect cancels every owned task.
+Limits are eight provider connections, eight retained tasks per connection,
+four active consent/read workers globally and a 90-second task lifetime.
+
+`aiosctl ui read-window SESSION EXACT_TITLE GOAL --json` keeps one original
+connection through explicit selection, uniquely matched title, native consent
+and snapshot retrieval. It denies absent or ambiguous titles. Snapshots are
+bounded observations; this route invokes no model and grants no semantic input
+authority. Public graphical Submit and D-Bus origin proof require their own
+integration before these controls can serve the complete task lifecycle.
+
 ## Native interaction and qualification
 
 The dialog uses the native palette, fonts, focus and accessibility of Qt Widgets.

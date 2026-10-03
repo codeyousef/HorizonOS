@@ -1,0 +1,41 @@
+[Unit]
+Description=Horizon OS scoped native graphical provider
+After=graphical-session.target dbus.socket
+Requisite=graphical-session.target
+PartOf=graphical-session.target
+ConditionUser=!root
+
+[Service]
+Type=exec
+ExecStart=@EXECUTABLE@
+RuntimeDirectory=aios-ui
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+# Dropping the kernel bounding set requires CAP_SETPCAP in a user namespace.
+# The native provider instead verifies zero effective/permitted/inheritable/
+# ambient capabilities and NoNewPrivileges before accepting any connection.
+RestrictAddressFamilies=AF_UNIX
+# Native desktop /proc/exe checks require the user's original namespace.
+# Mount/network isolation of an unprivileged user unit implicitly creates a
+# child user namespace, even with PrivateUsers=no. Those directives belong to
+# the orchestration broker, not this fixed native provider. See the explicit
+# graphical-provider exceptions in docs/native-consent.md.
+PrivateUsers=no
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Fixed startup capset clears this process's inherited capabilities.
+SystemCallFilter=capset
+MemoryMax=256M
+TasksMax=64
+TimeoutStartSec=10
+TimeoutStopSec=5
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

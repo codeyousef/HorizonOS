@@ -93,6 +93,9 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     let native=serde_json::to_value(&window).unwrap();
     assert_eq!(native["app"]["pid"],kate.native.as_ref().expect("owned native Kate process").0);
     assert_eq!(native["display"]["session"]["uid"],uid);
+    if std::env::var("AIOS_NATIVE_BRIDGE_SCENARIO").ok().as_deref()==Some("disposable-provider-v1"){
+        qualify_broker_bridge(&display,&window);
+    }
     let snapshot=window.snapshot(&control).expect("real selected-window snapshot");
     assert_eq!(snapshot.window_handle,window.handle);assert!(!snapshot.nodes.is_empty());assert!(snapshot.nodes.len()<=300);
     assert!(snapshot.nodes.iter().map(|n|n.name.len()+n.actions.iter().map(String::len).sum::<usize>()).sum::<usize>()<=16384);
@@ -162,4 +165,37 @@ fn native_selected_kate_snapshot_and_stale_owner(){
         "native_window_identity_sha256":window.identity_sha256().unwrap(),"expiry_denial":format!("{native_expiry:?}"),"withdrawal_ms":withdrawal_ms,
         "withdrawal_reuse_denied":true,"unconfirmed_snapshot_denied":true,"origin_disconnect_revoked_pending_read":true,
         "independent_stop_ms":independent_stop_ms,"independent_stop_revoked_pending_read":true,"policy_revision":aios_policy::registry_revision()}));
+}
+
+fn qualify_broker_bridge(display:&DisplayBinding,window:&WindowBinding){
+    let path=PathBuf::from(format!("/run/user/{}/aios/session.sock",display.session.uid));
+    let mut client=aios_session::Client::connect(&path).unwrap();
+    let selected=client.call(json!({"kind":"select_ui_session","session_id":display.session.id})).unwrap();
+    assert!(selected.error.is_none(),"{selected:?}");let handle=selected.data.unwrap()["candidate_handle"].as_str().unwrap().to_owned();
+    let discovered=client.call(json!({"kind":"list_ui_windows","session_handle":handle})).unwrap();
+    assert!(discovered.error.is_none(),"{discovered:?}");let discovered=discovered.data.unwrap();
+    assert_eq!(discovered["ui_authorized"],false);let windows=discovered["windows"].as_array().unwrap();assert_eq!(windows.len(),1);
+    assert_eq!(windows[0]["title"],window.title);let selected_window=windows[0]["window_handle"].as_str().unwrap().to_owned();
+    let start=client.call(json!({"kind":"start_ui_read","window_handle":selected_window,"goal":"Explain the selected synthetic document","mode":"ask"})).unwrap();
+    assert!(start.error.is_none(),"{start:?}");let task=start.data.unwrap()["task_id"].as_str().unwrap().to_owned();
+    let until=Instant::now()+Duration::from_secs(5);
+    loop{
+        let status=client.call(json!({"kind":"get_ui_read_status","task_id":task})).unwrap();assert!(status.error.is_none(),"{status:?}");
+        let status=status.data.unwrap();if status["state"]=="needs_permission"{break;}
+        assert!(!matches!(status["state"].as_str(),Some("failed"|"cancelled"|"completed")),"unexpected native read state {status}");
+        assert!(Instant::now()<until,"native provider permission state timed out");std::thread::sleep(Duration::from_millis(20));
+    }
+    let denied=client.call(json!({"kind":"take_ui_snapshot","task_id":task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::AuthRequired);
+    let forged=client.call(json!({"kind":"cancel_ui_read","task_id":task,"decision":"allow"})).unwrap();assert_eq!(forged.error.unwrap().code,ErrorCode::InvalidArgument);
+    let mut reconnect=aios_session::Client::connect(&path).unwrap();
+    let denied=reconnect.call(json!({"kind":"get_ui_read_status","task_id":task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::AuthRequired);
+    let start=Instant::now();let cancel=client.call(json!({"kind":"cancel_ui_read","task_id":task})).unwrap();
+    let cancellation_ms=start.elapsed().as_millis();assert!(cancel.error.is_none(),"{cancel:?}");assert!(cancellation_ms<1000);
+    let status=client.call(json!({"kind":"get_ui_read_status","task_id":task})).unwrap().data.unwrap();assert_eq!(status["state"],"cancelled");
+    let denied=client.call(json!({"kind":"take_ui_snapshot","task_id":task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::Cancelled);
+    assert!(client.call(json!({"kind":"forget_ui_read","task_id":task})).unwrap().error.is_none());
+    let denied=client.call(json!({"kind":"get_ui_read_status","task_id":task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::TargetNotFound);
+    println!("NATIVE_PROVIDER_BRIDGE={}",json!({"evidence_kind":"real-exact-managed-broker-and-provider-native-original-fd-and-window-synthetic-document-no-allow",
+        "session_id":display.session.id,"uid":display.session.uid,"metadata":discovered,"original_fd_bound":true,"unconfirmed_snapshot_denied":true,
+        "forged_decision_denied":true,"reconnect_denied":true,"cancellation_ms":cancellation_ms,"cancelled_snapshot_denied":true,"forget_verified":true}));
 }

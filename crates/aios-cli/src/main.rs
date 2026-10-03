@@ -2,6 +2,11 @@ use aios_protocol::contracts::{Action, parse_tool_call};
 
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if let [command,operation,session,title,goal,flag]=args.as_slice(){
+        if command=="ui" && operation=="read-window" && flag=="--json"{
+            match read_window(session,title,goal){Ok(value)=>{println!("{value}");return;},Err(code)=>api_error(code)}
+        }
+    }
     if let [command, operation, session, flag] = args.as_slice() {
         if command == "ui" && operation == "select-session" && flag == "--json" {
             match aios_session::bus::Client::connect_user_bus().and_then(|client| client.select_ui_session(session)) {
@@ -73,8 +78,42 @@ fn main() {
         if let Err(error) = result { eprintln!("aiosctl: {error}"); std::process::exit(1); }
         return;
     }
-    eprintln!("Usage: aiosctl status --json | ask TEXT --json | ui select-session SESSION --json | system info --json | inspect service UNIT --json [--socket PRIVATE_PATH]");
+    eprintln!("Usage: aiosctl status --json | ask TEXT --json | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | system info --json | inspect service UNIT --json [--socket PRIVATE_PATH]");
     std::process::exit(2);
+}
+
+fn read_window(session:&str,title:&str,goal:&str)->Result<serde_json::Value,aios_protocol::contracts::ErrorCode>{
+    use aios_protocol::contracts::ErrorCode;
+    use serde_json::{Value,json};
+    let uid=std::fs::metadata("/proc/self").map_err(|_|ErrorCode::TargetChanged)?;
+    use std::os::unix::fs::MetadataExt;
+    let path=std::path::PathBuf::from(format!("/run/user/{}/aios/session.sock",uid.uid()));
+    let mut client=aios_session::Client::connect(&path).map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let call=|client:&mut aios_session::Client,operation:Value|->Result<Value,ErrorCode>{
+        let response=client.call(operation).map_err(|_|ErrorCode::TargetChanged)?;
+        match response.error{Some(error)=>Err(error.code),None=>response.data.ok_or(ErrorCode::InvalidArgument)}
+    };
+    let selected=call(&mut client,json!({"kind":"select_ui_session","session_id":session}))?;
+    let handle=selected["candidate_handle"].as_str().ok_or(ErrorCode::InvalidArgument)?;
+    let windows=call(&mut client,json!({"kind":"list_ui_windows","session_handle":handle}))?;
+    let candidates=windows["windows"].as_array().ok_or(ErrorCode::InvalidArgument)?.iter().filter(|w|w["title"].as_str()==Some(title)).collect::<Vec<_>>();
+    if candidates.len()!=1{return Err(if candidates.is_empty(){ErrorCode::TargetNotFound}else{ErrorCode::Conflict});}
+    let handle=candidates[0]["window_handle"].as_str().ok_or(ErrorCode::InvalidArgument)?;
+    let started=call(&mut client,json!({"kind":"start_ui_read","window_handle":handle,"goal":goal,"mode":"ask"}))?;
+    let id=started["task_id"].as_str().ok_or(ErrorCode::InvalidArgument)?;
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(95);
+    loop{
+        let status=call(&mut client,json!({"kind":"get_ui_read_status","task_id":id}))?;
+        match status["state"].as_str(){
+            Some("completed")=>return call(&mut client,json!({"kind":"take_ui_snapshot","task_id":id})),
+            Some("failed"|"cancelled")=>return Err(serde_json::from_value(status["error"].clone()).map_err(|_|ErrorCode::InvalidArgument)?),
+            Some("queued"|"needs_permission"|"inspecting")=>{},_=>return Err(ErrorCode::InvalidArgument),
+        }
+        if std::time::Instant::now()>=deadline{
+            let _=call(&mut client,json!({"kind":"cancel_ui_read","task_id":id}));return Err(ErrorCode::DeadlineExceeded);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 fn new_nonce() -> String { uuid::Uuid::new_v4().to_string() }

@@ -30,3 +30,17 @@ effects. Ambiguous identity and unsupported recovery require human decisions.
 Security acceptance uses finite adversarial/failure tests from PRD 21; passing
 those tests is not a claim of perfect safety. Private test data and diagnostics
 remain ignored locally or in Linear; distributed artifacts contain sanitized data.
+
+The graphical native provider requires the desktop's original user namespace
+for kernel process/executable verification. Unprivileged user-unit mount/network
+isolation implicitly creates another user namespace and blocks those checks.
+This provider has an explicit filesystem/namespace exception, described in
+[native consent](native-consent.md): it retains the native UID's filesystem view
+and kernel capability bounding set, verifies zero effective/permitted/inheritable/
+ambient capabilities and active NoNewPrivileges at startup, allows only Unix
+socket address families, and bounds system calls, namespace creation, memory and
+tasks. It contains no model, arbitrary file/shell route or dynamic executor.
+Its exact managed service and original client descriptor are reauthenticated
+per request. The orchestration broker keeps its complete mount/user/network
+sandbox. A compromised native provider would have ordinary same-UID filesystem
+access; this exception is part of the trusted native component boundary.

@@ -46,7 +46,7 @@ fn compiled_executable(actual:PathBuf,expected:Option<&str>)->Result<String>{
     if actual!=canonical || !canonical.starts_with("/nix/store") {return Err(denied("compiled compositor executable"));}
     canonical.to_str().map(str::to_owned).ok_or(ErrorCode::TargetChanged)
 }
-fn user_manager_program(c:&Connection,owner:&str,name:&str)->Result<()>{
+pub(crate) fn user_manager_program(c:&Connection,owner:&str,name:&str)->Result<()>{
     let manager=proxy(c,owner,"/org/freedesktop/systemd1","org.freedesktop.systemd1.Manager")?;
     let path:OwnedObjectPath=manager.call("GetUnit",&(name,)).map_err(error)?;
     let service=proxy(c,owner,path.as_str(),"org.freedesktop.systemd1.Service")?;
@@ -61,7 +61,7 @@ fn user_manager_program(c:&Connection,owner:&str,name:&str)->Result<()>{
     if commands[0].0!=expected || !commands[0].1.iter().any(|a|a=="--user"){return Err(denied("compiled user manager program"));}
     Ok(())
 }
-fn user_manager_stamp(c:&Connection,owner:&str,name:&str)->Result<(u64,Vec<u8>)>{
+pub(crate) fn user_manager_stamp(c:&Connection,owner:&str,name:&str)->Result<(u64,Vec<u8>)>{
     let m=proxy(c,owner,"/org/freedesktop/systemd1","org.freedesktop.systemd1.Manager")?;
     let path:OwnedObjectPath=m.call("GetUnit",&(name,)).map_err(error)?;
     let s=proxy(c,owner,path.as_str(),"org.freedesktop.systemd1.Service")?;

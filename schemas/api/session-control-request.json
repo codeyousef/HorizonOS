@@ -170,6 +170,123 @@
               "pattern": "^[a-zA-Z0-9_-]+$"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "session_handle"
+          ],
+          "properties": {
+            "kind": {
+              "const": "list_ui_windows"
+            },
+            "session_handle": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "window_handle",
+            "goal",
+            "mode"
+          ],
+          "properties": {
+            "kind": {
+              "const": "start_ui_read"
+            },
+            "window_handle": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "goal": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "mode": {
+              "enum": [
+                "ask",
+                "diagnose"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "get_ui_read_status"
+            },
+            "task_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "take_ui_snapshot"
+            },
+            "task_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "cancel_ui_read"
+            },
+            "task_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "task_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "forget_ui_read"
+            },
+            "task_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
         }
       ]
     }

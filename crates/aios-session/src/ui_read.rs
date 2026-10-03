@@ -36,13 +36,18 @@ impl OriginatingClient {
         peer.connection_id=Some(uuid::Uuid::new_v4().to_string());
         let value=Self{cookie:cookie(&proof)?,proof,peer};value.verify()?;Ok(value)
     }
-    fn verify(&self)->Result<()>{
+    pub(crate) fn verify(&self)->Result<()>{
         let mut status=nix::libc::pollfd{fd:self.proof.as_raw_fd(),events:nix::libc::POLLRDHUP,revents:0};
         if unsafe{nix::libc::poll(&mut status,1,0)}<0 || status.revents&(nix::libc::POLLRDHUP|nix::libc::POLLHUP|nix::libc::POLLERR|nix::libc::POLLNVAL)!=0 {
             return Err(ErrorCode::Cancelled);
         }
         if cookie(&self.proof)?!=self.cookie{return Err(ErrorCode::TargetChanged);}
         identity::verify(&self.proof,&self.peer)
+    }
+    pub(crate) fn uid(&self)->u32{self.peer.uid}
+    pub(crate) fn try_clone(&self)->Result<Self>{
+        self.verify()?;
+        Ok(Self{proof:self.proof.try_clone().map_err(|_|ErrorCode::TargetChanged)?,peer:self.peer.clone(),cookie:self.cookie})
     }
 }
 /// Provider worker owns this task; the independent control loop owns `control`.

@@ -3,6 +3,8 @@ pub mod identity;
 pub mod display;
 pub mod accessibility;
 pub mod ui_read;
+pub mod managed_service;
+pub mod ui_bridge;
 pub mod bus;
 pub mod inference;
 use aios_protocol::{MAX_TASK_BYTES, read_frame_with_limit, write_frame, contracts::{Action, ErrorCode, ProviderError, parse_tool_call, canonical_json}};
@@ -33,6 +35,12 @@ pub enum Operation {
     GetCapabilities,
     GetSystemInfo,
     SelectUiSession { session_id: String },
+    ListUiWindows { session_handle: String },
+    StartUiRead { window_handle: String, goal: String, mode: Mode },
+    GetUiReadStatus { task_id: String },
+    TakeUiSnapshot { task_id: String },
+    CancelUiRead { task_id: String },
+    ForgetUiRead { task_id: String },
     ResolveService { unit_name: String },
     Invoke { tool_call: Box<RawValue> },
     Submit { request: Submit },
@@ -76,6 +84,12 @@ fn parse_operation(raw: &str) -> Result<Operation, ErrorCode> {
             }
         },
         "select_ui_session" => fields!(SelectUiSession { session_id: String }),
+        "list_ui_windows" => fields!(ListUiWindows { session_handle: String }),
+        "start_ui_read" => fields!(StartUiRead { window_handle: String, goal: String, mode: Mode }),
+        "get_ui_read_status" => fields!(GetUiReadStatus { task_id: String }),
+        "take_ui_snapshot" => fields!(TakeUiSnapshot { task_id: String }),
+        "cancel_ui_read" => fields!(CancelUiRead { task_id: String }),
+        "forget_ui_read" => fields!(ForgetUiRead { task_id: String }),
         "resolve_service" => fields!(ResolveService { unit_name: String }),
         "invoke" => fields!(Invoke { tool_call: Box<RawValue> }),
         "submit" => fields!(Submit { request: Submit }),
@@ -217,6 +231,12 @@ impl State {
                 Ok(json!({"schema_version":1,"operation":"ui_session_candidate","candidate_handle":id,"session":view,
                     "expires_after_ms":30000,"confirmation_required":true,"ui_authorized":false}))
             },
+            Operation::ListUiWindows { .. } | Operation::StartUiRead { .. } | Operation::GetUiReadStatus { .. }
+                | Operation::TakeUiSnapshot { .. } | Operation::CancelUiRead { .. } | Operation::ForgetUiRead { .. } => {
+                // Graphical forwarding requires the actual original Unix FD.
+                // A claimed subject or plain State dispatch is insufficient.
+                Err(ErrorCode::AuthRequired)
+            },
             Operation::GetSystemInfo => {
                 self.check_direct_read(peer, &Action::SystemInfo, ReadResources::default())?;
                 provider(aios_system::observe_system_info())
@@ -338,6 +358,7 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
     let mut peer = identity::authenticate(&stream).map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "untrusted peer"))?;
     peer.connection_id = Some(Uuid::new_v4().to_string());
     let _owner = ConnectionOwner { state: state.clone(), peer: peer.clone() };
+    let mut ui:Option<ui_bridge::Client>=None;
     // A 90-second task must remain inspectable/cancellable on its original
     // authenticated connection; short polling cannot force a reconnect.
     for _ in 0..4096 {
@@ -351,7 +372,7 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
             Err(ErrorCode::UnsupportedSchema)
         } else {
             match parse_operation(request.operation.get()) {
-                Ok(operation) => state.lock().map_err(|_| io::Error::other("state unavailable"))?.dispatch(&peer, operation),
+                Ok(operation) => graphical_dispatch(&stream,&state,&peer,&mut ui,operation),
                 Err(error) => Err(error),
             }
         };
@@ -364,6 +385,30 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
         write_frame(&mut stream, &serde_json::to_string(&response).map_err(io::Error::other)?)?;
     }
     Ok(())
+}
+
+fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut Option<ui_bridge::Client>,operation:Operation)->Result<Value,ErrorCode>{
+    let native=match operation {
+        Operation::ListUiWindows{session_handle}=>{
+            let candidate={let mut state=state.lock().map_err(|_|ErrorCode::ResourceExhausted)?;state.prune();
+                let candidate=state.ui_candidates.get(&session_handle).ok_or(ErrorCode::TargetNotFound)?;
+                if candidate.owner!=*peer{return Err(ErrorCode::PermissionDenied);}candidate.session.clone()};
+            if identity::observe_graphical_session(&candidate.id,peer.uid)?!=candidate{return Err(ErrorCode::TargetChanged);}
+            if ui.is_none(){*ui=Some(ui_bridge::Client::connect(stream)?);}
+            json!({"kind":"discover","session_id":candidate.id})
+        },
+        Operation::StartUiRead{window_handle,goal,mode}=>json!({"kind":"start_read","window_handle":window_handle,"goal":goal,"mode":mode}),
+        Operation::GetUiReadStatus{task_id}=>json!({"kind":"get_read_status","task_id":task_id}),
+        Operation::TakeUiSnapshot{task_id}=>json!({"kind":"take_snapshot","task_id":task_id}),
+        Operation::CancelUiRead{task_id}=>json!({"kind":"cancel","task_id":task_id}),
+        Operation::ForgetUiRead{task_id}=>json!({"kind":"forget","task_id":task_id}),
+        operation=>return state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.dispatch(peer,operation),
+    };
+    identity::verify(stream,peer)?;
+    let result=ui.as_mut().ok_or(ErrorCode::AuthRequired)?.call(native);
+    identity::verify(stream,peer)?;
+    if matches!(result,Err(ErrorCode::TargetChanged|ErrorCode::PermissionDenied)){ui.take();}
+    result
 }
 
 pub struct Client { stream: UnixStream, peer: Peer }
