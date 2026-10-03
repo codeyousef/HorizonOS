@@ -236,7 +236,7 @@ def console_keys(text):
     return result
 
 
-def load_record(config):
+def _load_record_material(config):
     path = project_path(config.root, ".local/provisioning.json", ".local")
     if not path.exists():
         raise failure(ExitCode.UNMET_PREREQUISITE, "NOT_PROVISIONED", "Run vm create before starting the bootstrap VM")
@@ -246,9 +246,6 @@ def load_record(config):
     validate_plan(config, record.get("plan"))
     if record.get("authorized_uuid") != record["plan"]["guest_uuid"] or record.get("authorized_operation") != "provision-fresh-virtual-disk":
         raise failure(ExitCode.AUTHORIZATION_NEEDED, "AUTHORIZATION_NEEDED", "Missing bootstrap authorization")
-    info = config.paths["disk_image"].stat()
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_dev != record.get("disk_device") or info.st_ino != record.get("disk_inode"):
-        raise failure(ExitCode.TARGET_MISMATCH, "TARGET_MISMATCH", "Virtual disk identity changed")
     for field, checksum in (("seed_iso", "seed_sha256"), ("firmware_code", "firmware_sha256")):
         candidate = Path(record[field])
         if candidate.is_symlink() or not candidate.is_file() or digest_file(candidate) != record[checksum]:
@@ -262,6 +259,13 @@ def load_record(config):
     relative = candidate.relative_to(config.root)
     if project_path(config.root, str(relative), ".local/vm") != candidate or candidate.is_symlink() or not candidate.is_file() or digest_file(candidate) != media["sha256"]:
         raise failure(ExitCode.VERIFICATION_FAILURE, "MEDIA_DIGEST_MISMATCH", "Installer media failed verification")
+    return record
+
+
+def load_record(config):
+    from .storage import verify
+    record = _load_record_material(config)
+    verify(config.paths["disk_image"], record)
     return record
 
 

@@ -342,5 +342,9 @@ def create_locked(config: VMConfig, authorization: str | None) -> tuple[ExitCode
               "seed_iso": str(seed_iso), "seed_sha256": digest_file(seed_iso), "firmware_code": report["firmware"]["code"],
               "firmware_sha256": digest_file(Path(report["firmware"]["code"])), "disk_device": config.paths["disk_image"].stat().st_dev,
               "disk_inode": config.paths["disk_image"].stat().st_ino, "authorized_operation": "provision-fresh-virtual-disk", "authorized_uuid": authorization}
+    from .storage import observe
+    _, storage_identity = observe(config.paths["disk_image"])
+    if storage_identity is not None:
+        record["storage_identity"] = storage_identity
     write_json_new(config.root / ".local/provisioning.json", record)
     return ExitCode.SUCCESS, {"guest_uuid": plan["guest_uuid"], "installation_uuid": plan["installation_uuid"], "state": "prepared", "media": media, "seed_sha256": record["seed_sha256"], "artifact_path": str(config.root / ".local/provisioning.json")}

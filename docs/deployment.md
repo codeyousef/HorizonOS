@@ -24,6 +24,25 @@ refused. The read-only seed contains public source, UUIDs, disk serial, explicit
 fresh-disk authorization and the dedicated public SSH key. The private key stays
 on the host.
 
+New disks on Btrfs also bind the native filesystem UUID, subvolume ID and
+subvolume UUID. The kernel's device number can change after a host reboot;
+the persistent binding still requires the original disk inode and owner.
+Other filesystems retain the device/inode check. A legacy Btrfs record without
+this binding stops on a changed device number. An operator can acknowledge
+the exact retained disk and current filesystem identity while the VM is stopped:
+
+```fish
+python3 tools/devctl.py vm rebind-storage --previous-device OLD_DEVICE --previous-inode ORIGINAL_INODE --filesystem-uuid FILESYSTEM_UUID --subvolume-uuid SUBVOLUME_UUID --json
+```
+
+This requires the original configuration, provisioning authority, media hashes,
+disk inode and owner to match. It rejects retained VM control state and preserves
+the original record in a private receipt. It leaves disk bytes, SSH trust and
+guest enrollment intact. Subsequent operations still verify native guest identity;
+the storage receipt alone does not establish a guest target. Existing desktop and
+snapshot records keep their original device/inode binding to the provisioning
+record; persistent filesystem identity is checked when loading that record.
+
 Fresh provisioning installs the pinned `nixosConfigurations.aios-dev` image,
 including the desktop, installed target/template/approval records and the narrow
 VM-only developer helper. Enrollment is generated from the verified VM and

@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import acceptance, deploy, desktop, guest, jobs, native_rpc, provision, reenrollment, snapshots, sync, vm
+from . import acceptance, deploy, desktop, guest, jobs, native_rpc, provision, reenrollment, snapshots, storage, sync, vm
 
 
 class Parser(argparse.ArgumentParser):
@@ -46,6 +46,11 @@ def parser() -> Parser:
     restore = vm.add_parser("restore")
     restore.add_argument("--name", required=True)
     restore.add_argument("--discard-guest-changes", action="store_true")
+    rebind = vm.add_parser("rebind-storage", help="acknowledge the exact persistent Btrfs identity of a stopped legacy disk")
+    rebind.add_argument("--previous-device", type=int, required=True)
+    rebind.add_argument("--previous-inode", type=int, required=True)
+    rebind.add_argument("--filesystem-uuid", required=True)
+    rebind.add_argument("--subvolume-uuid", required=True)
     enrollment_parser = commands.add_parser("enroll")
     enrollment_parser.add_argument("--re-enroll", metavar="PRIOR_INSTALLATION_UUID")
     enrollment = enrollment_parser.add_mutually_exclusive_group()
@@ -135,10 +140,12 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         return jobs.control(load_config(args.workspace), args.operation, args.job)
     if args.command == "artifacts":
         return jobs.pull(load_config(args.workspace), args.job)
-    if args.command == "vm" and args.operation in ("create", "start", "console", "stop", "snapshot", "restore"):
+    if args.command == "vm" and args.operation in ("create", "start", "console", "stop", "snapshot", "restore", "rebind-storage"):
         config = load_config(args.workspace)
         if config.values["provider"] != "qemu":
             raise DevctlError(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "External provider has no verified power/provisioning adapter")
+        if args.operation == "rebind-storage":
+            return storage.rebind(config, args.previous_device, args.previous_inode, args.filesystem_uuid, args.subvolume_uuid)
         if args.operation in ("snapshot", "restore"):
             with provision.operation_lock(config.root):
                 if args.operation == "snapshot":
