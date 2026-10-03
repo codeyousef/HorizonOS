@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real packaged user unit; never replace an existing service."""
+import hashlib
+import uuid
 import json
 import fcntl
 import os
@@ -9,7 +11,7 @@ import subprocess
 import time
 from service_inspection_smoke import products
 
-UNIT = "aios-sessiond.service"
+UNIT = "aios-session-acceptance-" + uuid.uuid4().hex + ".service"
 
 
 def main():
@@ -35,18 +37,31 @@ def main():
         output = ctl("show", UNIT, *arguments).stdout.decode()
         return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
     if show()["LoadState"] != "not-found":
-        raise RuntimeError("existing session unit must not be replaced")
-    unit_file = binaries["aios-sessiond"].parents[1] / "share/systemd/user" / UNIT
+        raise RuntimeError("qualification unit must not replace an existing unit")
+    has_owner = subprocess.run(["busctl", "--user", "call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner", "s", "org.aios.Session1"], env=env, check=True, stdout=subprocess.PIPE, timeout=5)
+    if has_owner.stdout.strip() != b"b false":
+        raise RuntimeError("existing public broker owner must not be replaced")
+    unit_file = binaries["aios-sessiond"].parents[1] / "share/systemd/user/aios-sessiond.service"
+    unit_bytes = unit_file.read_bytes()
+    if len(unit_bytes)>65536:
+        raise RuntimeError("unit exceeds qualification size limit")
     runtime_link = runtime / "systemd/user" / UNIT
     if runtime_link.exists() or runtime_link.is_symlink():
         raise RuntimeError("existing runtime unit must not be replaced")
-    ctl("link", "--runtime", str(unit_file))
+    runtime_link.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if runtime_link.parent.resolve()!=runtime_link.parent or runtime_link.parent.stat().st_uid!=os.geteuid():
+        raise RuntimeError("runtime unit directory ownership mismatch")
+    descriptor=os.open(runtime_link,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+    with os.fdopen(descriptor,"wb") as handle:
+        handle.write(unit_bytes)
     def owns_link():
-        return runtime_link.is_symlink() and runtime_link.resolve() == unit_file
+        info=runtime_link.lstat()
+        return stat.S_ISREG(info.st_mode) and info.st_uid==os.geteuid() and info.st_nlink==1 and stat.S_IMODE(info.st_mode)==0o600 and runtime_link.read_bytes()==unit_bytes
     def owns_fragment(properties):
         fragment = properties.get("FragmentPath", "")
-        return bool(fragment) and Path(fragment).resolve() == unit_file
+        return bool(fragment) and Path(fragment)==runtime_link and owns_link()
     try:
+        ctl("daemon-reload")
         ctl("start", UNIT)
         properties = show()
         if not owns_fragment(properties) or properties["ActiveState"] != "active" or int(properties["MainPID"]) <= 1:
@@ -70,6 +85,10 @@ def main():
         capabilities = json.loads(status.stdout)
         if capabilities["transport"] != "session-dbus" or capabilities["ui_enabled"] or capabilities["inference_available"]:
             raise RuntimeError("session availability scope mismatch")
+        ui = cli("ui", "select-session", "aios-no-such-session", "--json")
+        ui_denial = json.loads(ui.stdout)
+        if ui.returncode != 1 or ui_denial["error"]["code"] != "TARGET_NOT_FOUND":
+            raise RuntimeError("hardened UI observer did not return the stable missing-session error")
         question = cli("ask", "Why is sshd running?", "--json")
         answer = json.loads(question.stdout)
         if question.returncode != 1 or answer["error"] != "MODEL_UNAVAILABLE" or answer["mutation_performed"]:
@@ -83,7 +102,8 @@ def main():
         if after["ActiveState"] != "active" or after["MainPID"] == properties["MainPID"]:
             raise RuntimeError("packaged restart did not establish a new daemon")
         print("AIOS_USER_SERVICE=" + json.dumps({"outputs":[str(p) for p in paths], "before":properties, "after":after,
-            "capabilities":capabilities,"unavailable_model":answer,"service_observation":observed}), flush=True)
+            "unit_name":UNIT,"package_unit_sha256":hashlib.sha256(unit_bytes).hexdigest(),"exact_unit_bytes":True,
+            "capabilities":capabilities,"ui_selection_denial":ui_denial,"unavailable_model":answer,"service_observation":observed}), flush=True)
     except Exception:
         print("AIOS_USER_SERVICE_FAILURE=" + json.dumps(show()), flush=True)
         journal = subprocess.run(["journalctl", "--user", "--user-unit=" + UNIT, "--boot", "--lines=20", "--no-pager", "--output=json", "--output-fields=MESSAGE,PRIORITY,_BOOT_ID,_UID"],
@@ -91,7 +111,7 @@ def main():
         print("AIOS_OWN_UNIT_JOURNAL=" + journal.stdout.decode(errors="replace"), flush=True)
         raise
     finally:
-        # Only the exact newly linked package unit belongs to this fixture.
+        # Only the exact newly copied package unit belongs to this fixture.
         if owns_link():
             properties = show()
             if owns_fragment(properties):

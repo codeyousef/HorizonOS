@@ -28,6 +28,7 @@ pub struct Submit {
 pub enum Operation {
     GetCapabilities,
     GetSystemInfo,
+    SelectUiSession { session_id: String },
     ResolveService { unit_name: String },
     Invoke { tool_call: Box<RawValue> },
     Submit { request: Submit },
@@ -70,6 +71,7 @@ fn parse_operation(raw: &str) -> Result<Operation, ErrorCode> {
                 _ => Err(ErrorCode::InvalidArgument),
             }
         },
+        "select_ui_session" => fields!(SelectUiSession { session_id: String }),
         "resolve_service" => fields!(ResolveService { unit_name: String }),
         "invoke" => fields!(Invoke { tool_call: Box<RawValue> }),
         "submit" => fields!(Submit { request: Submit }),
@@ -96,9 +98,10 @@ pub struct TaskStatus {
 }
 
 struct Task { owner: Peer, expires: Instant, nonce: String, digest: [u8; 32], status: TaskStatus }
+struct UiCandidate { owner: Peer, expires: Instant, session: identity::GraphicalSession }
 struct Handle { owner: Peer, expires: Instant, unit: String }
 #[derive(Default)]
-pub struct State { tasks: HashMap<String, Task>, handles: HashMap<String, Handle> }
+pub struct State { tasks: HashMap<String, Task>, handles: HashMap<String, Handle>, ui_candidates: HashMap<String, UiCandidate> }
 pub type SharedState = Arc<Mutex<State>>;
 
 fn now() -> String { OffsetDateTime::now_utc().format(&Rfc3339).expect("valid timestamp") }
@@ -110,6 +113,7 @@ impl State {
         let time = Instant::now();
         self.tasks.retain(|_, task| task.expires > time);
         self.handles.retain(|_, handle| handle.expires > time);
+        self.ui_candidates.retain(|_, candidate| candidate.expires > time);
     }
     fn task(&self, id: &str, peer: &Peer) -> Result<&Task, ErrorCode> {
         if id.is_empty() || id.chars().count() > 128 { return Err(ErrorCode::InvalidArgument); }
@@ -121,8 +125,16 @@ impl State {
         self.prune();
         match operation {
             Operation::GetCapabilities => Ok(json!({"schema_version":1,"request_id":Uuid::new_v4().to_string(),"operation":"capabilities","actions":["system.info","system.service_status"],
-                "read_only":true,"inference_available":false,"ui_enabled":false,"transport":"private-unix",
+                "read_only":true,"inference_available":false,"ui_enabled":false,"ui_session_selection_available":true,"transport":"private-unix",
                 "task_request_max_bytes":MAX_TASK_BYTES,"session_associated":peer.logind_session.is_some()})),
+            Operation::SelectUiSession { session_id } => {
+                if self.ui_candidates.len()>=64 || self.ui_candidates.values().filter(|c|c.owner==*peer).count()>=8 {return Err(ErrorCode::ResourceExhausted);}
+                let session=identity::observe_graphical_session(&session_id,peer.uid)?;
+                let id=Uuid::new_v4().to_string();let view=provider(&session)?;
+                self.ui_candidates.insert(id.clone(),UiCandidate{owner:peer.clone(),expires:Instant::now()+Duration::from_secs(30),session});
+                Ok(json!({"schema_version":1,"operation":"ui_session_candidate","candidate_handle":id,"session":view,
+                    "expires_after_ms":30000,"confirmation_required":true,"ui_authorized":false}))
+            },
             Operation::GetSystemInfo => provider(aios_system::observe_system_info()),
             Operation::ResolveService { unit_name } => {
                 validate_service_name(&unit_name)?;
@@ -146,7 +158,14 @@ impl State {
                 if request.text.trim().is_empty() || request.text.len() > 60000 || request.client_nonce.is_empty() || request.client_nonce.len() > 128 {
                     return Err(ErrorCode::InvalidArgument);
                 }
-                if !request.context_handles.is_empty() || request.selected_app_handle.is_some() || request.selected_session_handle.is_some() {
+                if let Some(handle)=&request.selected_session_handle {
+                    let candidate=self.ui_candidates.get(handle).ok_or(ErrorCode::TargetNotFound)?;
+                    if candidate.owner!=*peer {return Err(ErrorCode::PermissionDenied);}
+                    if identity::observe_graphical_session(&candidate.session.id,peer.uid)?!=candidate.session {return Err(ErrorCode::TargetChanged);}
+                    // Selection is an observation, never a consent receipt.
+                    return Err(ErrorCode::AuthRequired);
+                }
+                if !request.context_handles.is_empty() || request.selected_app_handle.is_some() {
                     return Err(ErrorCode::AuthRequired);
                 }
                 let digest: [u8; 32] = Sha256::digest(canonical_json(&provider(&request)?)?).into();
@@ -192,14 +211,23 @@ impl State {
 pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-    let peer = identity::authenticate(&stream).map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "untrusted peer"))?;
+    let mut peer = identity::authenticate(&stream).map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "untrusted peer"))?;
+    peer.connection_id = Some(Uuid::new_v4().to_string());
     for _ in 0..128 {
         let Some(frame) = read_frame_with_limit(&mut stream, MAX_TASK_BYTES)? else { return Ok(()); };
         identity::verify(&stream, &peer).map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "peer changed"))?;
         let request: Request = serde_json::from_str(&frame).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid request"))?;
-        if request.schema_version != 1 || !uuid(&request.request_id) { return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid version or correlation id")); }
-        let operation = parse_operation(request.operation.get()).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid operation"))?;
-        let outcome = state.lock().map_err(|_| io::Error::other("state unavailable"))?.dispatch(&peer, operation);
+        if !uuid(&request.request_id) { return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid correlation id")); }
+        // A bounded, authenticated envelope with a valid correlation ID receives
+        // stable errors. Invalid framing/JSON/envelopes still close the stream.
+        let outcome = if request.schema_version != 1 {
+            Err(ErrorCode::UnsupportedSchema)
+        } else {
+            match parse_operation(request.operation.get()) {
+                Ok(operation) => state.lock().map_err(|_| io::Error::other("state unavailable"))?.dispatch(&peer, operation),
+                Err(error) => Err(error),
+            }
+        };
         let (data, error) = match outcome {
             Ok(value) => (Some(value), None),
             Err(code) => (None, Some(ProviderError { code, message: "Request could not be fulfilled within authenticated scope".into(), retryable: false })),
@@ -241,7 +269,7 @@ mod tests {
     use super::*;
     fn peer_fixture() -> Peer {
         Peer { uid: 1000, pid: 200, start_ticks: 3, boot_id: "fixture-boot".into(),
-            logind_session: None, remote: true, session_type: None, ui_enabled: false, bus_sender: None, bus_id: None }
+            logind_session: None, remote: true, session_type: None, ui_enabled: false, bus_sender: None, bus_id: None, connection_id: None }
     }
     fn submit_fixture(mode: Mode, nonce: &str, text: &str) -> Operation {
         Operation::Submit { request: Submit { mode, text: text.into(), client_nonce: nonce.into(),

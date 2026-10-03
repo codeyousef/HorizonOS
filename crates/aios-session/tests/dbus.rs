@@ -40,6 +40,12 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     // zbus also advertises standard PropertiesChanged; only the AIOS interface
     // is prohibited from exposing task/evidence signals.
     assert!(!agent_xml.contains("<signal"));
+    let ui=Proxy::new(&conn,NAME,"/org/aios/UI1","org.aios.UI1").unwrap();
+    let ui_introspection=Proxy::new(&conn,NAME,"/org/aios/UI1","org.freedesktop.DBus.Introspectable").unwrap();
+    let ui_xml:String=ui_introspection.call("Introspect",&()).unwrap();
+    let own_ui=ui_xml.split("<interface name=\"org.aios.UI1\">").nth(1).unwrap().split("</interface>").next().unwrap();
+    assert!(own_ui.contains("name=\"SelectSession\""));assert!(!own_ui.contains("<signal"));
+    code(ui.call::<_,_,String>("SelectSession",&("aios-no-such-session",)).unwrap_err(),"TARGET_NOT_FOUND");
     let caps: String = api.call("GetCapabilities", &()).unwrap();
     let caps: Value = serde_json::from_str(&caps).unwrap();
     assert_eq!(caps["transport"], "session-dbus"); assert_eq!(caps["ui_enabled"],false);

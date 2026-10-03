@@ -108,9 +108,18 @@ impl Agent {
     }
 }
 
+pub struct Ui { agent: Agent }
+#[zbus::interface(name = "org.aios.UI1")]
+impl Ui {
+    async fn select_session(&self, session_id:&str, #[zbus(connection)] connection:&Connection, #[zbus(header)] header:Header<'_>) -> Result<String> {
+        self.agent.json(connection,header,Operation::SelectUiSession {session_id:session_id.into()}).await
+    }
+}
+
 pub fn export(address: &str, state: SharedState) -> zbus::Result<zbus::blocking::Connection> {
     zbus::blocking::connection::Builder::address(address)?.method_timeout(Duration::from_secs(2))
         .max_queued(64).allow_name_replacements(false).replace_existing_names(false)
+        .serve_at("/org/aios/UI1",Ui{agent:Agent::new(state.clone())})?
         .serve_at(PATH, Agent::new(state))?.name(NAME)?.build()
 }
 
@@ -148,12 +157,24 @@ impl Client {
         Ok(())
     }
     fn call<B: serde::Serialize + zbus::zvariant::DynamicType>(&self, method: &str, body: &B) -> std::result::Result<String, ErrorCode> {
+        self.call_at(PATH, INTERFACE, method, body)
+    }
+    fn call_at<B: serde::Serialize + zbus::zvariant::DynamicType>(&self, path: &str, interface: &str, method: &str, body: &B) -> std::result::Result<String, ErrorCode> {
         self.verify()?;
-        let api = zbus::blocking::Proxy::new(&self.connection, self.owner.as_str(), PATH, INTERFACE).map_err(|_| ErrorCode::UnsupportedCapability)?;
+        let api = zbus::blocking::Proxy::new(&self.connection, self.owner.as_str(), path, interface).map_err(|_| ErrorCode::UnsupportedCapability)?;
         let result: String = api.call(method, body).map_err(client_error)?;
         self.verify()?;
         if result.len() > aios_protocol::MAX_FRAME_BYTES { return Err(ErrorCode::ResourceExhausted); }
         Ok(result)
+    }
+    pub fn select_ui_session(&self, session_id: &str) -> std::result::Result<Value, ErrorCode> {
+        let value: Value = serde_json::from_str(&self.call_at("/org/aios/UI1", "org.aios.UI1", "SelectSession", &(session_id,))?).map_err(|_| ErrorCode::InvalidArgument)?;
+        if value["schema_version"] != 1 || value["operation"] != "ui_session_candidate"
+            || value["session"]["id"] != session_id || value["confirmation_required"] != true
+            || value["ui_authorized"] != false || !value["candidate_handle"].as_str().is_some_and(crate::uuid) {
+            return Err(ErrorCode::TargetChanged);
+        }
+        Ok(value)
     }
     pub fn capabilities(&self) -> std::result::Result<Value, ErrorCode> {
         serde_json::from_str(&self.call("GetCapabilities", &())?).map_err(|_| ErrorCode::InvalidArgument)

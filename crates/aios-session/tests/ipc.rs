@@ -68,14 +68,14 @@ fn malformed_authority_and_oversized_frames_close_connection() {
         let mut one=[0]; assert!(stream.read(&mut one).is_ok_and(|n| n==0));
     }
     let mut client=server.client();
-    assert!(client.call(json!({"kind":"submit","request":{"mode":"ask","text":"test","client_nonce":"x","uid":0,"approved":true}})).is_err());
+    assert_eq!(client.call(json!({"kind":"submit","request":{"mode":"ask","text":"test","client_nonce":"x","uid":0,"approved":true}})).unwrap().error.unwrap().code, aios_protocol::contracts::ErrorCode::InvalidArgument);
 }
 
 #[test]
 fn handle_and_task_ownership_do_not_follow_a_supplied_identity() {
     // This state fixture is separate from real peer-credential acceptance above.
     let mut state=State::default();
-    let peer=aios_session::identity::Peer{uid:1000,pid:200,start_ticks:3,boot_id:"boot-fixture".into(),logind_session:None,remote:true,session_type:None,ui_enabled:false,bus_sender:None,bus_id:None};
+    let peer=aios_session::identity::Peer{uid:1000,pid:200,start_ticks:3,boot_id:"boot-fixture".into(),logind_session:None,remote:true,session_type:None,ui_enabled:false,bus_sender:None,bus_id:None,connection_id:None};
     let task=state.dispatch(&peer,aios_session::Operation::Submit{request:aios_session::Submit{mode:aios_session::Mode::Ask,text:"private".into(),client_nonce:"fixture".into(),context_handles:vec![],selected_app_handle:None,selected_session_handle:None}}).unwrap()["request_id"].as_str().unwrap().to_owned();
     for other in [aios_session::identity::Peer{uid:1001,..peer.clone()},aios_session::identity::Peer{start_ticks:4,..peer.clone()},aios_session::identity::Peer{pid:201,..peer.clone()}] {
         assert_eq!(state.dispatch(&other,aios_session::Operation::GetStatus{task_id:task.clone()}).unwrap_err(),aios_protocol::contracts::ErrorCode::PermissionDenied);
@@ -103,4 +103,57 @@ fn fail03_unreviewed_and_malformed_tools_never_change_the_service() {
     let after=client.call(read).unwrap().data.unwrap();
     for field in ["main_pid","restart_count","boot_id","active_state","sub_state"]{assert_eq!(before["data"][field],after["data"][field],"{field} changed");}
     println!("AIOS_FAIL03_REAL_SOCKET=passed; unknown/malformed/unimplemented actions denied; service PID, restart count and boot unchanged");
+}
+
+#[test]
+fn a_new_private_connection_requires_fresh_authority_even_in_the_same_process() {
+    use aios_protocol::contracts::ErrorCode;
+    let server=Server::start();let mut first=server.client();
+    let request=json!({"kind":"submit","request":{"mode":"ask","text":"private reconnect test","client_nonce":"reconnect"}});
+    let task=first.call(request.clone()).unwrap().data.unwrap()["request_id"].as_str().unwrap().to_owned();
+    let mut reconnect=server.client();
+    for kind in ["get_status","cancel","forget"] {
+        assert_eq!(reconnect.call(json!({"kind":kind,"task_id":task})).unwrap().error.unwrap().code,ErrorCode::PermissionDenied);
+    }
+    assert_eq!(reconnect.call(json!({"kind":"get_events","task_id":task,"after_sequence":0,"limit":10})).unwrap().error.unwrap().code,ErrorCode::PermissionDenied);
+    let next=reconnect.call(request).unwrap().data.unwrap()["request_id"].as_str().unwrap().to_owned();assert_ne!(next,task);
+    assert!(first.call(json!({"kind":"get_status","task_id":task})).unwrap().error.is_none());
+    println!("AIOS_PRIVATE_RECONNECT=passed; same UID/PID cannot reuse task/event/cancel/forget authority on another stream");
+}
+
+#[test]
+fn valid_envelopes_get_stable_errors_without_losing_the_stream() {
+    use aios_protocol::{read_frame,write_frame,contracts::ErrorCode};
+    let server=Server::start();let mut stream=UnixStream::connect(&server.socket).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    for (version,operation,expected) in [
+        (2,json!({"kind":"get_capabilities"}),ErrorCode::UnsupportedSchema),
+        (1,json!({"kind":"unknown_operation"}),ErrorCode::InvalidArgument),
+        (1,json!({"kind":"get_events","task_id":"missing","after_sequence":0,"limit":0}),ErrorCode::TargetNotFound),
+    ] {
+        let id=uuid::Uuid::new_v4().to_string();let request=json!({"schema_version":version,"request_id":id,"operation":operation});
+        write_frame(&mut stream,&request.to_string()).unwrap();let raw=read_frame(&mut stream).unwrap().unwrap();
+        let reply:aios_session::Response=serde_json::from_str(&raw).unwrap();assert_eq!(reply.request_id,id);assert_eq!(reply.error.unwrap().code,expected);
+    }
+    let id=uuid::Uuid::new_v4().to_string();write_frame(&mut stream,&json!({"schema_version":1,"request_id":id,"operation":{"kind":"get_capabilities"}}).to_string()).unwrap();
+    let response:aios_session::Response=serde_json::from_str(&read_frame(&mut stream).unwrap().unwrap()).unwrap();assert!(response.error.is_none());
+}
+
+#[test]
+fn ui_selection_has_no_newest_session_fallback_or_client_identity_assertions() {
+    use aios_protocol::contracts::ErrorCode;
+    let server=Server::start();let mut client=server.client();
+    let capabilities=client.call(json!({"kind":"get_capabilities"})).unwrap().data.unwrap();
+    assert_eq!(capabilities["ui_enabled"],false);assert_eq!(capabilities["ui_session_selection_available"],true);
+    for (operation,expected) in [
+        (json!({"kind":"select_ui_session","session_id":"invalid/session"}),ErrorCode::InvalidArgument),
+        (json!({"kind":"select_ui_session","session_id":"aios-no-such-session"}),ErrorCode::TargetNotFound),
+        (json!({"kind":"select_ui_session","session_id":"newest","uid":0,"approved":true}),ErrorCode::InvalidArgument),
+    ] {assert_eq!(client.call(operation).unwrap().error.unwrap().code,expected);}
+    let raw=UnixStream::connect(&server.socket).unwrap();let peer=aios_session::identity::authenticate(&raw).unwrap();
+    if let Some(id)=peer.logind_session {if peer.remote || !matches!(peer.session_type.as_deref(),Some("wayland"|"x11")) {
+        assert_eq!(client.call(json!({"kind":"select_ui_session","session_id":id})).unwrap().error.unwrap().code,ErrorCode::PermissionDenied);
+    }}
+    assert_eq!(client.call(json!({"kind":"submit","request":{"mode":"act","text":"use desktop","client_nonce":"deny-unconfirmed","selected_session_handle":"invented"}})).unwrap().error.unwrap().code,ErrorCode::TargetNotFound);
+    println!("AIOS_UI_HEADLESS=passed; explicit live selection required; forged identity and implicit desktop denied; no UI authorization");
 }

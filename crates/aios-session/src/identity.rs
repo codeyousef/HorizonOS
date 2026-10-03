@@ -8,7 +8,7 @@ use zbus::{blocking::Proxy, zvariant::OwnedObjectPath};
 fn lookup_error(error: zbus::Error) -> ErrorCode {
     match error {
         zbus::Error::MethodError(name, _, _) => match name.as_str() {
-            "org.freedesktop.login1.NoSessionForPID" => ErrorCode::TargetNotFound,
+            "org.freedesktop.login1.NoSessionForPID" | "org.freedesktop.login1.NoSuchSession" => ErrorCode::TargetNotFound,
             "org.freedesktop.DBus.Error.NameHasNoOwner" | "org.freedesktop.DBus.Error.ServiceUnknown" => ErrorCode::UnsupportedCapability,
             "org.freedesktop.DBus.Error.AccessDenied" | "org.freedesktop.DBus.Error.AuthFailed" => ErrorCode::PermissionDenied,
             _ => ErrorCode::PartialResult,
@@ -24,6 +24,8 @@ pub struct Peer {
     pub logind_session: Option<String>, pub remote: bool, pub session_type: Option<String>,
     pub ui_enabled: bool,
     pub bus_sender: Option<String>, pub bus_id: Option<String>,
+    /// Server-created private connection identity; never read from client JSON.
+    pub connection_id: Option<String>,
 }
 
 fn process(pid: u32, uid: u32) -> Result<(u64, String), ErrorCode> {
@@ -45,7 +47,7 @@ pub fn authenticate(stream: &UnixStream) -> Result<Peer, ErrorCode> {
 pub(crate) fn authenticate_process(uid: u32, pid: u32) -> Result<Peer, ErrorCode> {
     if uid != geteuid().as_raw() || pid <= 1 { return Err(ErrorCode::PermissionDenied); }
     let (start_ticks, boot_id) = process(pid, uid)?;
-    let mut peer = Peer { uid, pid, start_ticks, boot_id, logind_session: None, remote: false, session_type: None, ui_enabled: false, bus_sender: None, bus_id: None };
+    let mut peer = Peer { uid, pid, start_ticks, boot_id, logind_session: None, remote: false, session_type: None, ui_enabled: false, bus_sender: None, bus_id: None, connection_id: None };
     // Failure to associate a process never guesses a desktop. All present APIs
     // are headless and read-only; interactive grants require later enrollment.
     match logind_session(pid, uid) {
@@ -58,7 +60,10 @@ pub(crate) fn authenticate_process(uid: u32, pid: u32) -> Result<Peer, ErrorCode
 }
 
 pub fn verify(stream: &UnixStream, original: &Peer) -> Result<(), ErrorCode> {
-    let current = authenticate(stream)?;
+    let mut current = authenticate(stream)?;
+    // The existing stream owns this server-issued binding. Kernel/process/logind
+    // identity is freshly resolved; reconnects receive a different binding.
+    current.connection_id = original.connection_id.clone();
     if current != *original { return Err(ErrorCode::TargetChanged); }
     Ok(())
 }
@@ -80,4 +85,53 @@ fn logind_session(pid: u32, uid: u32) -> Result<(String, bool, String), ErrorCod
     let kind: String = session.get_property("Type").map_err(|_| ErrorCode::PartialResult)?;
     if id.is_empty() || id.len() > 128 || kind.len() > 32 { return Err(ErrorCode::PartialResult); }
     Ok((id, remote, kind))
+}
+
+/// Live logind identity for an explicitly selected graphical session. Observing
+/// this is not consent and never enables a UI action by itself.
+#[derive(Debug,Clone,PartialEq,Eq,Serialize)]
+pub struct GraphicalSession {
+    pub id:String, pub uid:u32, pub remote:bool, pub kind:String,
+    pub class:String, pub state:String, pub active:bool,
+}
+fn graphical_snapshot(session:&Proxy<'_>)->Result<GraphicalSession,ErrorCode>{
+    let (uid,_):(u32,OwnedObjectPath)=session.get_property("User").map_err(lookup_error)?;
+    Ok(GraphicalSession { id:session.get_property("Id").map_err(lookup_error)?,uid,
+        remote:session.get_property("Remote").map_err(lookup_error)?,kind:session.get_property("Type").map_err(lookup_error)?,
+        class:session.get_property("Class").map_err(lookup_error)?,state:session.get_property("State").map_err(lookup_error)?,
+        active:session.get_property("Active").map_err(lookup_error)? })
+}
+fn validate_graphical(session:&GraphicalSession,requested_id:&str,uid:u32)->Result<(),ErrorCode>{
+    if session.id!=requested_id || session.uid!=uid {return Err(ErrorCode::PermissionDenied);}
+    if session.remote || !session.active || session.class!="user" || session.state!="active" || !matches!(session.kind.as_str(),"x11"|"wayland") {return Err(ErrorCode::PermissionDenied);}
+    Ok(())
+}
+pub fn observe_graphical_session(id:&str,uid:u32)->Result<GraphicalSession,ErrorCode>{
+    if id.is_empty() || id.len()>128 || !id.bytes().all(|c|c.is_ascii_alphanumeric()||c==b'_'||c==b'-'){return Err(ErrorCode::InvalidArgument);}
+    let conn=zbus::blocking::connection::Builder::address("unix:path=/run/dbus/system_bus_socket").map_err(|_|ErrorCode::UnsupportedCapability)?
+        .method_timeout(Duration::from_millis(500)).build().map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let bus=Proxy::new(&conn,"org.freedesktop.DBus","/org/freedesktop/DBus","org.freedesktop.DBus").map_err(lookup_error)?;
+    let owner:String=bus.call("GetNameOwner",&("org.freedesktop.login1",)).map_err(lookup_error)?;
+    let credentials:zbus::fdo::ConnectionCredentials=bus.call("GetConnectionCredentials",&(owner.as_str(),)).map_err(lookup_error)?;
+    let pid=credentials.process_id().ok_or(ErrorCode::PermissionDenied)?;
+    if credentials.unix_user_id()!=Some(0){return Err(ErrorCode::PermissionDenied);}
+    // Root-owned logind is pinned to its authenticated unique bus connection.
+    // ProtectProc=invisible deliberately hides root /proc from this user broker.
+    // Do not weaken that isolation to observe a privileged provider.
+    let manager=Proxy::new(&conn,owner.as_str(),"/org/freedesktop/login1","org.freedesktop.login1.Manager").map_err(lookup_error)?;
+    let path:OwnedObjectPath=manager.call("GetSession",&(id,)).map_err(lookup_error)?;
+    let session=Proxy::new(&conn,owner.as_str(),path.as_str(),"org.freedesktop.login1.Session").map_err(lookup_error)?;
+    let before=graphical_snapshot(&session)?;validate_graphical(&before,id,uid)?;
+    let after:zbus::fdo::ConnectionCredentials=bus.call("GetConnectionCredentials",&(owner.as_str(),)).map_err(lookup_error)?;
+    if graphical_snapshot(&session)?!=before || after.unix_user_id()!=Some(0) || after.process_id()!=Some(pid) || bus.call::<_,_,String>("GetNameOwner",&("org.freedesktop.login1",)).map_err(lookup_error)?!=owner {return Err(ErrorCode::TargetChanged);}
+    Ok(before)
+}
+#[cfg(test)] mod graphical_tests {
+    use super::*;
+    #[test] fn explicit_selected_graphical_identity_never_uses_a_guessed_desktop(){
+        let s=GraphicalSession{id:"fixture-selected".into(),uid:1000,remote:false,kind:"wayland".into(),class:"user".into(),state:"active".into(),active:true};
+        assert_eq!(validate_graphical(&s,"fixture-selected",1000),Ok(()));
+        for changed in [GraphicalSession{uid:1001,..s.clone()},GraphicalSession{remote:true,..s.clone()},GraphicalSession{active:false,..s.clone()},GraphicalSession{kind:"tty".into(),..s.clone()},GraphicalSession{class:"manager".into(),..s.clone()},GraphicalSession{state:"closing".into(),..s.clone()}] {assert_eq!(validate_graphical(&changed,"fixture-selected",1000),Err(ErrorCode::PermissionDenied));}
+        assert_eq!(validate_graphical(&s,"newest",1000),Err(ErrorCode::PermissionDenied));
+    }
 }

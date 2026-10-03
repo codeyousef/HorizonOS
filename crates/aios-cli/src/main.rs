@@ -2,6 +2,14 @@ use aios_protocol::contracts::{Action, parse_tool_call};
 
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if let [command, operation, session, flag] = args.as_slice() {
+        if command == "ui" && operation == "select-session" && flag == "--json" {
+            match aios_session::bus::Client::connect_user_bus().and_then(|client| client.select_ui_session(session)) {
+                Ok(value) => { println!("{value}"); return; },
+                Err(code) => api_error(code),
+            }
+        }
+    }
     if args == ["status", "--json"] {
         let result = aios_session::bus::Client::connect_user_bus().and_then(|client| client.capabilities());
         match result {
@@ -59,7 +67,7 @@ fn main() {
         if let Err(error) = result { eprintln!("aiosctl: {error}"); std::process::exit(1); }
         return;
     }
-    eprintln!("Usage: aiosctl status --json | ask TEXT --json | system info --json | inspect service UNIT --json [--socket PRIVATE_PATH]");
+    eprintln!("Usage: aiosctl status --json | ask TEXT --json | ui select-session SESSION --json | system info --json | inspect service UNIT --json [--socket PRIVATE_PATH]");
     std::process::exit(2);
 }
 
