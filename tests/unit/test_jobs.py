@@ -1,5 +1,6 @@
 """Host fixtures for registered job guards; no guest builds execute here."""
 import copy
+import json
 import importlib.util
 import os
 from pathlib import Path
@@ -31,6 +32,29 @@ class JobTests(unittest.TestCase):
         self.config = VMConfig.from_data(self.root, EXAMPLE)
         self.request = {"schema_version": 1, "operation": "start", "identity": IDENTITY, "job_id": JOB,
                         "kind": "test-unit", "package": None, "source_root": "/home/dev/aios-releases", "snapshot_digest": "a" * 64}
+
+    def test_host_boundary_inventory_rejects_codex_and_never_returns_arguments(self):
+        sys.modules["layout_audit"] = __import__("test_layout_audit").audit
+        spec = importlib.util.spec_from_file_location("host_boundary_fixture", ROOT / "tools/guest/host_boundary_smoke.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        mountinfo = "1 0 0:1 / /proc rw,nosuid - proc proc rw\n"
+        self.assertEqual(module.mount_inventory(mountinfo)["filesystem_types"], ["proc"])
+        for hostile in (mountinfo.replace("rw,nosuid", "rw,hidepid=2"), mountinfo + "2 0 0:2 / /shared rw - virtiofs shared rw\n"):
+            with self.assertRaises(ValueError):
+                module.mount_inventory(hostile)
+        process = self.root / "123"
+        process.mkdir()
+        (process / "comm").write_text("python3\n")
+        (process / "cmdline").write_bytes(b"python3\0secret-fixture-argument\0")
+        report = module.inventory(self.root)
+        self.assertEqual(report["checked_processes"], 1)
+        self.assertNotIn("secret-fixture-argument", json.dumps(report))
+        for name, arguments in (("codex", b"renamed\0"), ("node", b"node\0/lib/node_modules/@openai/codex/bin/codex.js\0")):
+            (process / "comm").write_text(name)
+            (process / "cmdline").write_bytes(arguments)
+            with self.assertRaises(ValueError):
+                module.inventory(self.root)
 
     def test_target_mismatch_precedes_job_or_source_mutation(self):
         with patch.object(controller, "job_root") as root, patch.object(controller, "validate_start") as validate:

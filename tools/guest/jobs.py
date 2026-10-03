@@ -18,7 +18,7 @@ import uuid
 import snapshot as source
 
 PACKAGES = ("aios-core", "aios-model", "aios-desktop", "aios-cli", "aios-dev-tools")
-KINDS = {"resolve-lock", "build-packages", "build-system", "build-desktop-test", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "upstream-compatibility-smoke", "model-profile-low-smoke", "model-profile-high-smoke", "model-inference-smoke", "model-service-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "supervision-probe"}
+KINDS = {"resolve-lock", "build-packages", "build-system", "build-desktop-test", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "upstream-compatibility-smoke", "host-boundary-smoke", "model-profile-low-smoke", "model-profile-high-smoke", "model-inference-smoke", "model-service-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "supervision-probe"}
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 LIMIT = 4 * 1024**2
 cancelled = False
@@ -125,6 +125,8 @@ def commands(kind, release, package=None, job_directory=None):
     if kind in {"model-profile-low-smoke", "model-profile-high-smoke"}:
         profile = "low" if kind == "model-profile-low-smoke" else "high"
         return [["nix", "develop", *locked, reference + "#model-conversion", "--command", "python3", str(release / "tools/guest/model_profiles_smoke.py"), profile]]
+    if kind == "host-boundary-smoke":
+        return [["python3", str(release / "tools/guest/host_boundary_smoke.py")]]
     if kind == "model-inference-smoke":
         return [["python3",str(release / "tools/guest/model_inference_smoke.py")]]
     if kind == "broker-preparation-smoke":

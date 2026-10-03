@@ -8,7 +8,7 @@ import base64
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shlex
 import stat
@@ -132,6 +132,37 @@ def ssh_report(contents):
     return effective
 
 
+def credential_boundary(passwd, root=Path("/"), *, strict=False):
+    """Inspect known host credential locations, never their contents."""
+    homes = set()
+    for line in passwd.splitlines():
+        fields = line.split(":")
+        require(len(fields) == 7, "boundary-passwd-format")
+        home = PurePosixPath(fields[5])
+        require(home.is_absolute() and ".." not in home.parts and str(home) == fields[5], "boundary-home-path")
+        homes.add(str(home))
+    require(len(homes) <= 256, "boundary-home-count")
+    markers = (".codex", ".agents", ".git-credentials", ".netrc", ".aws/credentials", ".config/gh/hosts.yml",
+               ".ssh/id_rsa", ".ssh/id_ed25519", ".ssh/id_ecdsa", ".ssh/dev_ed25519", ".local/ssh")
+    checked, unknown = 0, set()
+    for home in sorted(homes):
+        for marker in markers:
+            path = root / home.lstrip("/") / marker
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                checked += 1
+            except PermissionError:
+                unknown.add(home)
+            else:
+                raise Denied("host-credential-location-present", {"home": home, "marker": marker})
+    require(not strict or not unknown, "host-credential-locations-unreadable")
+    return {"home_roots": sorted(homes), "marker_names": list(markers), "absent_locations_checked": checked,
+            "unreadable_home_roots": sorted(unknown), "known_locations_absent": not unknown,
+            "credential_contents_read": False,
+            "scope": "Known credential locations in every configured account home; public seed/source provenance excludes credential transfer."}
+
+
 def audit(guest_uuid, installation_uuid, fingerprint):
     require(os.geteuid() == 0, "root-auditor-required")
     require(str(uuid.UUID(guest_uuid)) == guest_uuid and str(uuid.UUID(installation_uuid)) == installation_uuid and re.fullmatch(r"SHA256:[A-Za-z0-9/+]{43}", fingerprint), "expected-target-format")
@@ -145,6 +176,7 @@ def audit(guest_uuid, installation_uuid, fingerprint):
     require(key_fingerprint(text("/etc/ssh/ssh_host_ed25519_key.pub")) == fingerprint, "pinned-installed-host-key")
     metadata = {name: credential_metadata(path, secret=name == "tester_secret") for name, path in (("tester_secret", "/root/.aios-tester-secret"), ("shadow", "/etc/shadow"), ("host_private_key", "/etc/ssh/ssh_host_ed25519_key"))}
     require(metadata["host_private_key"]["mode"] == "0o600", "host-private-key-permissions")
+    boundary = credential_boundary(text("/etc/passwd"), strict=True)
     accounts = account_report(text("/etc/passwd"), text("/etc/group"), text("/etc/shadow"))
     mounts = mount_report(text("/etc/fstab"), installation_uuid)
     nix = nix_report(text("/etc/nix/nix.conf"))
@@ -152,7 +184,7 @@ def audit(guest_uuid, installation_uuid, fingerprint):
     require(completed.returncode == 0 and len(completed.stdout) <= 262144, "sshd-effective-check")
     effective = ssh_report(completed.stdout)
     return {"schema_version": 1, "guest_uuid": guest_uuid, "installation_uuid": installation_uuid, "guest_role": "development", "host_key_fingerprint": fingerprint,
-            "accounts": accounts, "credential_metadata": metadata, "fstab": mounts, "nix": nix, "sshd": effective,
+            "accounts": accounts, "host_credential_boundary": boundary, "credential_metadata": metadata, "fstab": mounts, "nix": nix, "sshd": effective,
             "assertions": {"installed_identity": True, "dev_not_wheel_or_nix_trusted": True, "tester_wheel_with_guest_only_secret": True, "service_accounts_nologin": True, "required_btrfs_subvolumes": True, "efi_private_mask": True, "no_swap_partition_or_fstab_entry": True},
             "limitations": ["Offline read-only bootstrap layout/account audit; not running product services, production configuration or final OS acceptance."]}
 

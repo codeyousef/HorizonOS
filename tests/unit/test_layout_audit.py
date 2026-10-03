@@ -35,6 +35,28 @@ class LayoutTests(unittest.TestCase):
             shadow += f"{name}:!:1:0:99999:7:::\n"
         return passwd, groups, shadow
 
+    def test_known_host_credential_markers_are_denied_without_reading_contents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            passwd = self.accounts()[0]
+            clear = audit.credential_boundary(passwd, root, strict=True)
+            self.assertTrue(clear["known_locations_absent"])
+            marker = root / "root/.codex"
+            marker.mkdir(parents=True)
+            (marker / "auth.json").write_text("sensitive fixture must never be returned")
+            with self.assertRaises(audit.Denied) as error:
+                audit.credential_boundary(passwd, root, strict=True)
+            self.assertEqual(str(error.exception), "host-credential-location-present")
+            self.assertNotIn("sensitive fixture", json.dumps(error.exception.evidence))
+
+    def test_unreadable_credential_roots_are_not_absence(self):
+        with patch.object(Path, "lstat", side_effect=PermissionError):
+            report = audit.credential_boundary(self.accounts()[0])
+            self.assertFalse(report["known_locations_absent"])
+            self.assertIn("/root", report["unreadable_home_roots"])
+            with self.assertRaises(audit.Denied):
+                audit.credential_boundary(self.accounts()[0], strict=True)
+
     def test_account_evidence_excludes_actual_password_hash(self):
         result = audit.account_report(*self.accounts())
         self.assertEqual(result["tester"]["password_state"], "hashed")
