@@ -94,6 +94,10 @@
       packages.${system} = { aios-model-artifact = modelArtifact; aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system}.host-unit = devTools;
       lib.stateContract = stateContract;
+      lib.catalogPackages = builtins.listToAttrs (map (entry: {
+        name = entry.id;
+        value = pkgs.lib.getAttrFromPath entry.attribute pkgs;
+      }) stateContract.catalog.content.packages);
       lib.managedState = import ./tests/nix/managed.nix { inherit nixpkgs stateContract; };
       lib.developmentBoundary = import ./tests/nix/development.nix { inherit nixpkgs; };
       lib.upstreamCompatibility = import ./tests/nix/upstreams.nix {

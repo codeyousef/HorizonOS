@@ -23,10 +23,10 @@ def main():
     environment.update(LANG="C.UTF-8", NIX_USER_CONF_FILES="/dev/null", NIX_REMOTE="daemon")
     commands = []
 
-    def run(argv, payload=None, expected=0, timeout=180):
+    def run(argv, payload=None, expected=0, timeout=180, extra_env=None):
         if source.identity() != identity:
             raise RuntimeError("guest identity changed before managed-state check")
-        result = subprocess.run(argv, input=payload, capture_output=True, env=environment, timeout=timeout)
+        result = subprocess.run(argv, input=payload, capture_output=True, env={**environment, **(extra_env or {})}, timeout=timeout)
         commands.append({"argv": argv, "upstream_exit": result.returncode,
                          "stdout": result.stdout.decode(errors="replace"), "stderr": result.stderr.decode(errors="replace")})
         if result.returncode != expected:
@@ -249,6 +249,8 @@ def main():
         finally:
             for parent, _, _ in os.walk(working):
                 Path(parent).chmod(0o700)
+    import catalog_capability_smoke
+    capabilities = catalog_capability_smoke.qualify(reference, locked, pure, contract["catalog"], run, environment.get("TMPDIR"))
     closure = json.loads(run(["nix","path-info","--json","--recursive",package]))
     if source.identity() != identity:
         raise RuntimeError("guest identity changed after managed-state checks")
@@ -256,10 +258,12 @@ def main():
         "target_identity":identity,"catalog":contract["catalog"],"module_cases":cases,"checks":checks,"previews":previews,"machine_candidate_checks":machine_checks,"template_package":template_evidence,
         "package":package,"executable_sha256":hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
         "runtime_closure":closure,"commands":commands,"root_candidate_registration_verified":False,
-        "system_activation_verified":False,"application_capabilities_verified":False,"postgresql_readiness_verified":False,
+        "system_activation_verified":False,"application_capabilities_verified":True,"postgresql_fixture_readiness_verified":True,
+        "catalog_capabilities":capabilities,"postgresql_system_service_readiness_verified":False,
         "power_policy_applied_verified":False,"limitations":["NixOS machine/manifest and Rust permission/data tests are fixtures.",
         "Catalog metadata and checker build/run are actual pinned Nix evaluation and execution.",
-        "Root ownership, candidate registration, runtime power application, database readiness and desktop capabilities remain to qualify."]}, sort_keys=True))
+        "Application executable/version/desktop entries and disposable PostgreSQL readiness/query/teardown are actual runtime checks.",
+        "Graphical workflows, root registration, system PostgreSQL activation and runtime power application are separate verification."]}, sort_keys=True))
 
 
 if __name__ == "__main__":

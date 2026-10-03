@@ -82,7 +82,14 @@ python3 tools/devctl.py test --suite integration --provider managed-state --deta
 
 The registered provider generates the actual locked catalog, builds/runs the checker,
 compares Rust/Nix canonical bytes, evaluates NixOS package/PostgreSQL settings, and
-checks input/transport/stateVersion/unfree denials. Machine manifests and Rust grants/
-data observations are fixtures. No root registration, activation, PostgreSQL readiness,
-desktop application capability or effective power-policy application is established.
-The module is not enabled in the running guest or development system image yet.
+checks input/transport/stateVersion/unfree denials. It realizes all four reviewed
+packages, checks actual application versions and desktop launch entries, and starts
+a disposable nonroot PostgreSQL cluster with peer authentication and no TCP listener.
+The fixed readiness probe, an actual SQL query, stopped-server denial and teardown
+are checked under the fixture owner's identity. A failed stop preserves the private
+cluster for recovery.
+
+Machine manifests and Rust grants/data observations are fixtures. These checks do
+not establish graphical application workflows, a system PostgreSQL service under
+the postgres account, root registration, activation or applied power policy. The
+running machine's managed manifest and existing databases are not changed.
