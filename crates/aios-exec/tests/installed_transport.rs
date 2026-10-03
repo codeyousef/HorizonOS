@@ -10,6 +10,10 @@ fn denied<T: std::fmt::Debug>(result: zbus::Result<T>, code: &str) {
     let zbus::Error::MethodError(name, _, _) = result.unwrap_err() else { panic!("expected stable method denial") };
     assert_eq!(name.as_str(), format!("org.aios.Error.{code}"));
 }
+fn bus_denied<T: std::fmt::Debug>(result: zbus::Result<T>) {
+    let zbus::Error::MethodError(name, _, _) = result.unwrap_err() else { panic!("expected native policy denial") };
+    assert_eq!(name.as_str(), "org.freedesktop.DBus.Error.AccessDenied");
+}
 fn action(id: &str, arguments: Value) -> String {
     json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),
         "operation":{"kind":"invoke","tool_call":{"kind":"tool_call","action_id":id,"arguments":arguments}}}).to_string()
@@ -29,6 +33,18 @@ fn system_and_packages(connection: &Connection, executor_owner: &str) {
         for method in methods { assert!(surface.contains(&format!("<method name=\"{method}\">"))); }
         let proxy=Proxy::new(connection,"org.aios.System1",path,interface).unwrap();
         assert_eq!(value(&proxy,"GetCapabilities",())["data"]["native_caller_verified"],true);
+        // Policy destinations match the owning connection, not only the
+        // addressed name. Exact reviewed paths/members must work through all
+        // aliases, while another interface/path/member cannot gain access.
+        for destination in ["org.aios.System1", "org.aios.Executor1", executor_owner] {
+            let alias=Proxy::new(connection,destination,path,interface).unwrap();
+            assert_eq!(value(&alias,"GetCapabilities",())["data"]["native_caller_verified"],true);
+            bus_denied(alias.call::<_,_,String>("UnreviewedMethod",&()));
+            let wrong_path=Proxy::new(connection,destination,"/org/aios/Unreviewed",interface).unwrap();
+            bus_denied(wrong_path.call::<_,_,String>("GetCapabilities",&()));
+            let wrong_interface=Proxy::new(connection,destination,path,"org.aios.Unreviewed1").unwrap();
+            bus_denied(wrong_interface.call::<_,_,String>("GetCapabilities",&()));
+        }
         denied(proxy.call::<_,_,String>("Info",&(" ".repeat(aios_protocol::MAX_TASK_BYTES+1),)),"RESOURCE_EXHAUSTED");
     }
     let system=Proxy::new(connection,"org.aios.System1","/org/aios/System1","org.aios.System1").unwrap();
