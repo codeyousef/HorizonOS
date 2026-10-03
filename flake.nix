@@ -69,12 +69,14 @@
       });
       model = (productPackage "aios-model" "aios-model" "aios-modeld").overrideAttrs (old: {
         AIOS_LLAMA_BRIDGE = "${llamaBridge}";
+        AIOS_LLAMA_SOURCE = "${pkgs.llama-cpp.src}";
         postInstall = (old.postInstall or "") + ''
           install -Dm644 ${./nix/packages/aios-model.socket} "$out/share/systemd/system/aios-model.socket"
           install -Dm644 ${./nix/packages/aios-model.service} "$out/share/systemd/system/aios-model.service"
           substituteInPlace "$out/share/systemd/system/aios-model.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-modeld"
         '';
       });
+      modelArtifact = pkgs.callPackage ./nix/packages/model-artifact.nix { };
     in {
       nixosConfigurations.aios-dev = nixpkgs.lib.nixosSystem {
         inherit system;
@@ -89,7 +91,7 @@
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios;
       nixosModules.production = import ./nix/modules/aios/production.nix;
-      packages.${system} = { aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
+      packages.${system} = { aios-model-artifact = modelArtifact; aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system}.host-unit = devTools;
       lib.stateContract = stateContract;
       lib.managedState = import ./tests/nix/managed.nix { inherit nixpkgs stateContract; };
@@ -104,6 +106,7 @@
       default = pkgs.mkShell {
         packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy pkg-config sqlite ];
         AIOS_LLAMA_BRIDGE = "${llamaBridge}";
+        AIOS_LLAMA_SOURCE = "${pkgs.llama-cpp.src}";
       };
       model-conversion = pkgs.mkShell {
         packages = [ conversionPython llamaBridge ];

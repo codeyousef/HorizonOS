@@ -34,7 +34,7 @@ fn result(code:i32) -> Result<(),ErrorCode> {
 }
 fn hash(bytes:&[u8]) -> String { format!("{:x}",Sha256::digest(bytes)) }
 fn valid_hash(value:&str)->bool { value.len()==64 && value.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) }
-#[derive(Deserialize)]
+#[derive(Deserialize,PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Artifact { pub filename:String,pub bytes:u64,pub sha256:String }
 #[derive(Deserialize)]
@@ -43,6 +43,64 @@ struct Lock {
     schema_version:u32,profile:String,availability:String,source_lock_sha256:Option<String>,
     runtime_revision:String,artifact:Option<Artifact>,chat_template_sha256:String,
     converter_sha256:Option<String>,quantizer_sha256:Option<String>,quality_qualified:bool,performance_qualified:bool,
+}
+#[derive(Deserialize,PartialEq)]
+#[serde(deny_unknown_fields)]
+struct SourceFile { name:String,bytes:u64,sha256:String }
+#[derive(Deserialize,PartialEq)]
+#[serde(deny_unknown_fields)]
+struct RuntimeSource { repository:String,revision:String,tag:String,source_nar_hash:String,license:String }
+#[derive(Deserialize,PartialEq)]
+#[serde(deny_unknown_fields)]
+struct SourceLock {
+    schema_version:u32,repository:String,revision:String,license:String,files:Vec<SourceFile>,
+    runtime:RuntimeSource,quantization:String,context_limit:u32,required_cpu_features:Vec<String>,inference_backend:String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConversionReceipt {
+    schema_version:u32,profile:String,evidence_kind:String,source:SourceLock,artifact:Artifact,
+    runtime_path:String,converter_sha256:String,quantizer_sha256:String,chat_template_sha256:String,
+    versions:String,model_directory:String,quality_qualified:bool,performance_qualified:bool,
+}
+fn verify_receipt(bytes:&[u8],directory:&Path,source:&SourceLock,manifest:&Lock)->Result<(),ErrorCode> {
+    let receipt:ConversionReceipt=serde_json::from_slice(bytes).map_err(|_|ErrorCode::InvalidArgument)?;
+    if receipt.schema_version!=1 || receipt.profile!="normal" || receipt.source!=*source ||
+        receipt.evidence_kind!="real-official-weight-conversion" ||
+        Some(&receipt.artifact)!=manifest.artifact.as_ref() ||
+        Some(receipt.converter_sha256.as_str())!=manifest.converter_sha256.as_deref() ||
+        Some(receipt.quantizer_sha256.as_str())!=manifest.quantizer_sha256.as_deref() ||
+        receipt.chat_template_sha256!=manifest.chat_template_sha256 ||
+        Some(receipt.runtime_path.as_str())!=Path::new(env!("AIOS_PINNED_QUANTIZER")).parent().and_then(Path::parent).and_then(Path::to_str) ||
+        Some(receipt.model_directory.as_str())!=directory.to_str() || receipt.versions.is_empty() || receipt.versions.len()>256 ||
+        receipt.quality_qualified!=manifest.quality_qualified || receipt.performance_qualified!=manifest.performance_qualified {
+        return Err(ErrorCode::TargetChanged);
+    }
+    Ok(())
+}
+fn source_lock(manifest:&Lock)->Result<SourceLock,ErrorCode> {
+    let source:SourceLock=serde_json::from_slice(include_bytes!("../../../models/source-lock.json")).map_err(|_|ErrorCode::UnsupportedSchema)?;
+    if source.schema_version!=1 || source.repository!="Qwen/Qwen3.5-2B" || source.revision.len()!=40 ||
+        source.license!="Apache-2.0" || source.runtime.repository!="ggml-org/llama.cpp" ||
+        source.runtime.revision!=manifest.runtime_revision || source.runtime.tag!="b9190" ||
+        source.runtime.source_nar_hash!="sha256-zajArFzrLUUVsfG1xBttwzwaT9QNlKzDbvSxvof+FMQ=" ||
+        source.runtime.license!="MIT" || source.quantization!="Q4_K_M" || source.context_limit!=8192 ||
+        source.required_cpu_features!=["x86_64"] || source.inference_backend!="cpu" || source.files.len()!=9 {
+        return Err(ErrorCode::TargetChanged);
+    }
+    let mut names=std::collections::BTreeSet::new();
+    for file in &source.files {
+        if Path::new(&file.name).file_name().and_then(|s|s.to_str())!=Some(file.name.as_str()) ||
+            file.bytes==0 || !valid_hash(&file.sha256) || !names.insert(file.name.clone()) {return Err(ErrorCode::TargetChanged);}
+    }
+    for required in ["LICENSE","chat_template.jinja","tokenizer.json","tokenizer_config.json","vocab.json","merges.txt",
+                     "config.json","model.safetensors.index.json","model.safetensors-00001-of-00001.safetensors"] {
+        if !names.contains(&required.to_owned()) {return Err(ErrorCode::TargetChanged);}
+    }
+    if source.files.iter().find(|f|f.name=="chat_template.jinja").map(|f|f.sha256.as_str())!=Some(manifest.chat_template_sha256.as_str()) {
+        return Err(ErrorCode::TargetChanged);
+    }
+    Ok(source)
 }
 fn lock() -> Result<Lock,ErrorCode> {
     let lock:Lock=serde_json::from_str(include_str!("../../../models/lock.json")).map_err(|_|ErrorCode::UnsupportedSchema)?;
@@ -70,7 +128,60 @@ impl Cancellation {
 }
 /// Production accepts only root-owned immutable store files. Qualification
 /// permits an owned read-only converted artifact in the development guest.
+#[derive(Clone,Copy)]
 pub enum ArtifactTrust { Production, Qualification }
+fn metadata_bytes(path:&Path,maximum:u64,trust:ArtifactTrust,readonly:bool)->Result<Vec<u8>,ErrorCode> {
+    if maximum>32*1024*1024 || path.parent().ok_or(ErrorCode::InvalidArgument)?.canonicalize().map_err(|_|ErrorCode::TargetNotFound)?!=path.parent().unwrap() {
+        return Err(ErrorCode::PermissionDenied);
+    }
+    let file=OpenOptions::new().read(true).custom_flags(nix::libc::O_NOFOLLOW|nix::libc::O_NONBLOCK).open(path).map_err(|_|ErrorCode::TargetNotFound)?;
+    let before=file.metadata().map_err(|_|ErrorCode::TargetChanged)?;
+    if !before.is_file() || before.len()>maximum || before.nlink()==0 || (readonly && before.mode()&0o222!=0) {return Err(ErrorCode::PermissionDenied);}
+    match trust {
+        ArtifactTrust::Production if before.uid()!=0 || !path.starts_with("/nix/store")=>return Err(ErrorCode::PermissionDenied),
+        ArtifactTrust::Qualification if before.uid()!=nix::unistd::geteuid().as_raw() || before.nlink()!=1=>return Err(ErrorCode::PermissionDenied),
+        _=>{},
+    }
+    let mut bytes=Vec::new();(&file).take(maximum+1).read_to_end(&mut bytes).map_err(|_|ErrorCode::TargetChanged)?;
+    let after=file.metadata().map_err(|_|ErrorCode::TargetChanged)?;
+    if bytes.len() as u64!=before.len() || (before.dev(),before.ino(),before.len(),before.ctime(),before.ctime_nsec())!=
+        (after.dev(),after.ino(),after.len(),after.ctime(),after.ctime_nsec()) {return Err(ErrorCode::TargetChanged);}
+    Ok(bytes)
+}
+fn verify_metadata(path:&Path,bytes:u64,sha256:&str,trust:ArtifactTrust)->Result<(),ErrorCode> {
+    let content=metadata_bytes(path,bytes,trust,true)?;
+    if content.len() as u64!=bytes || hash(&content)!=sha256 {return Err(ErrorCode::TargetChanged);}
+    Ok(())
+}
+fn verify_bundle(directory:&Path,trust:ArtifactTrust,manifest:&Lock)->Result<(),ErrorCode> {
+    let source=source_lock(manifest)?;
+    match trust {
+        ArtifactTrust::Production=>{
+            for (name,expected) in [("lock.json",include_bytes!("../../../models/lock.json").as_slice()),
+                                    ("source-lock.json",include_bytes!("../../../models/source-lock.json").as_slice())] {
+                verify_metadata(&directory.join(name),expected.len() as u64,&hash(expected),trust)?;
+            }
+        },
+        ArtifactTrust::Qualification=>{
+            // Development conversion receipts are not production authority.
+            // Match every provenance binding against the embedded reviewed pins.
+            let bytes=metadata_bytes(&directory.join("conversion.json"),65536,trust,false)?;
+            verify_receipt(&bytes,directory,&source,manifest)?;
+        },
+    }
+    // Original weight provenance is bound by the reviewed source manifest and
+    // exact converted GGUF digest. Tokenizer/config/template/license bytes are
+    // additionally checked as separate metadata, before any native model load.
+    for file in source.files.iter().filter(|file|file.bytes<32*1024*1024) {
+        verify_metadata(&directory.join("source").join(&file.name),file.bytes,&file.sha256,trust)?;
+    }
+    for (path,expected) in [(env!("AIOS_PINNED_CONVERTER"),manifest.converter_sha256.as_deref()),
+                            (env!("AIOS_PINNED_QUANTIZER"),manifest.quantizer_sha256.as_deref())] {
+        let content=metadata_bytes(Path::new(path),32*1024*1024,ArtifactTrust::Production,true)?;
+        if Some(hash(&content).as_str())!=expected {return Err(ErrorCode::TargetChanged);}
+    }
+    Ok(())
+}
 pub struct Model { value:NonNull<c_void>,_descriptor:File }
 impl Drop for Model { fn drop(&mut self) { unsafe { ffi::aios_model_free(self.value.as_ptr()); } } }
 impl Model {
@@ -79,7 +190,7 @@ impl Model {
     }
     pub fn load_cancelable(directory:&Path,trust:ArtifactTrust,cancel:Option<&Cancellation>) -> Result<Self,ErrorCode> {
         if cancel.is_some_and(Cancellation::is_cancelled) { return Err(ErrorCode::Cancelled); }
-        let lock=lock()?;let artifact=lock.artifact.ok_or(ErrorCode::ModelUnavailable)?;
+        let lock=lock()?;let artifact=lock.artifact.as_ref().ok_or(ErrorCode::ModelUnavailable)?;
         if !valid_hash(&artifact.sha256) || artifact.bytes<1024 || artifact.bytes>4*1024*1024*1024 ||
             Path::new(&artifact.filename).file_name().and_then(|v|v.to_str())!=Some(artifact.filename.as_str()) ||
             !directory.is_absolute() || directory.canonicalize().map_err(|_|ErrorCode::TargetNotFound)?!=directory {
@@ -102,6 +213,7 @@ impl Model {
         buffer.fill(0);
         if format!("{:x}",digest.finalize())!=artifact.sha256 { return Err(ErrorCode::TargetChanged); }
         file.seek(SeekFrom::Start(0)).map_err(|_|ErrorCode::TargetChanged)?;
+        verify_bundle(directory,trust,&lock)?;
         let revision=unsafe { CStr::from_ptr(ffi::aios_runtime_revision()) }.to_str().map_err(|_|ErrorCode::TargetChanged)?;
         if unsafe { ffi::aios_abi_version() }!=1 || revision!=lock.runtime_revision { return Err(ErrorCode::TargetChanged); }
         result(unsafe { ffi::aios_cpu_backend_check() })?;
@@ -179,7 +291,55 @@ mod tests {
     #[test] fn pinned_manifest_is_complete_and_hashes_are_strict() {
         let manifest=lock().expect("the qualification artifact must have a complete pinned manifest");
         assert!(manifest.artifact.is_some());
+        assert_eq!(source_lock(&manifest).unwrap().files.len(),9);
         assert!(!valid_hash("not-a-hash"));assert!(!valid_hash(&"A".repeat(64)));
+    }
+    #[test] fn conversion_provenance_rejects_altered_hashes_and_ambiguous_json() {
+        let manifest=lock().unwrap();let source=source_lock(&manifest).unwrap();
+        let directory=Path::new("/development/fixture");
+        let artifact=manifest.artifact.as_ref().unwrap();
+        let value=serde_json::json!({"schema_version":1,"profile":"normal","evidence_kind":"real-official-weight-conversion",
+            "source":serde_json::from_slice::<serde_json::Value>(include_bytes!("../../../models/source-lock.json")).unwrap(),
+            "artifact":{"filename":artifact.filename,"bytes":artifact.bytes,"sha256":artifact.sha256},
+            "runtime_path":Path::new(env!("AIOS_PINNED_QUANTIZER")).parent().unwrap().parent().unwrap(),
+            "converter_sha256":manifest.converter_sha256,"quantizer_sha256":manifest.quantizer_sha256,
+            "chat_template_sha256":manifest.chat_template_sha256,"versions":"fixture versions",
+            "model_directory":directory,"quality_qualified":false,"performance_qualified":false});
+        assert_eq!(verify_receipt(&serde_json::to_vec(&value).unwrap(),directory,&source,&manifest),Ok(()));
+        for key in ["converter_sha256","quantizer_sha256","chat_template_sha256","runtime_path","model_directory"] {
+            let mut changed=value.clone();changed[key]=serde_json::json!("altered");
+            assert_eq!(verify_receipt(&serde_json::to_vec(&changed).unwrap(),directory,&source,&manifest),Err(ErrorCode::TargetChanged));
+        }
+        for i in 0..9 {
+            let mut changed=value.clone();changed["source"]["files"][i]["sha256"]=serde_json::json!("0".repeat(64));
+            assert_eq!(verify_receipt(&serde_json::to_vec(&changed).unwrap(),directory,&source,&manifest),Err(ErrorCode::TargetChanged));
+        }
+        let mut changed=value.clone();changed["approved"]=serde_json::json!(true);
+        assert_eq!(verify_receipt(&serde_json::to_vec(&changed).unwrap(),directory,&source,&manifest),Err(ErrorCode::InvalidArgument));
+        let duplicate=value.to_string().replace("\"schema_version\":1","\"schema_version\":1,\"schema_version\":1");
+        assert_eq!(verify_receipt(duplicate.as_bytes(),directory,&source,&manifest),Err(ErrorCode::InvalidArgument));
+    }
+    #[test] fn metadata_is_bounded_readonly_and_descriptor_verified() {
+        use std::os::unix::fs::{symlink,PermissionsExt};
+        let directory=std::env::temp_dir().join(format!("horizon-metadata-{}",uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();let path=directory.join("LICENSE");
+        std::fs::write(&path,b"fixture license").unwrap();
+        let expected=hash(b"fixture license");let trust=ArtifactTrust::Qualification;
+        assert_eq!(verify_metadata(&path,15,&expected,trust),Err(ErrorCode::PermissionDenied));
+        std::fs::set_permissions(&path,std::fs::Permissions::from_mode(0o444)).unwrap();
+        assert_eq!(verify_metadata(&path,15,&expected,trust),Ok(()));
+        assert_eq!(verify_metadata(&path,15,&"0".repeat(64),trust),Err(ErrorCode::TargetChanged));
+        assert_eq!(verify_metadata(&path,14,&expected,trust),Err(ErrorCode::PermissionDenied));
+        std::fs::hard_link(&path,directory.join("alias")).unwrap();
+        assert_eq!(verify_metadata(&path,15,&expected,trust),Err(ErrorCode::PermissionDenied));
+        std::fs::remove_file(directory.join("alias")).unwrap();std::fs::remove_file(&path).unwrap();
+        symlink("/etc/os-release",&path).unwrap();
+        assert_eq!(verify_metadata(&path,15,&expected,trust),Err(ErrorCode::TargetNotFound));
+        std::fs::remove_file(&path).unwrap();
+        let fifo=CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe {nix::libc::mkfifo(fifo.as_ptr(),0o400)},0);
+        assert_eq!(verify_metadata(&path,15,&expected,trust),Err(ErrorCode::PermissionDenied));
+        std::fs::remove_dir_all(directory).unwrap();
     }
     #[test] fn unsafe_and_corrupted_artifacts_are_rejected_before_native_loading() {
         use std::os::unix::fs::{symlink,PermissionsExt};

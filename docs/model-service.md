@@ -13,6 +13,25 @@ network/home/log/Nix-socket isolation, resource bounds and restart backoff.
 Image/module activation and effective production sandbox verification are
 separate deployment acceptance checks.
 
+`aios-model-artifact` is the independent normal-profile data package shared by
+desktop, headless and recovery image composition. It uses fixed hashes and
+`requireFile`, with no fetcher, inference-code dependency or conversion build.
+An administrator imports the reviewed GGUF and original metadata once with
+`nix-store --add-fixed sha256`; building code reuses that store data. The package
+contains read-only weights, exact source/conversion locks and original
+tokenizer/config/template/license metadata, without original training weights,
+Python or PyTorch. Select this package as the image's model directory and retain
+the previous package until the new artifact passes acceptance.
+
+Before native loading, Rust verifies the GGUF digest, complete source provenance,
+metadata bytes and the pinned converter and quantizer binaries. Production
+requires exact packaged manifests and root-owned immutable store files;
+development qualification requires a strictly parsed matching conversion
+receipt and owned read-only files. Original weight hashes bind the reviewed
+conversion to its exact output; inference does not need the original source
+weights. The embedded chat template is also checked after opening the model.
+Missing, changed, writable, linked or redirected development inputs fail closed.
+
 Connections use kernel peer credentials and the kernel's peer pidfd. Every read
 also validates message credentials, so an inherited or transferred descriptor
 cannot silently change the authenticated process. Unexpected ancillary file

@@ -11,7 +11,7 @@
   },
   "chat_template_sha256": "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80",
   "converter_sha256": "7594edd441c04ae7c7854917b603f1366ad13e17a558eb06c9920ccfc26d1eab",
-  "quantizer_sha256": "7c12e210a8bf124a8ed2a5a12e48442abfb8a019cdcadd0e4ed724622b17a849",
+  "quantizer_sha256": "dfd42f409868e8171aced19e9e13d42a71a273dc96675467a623d89ce8021dc8",
   "quality_qualified": false,
   "performance_qualified": false
 }
