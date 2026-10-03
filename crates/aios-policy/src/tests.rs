@@ -2,18 +2,18 @@
 use super::*;
 use aios_protocol::contracts::parse_tool_call;
 use serde_json::json;
-fn subject() -> Subject {
+pub(super) fn subject() -> Subject {
     Subject { uid: 1000, pid: 200, start_ticks: 42, boot_id: "ab31ff68-0c2d-4db1-8d6b-9a63189c6844".into(),
         session: Some(Session { id: "c1".into(), remote: true, kind: "tty".into() }),
         client: Client::Unix { connection_id: Uuid::new_v4().to_string() } }
 }
-fn policy(s: &Subject) -> Policy { Policy::new(s.boot_id.clone(), registry_revision()).unwrap() }
+pub(super) fn policy(s: &Subject) -> Policy { Policy::new(s.boot_id.clone(), registry_revision()).unwrap() }
 fn scope() -> Scope { Scope { actions: ["system.info".into()].into(), ..Default::default() } }
 fn grant(p: &Policy, s: &Subject, scope: Scope) -> ReadGrant {
     let intent = p.authenticated_user_intent(s.clone(), Uuid::new_v4().to_string(), "Tell me about my OS", Mode::Ask).unwrap();
     p.grant_reads(intent, scope, 100, 90_000).unwrap()
 }
-struct Resources(Vec<Resource>);
+pub(super) struct Resources(pub(super) Vec<Resource>);
 impl CurrentResources for Resources {
     fn resolve(&self, field: &str, kind: &str, handle: &str) -> Result<String> {
         self.0.iter().find(|r| r.field == field && r.kind == kind && r.handle == handle)

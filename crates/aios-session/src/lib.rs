@@ -2,6 +2,7 @@
 pub mod identity;
 pub mod display;
 pub mod accessibility;
+pub mod ui_read;
 pub mod bus;
 pub mod inference;
 use aios_protocol::{MAX_TASK_BYTES, read_frame_with_limit, write_frame, contracts::{Action, ErrorCode, ProviderError, parse_tool_call, canonical_json}};

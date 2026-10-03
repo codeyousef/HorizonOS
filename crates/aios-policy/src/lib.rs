@@ -5,8 +5,9 @@ use aios_protocol::{contracts::{Action, ErrorCode, canonical_json}, registry::{s
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::{collections::{BTreeMap, BTreeSet}, sync::atomic::{AtomicBool, Ordering}};
+use std::{collections::{BTreeMap, BTreeSet}, sync::{Arc,atomic::{AtomicBool, Ordering}}};
 use uuid::Uuid;
+pub mod consent;
 
 pub type Result<T> = std::result::Result<T, ErrorCode>;
 pub const MAX_EXPIRY_MS: u64 = 300_000;
@@ -22,7 +23,7 @@ pub fn digest<T: Serialize>(value: &T) -> Result<String> {
 }
 pub fn registry_revision() -> String {
     // Includes the policy implementation contract and the fixed generated registry.
-    format!("{:x}", Sha256::digest(format!("aios-policy-v1\n{}", aios_protocol::contracts::REGISTRY_SOURCE)))
+    format!("{:x}", Sha256::digest(format!("aios-policy-v2-native-read-consent\n{}", aios_protocol::contracts::REGISTRY_SOURCE)))
 }
 fn hash(value: &str) -> bool { value.len() == 64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) }
 fn uuid(value: &str) -> bool { Uuid::parse_str(value).is_ok_and(|v| !v.is_nil() && v.to_string() == value) }
@@ -146,7 +147,7 @@ impl<R: CurrentResources> ResourceResolver for ScopedResolver<'_, R> {
 pub struct ReadGrant {
     subject: Subject, request_id: String, mode: Mode, goal_sha256: String, scope: Scope,
     plan_sha256: String, policy_revision: String, incarnation: Uuid, nonce: Uuid,
-    issued_ms: u64, expires_ms: u64, revoked: AtomicBool,
+    issued_ms: u64, expires_ms: u64, revoked: Arc<AtomicBool>,
 }
 impl ReadGrant { pub fn revoke(&self) { self.revoked.store(true, Ordering::Release); } }
 impl Drop for ReadGrant { fn drop(&mut self) { self.revoke(); } }
@@ -178,7 +179,7 @@ impl Policy {
         let plan_sha256 = digest(&(&intent.subject, &intent.request_id, &intent.goal_sha256, intent.mode, &scope, &self.revision, now_ms, expires_ms))?;
         Ok(ReadGrant { subject: intent.subject, request_id: intent.request_id, goal_sha256: intent.goal_sha256,
             mode: intent.mode, scope, plan_sha256, policy_revision: self.revision.clone(), incarnation: self.incarnation,
-            nonce: Uuid::new_v4(), issued_ms: now_ms, expires_ms, revoked: AtomicBool::new(false) })
+            nonce: Uuid::new_v4(), issued_ms: now_ms, expires_ms, revoked: Arc::new(AtomicBool::new(false)) })
     }
     pub fn check_read(&self, grant: &ReadGrant, subject: &Subject, request_id: &str, action: &Action,
         current: &impl CurrentResources, now_ms: u64) -> Result<()> {
@@ -194,6 +195,21 @@ impl Policy {
             &grant.policy_revision, grant.issued_ms, grant.expires_ms))? != grant.plan_sha256 { grant.revoke(); return Err(ErrorCode::PlanChanged); }
         if !grant.scope.actions.contains(action.action_id()) { return Err(ErrorCode::PermissionDenied); }
         if requirement(action.action_id(), grant.mode, Risk::R0)? != Requirement::ReadScope { return Err(ErrorCode::PermissionDenied); }
+        if grant.scope.resources.iter().any(|r| r.kind == "graphical-session") {
+            // Interactive authority retains every selected window and display
+            // binding, even when this particular action references only one.
+            for r in &grant.scope.resources {
+                match current.resolve(&r.field, &r.kind, &r.handle) {
+                    Ok(identity) if identity == r.identity_sha256 => {},
+                    Ok(_) => { grant.revoke(); return Err(ErrorCode::TargetChanged); },
+                    Err(error) => { grant.revoke(); return Err(error); },
+                }
+            }
+            let live_now=boottime_ms()?;
+            if live_now < grant.issued_ms || live_now >= grant.expires_ms || grant.revoked.load(Ordering::Acquire) {
+                grant.revoke(); return Err(ErrorCode::ApprovalExpired);
+            }
+        }
         registry::validate_references(action, &ScopedResolver { scope: &grant.scope, current })
     }
 }

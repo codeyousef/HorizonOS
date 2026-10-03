@@ -44,6 +44,38 @@ an exact digest match, a successful exit, a bounded response with no extra input
 and a fresh native/policy validation. Failure never yields permission. Launching
 another copy of this executable supplies no authority to the broker.
 
+## Shared policy and native task ownership
+
+`aios-policy::consent` freezes the authenticated originating subject, request,
+goal, Ask/Diagnose mode, explicitly selected native display, concrete window
+identities, presentation, installed policy revision, broker incarnation,
+volatile nonce and suspend-inclusive expiration in the confirmation digest.
+The first issuer permits only `ui.snapshot`; derived snapshot/node lineage is
+required before `ui.find` can be enabled. It cannot authorize writes or roots.
+Headless `grant_reads` continues to reject graphical capabilities.
+
+The native transport launches the compile-pinned immutable Qt wrapper with a
+cleared environment and the selected Wayland socket. Its pollable supervisor
+requires the actual pinned native child executable, successful exit and one
+exact bounded response line. There is no public constructor for an approved
+decision, no transferable grant and no request-selected renderer. Cancellation,
+identity or resource drift, policy replacement and expiry withdraw the prompt.
+Consuming the opaque native result rechecks every binding and issues a volatile
+read grant. Every subsequent read freshly validates all selected resources,
+including the display, before resolving that action's references; drift revokes
+the grant permanently.
+
+`aios-session::ui_read::NativeReadTask` retains the originating connection FD,
+kernel socket cookie, native peer/process/logind identity, selected window,
+pending dialog, shared policy and grant inside one provider worker. Disconnect
+and independent Stop control withdraw consent and prevent further queries.
+Snapshots require a live grant before the accessibility query and fresh
+authorization after it, before returning content. The native traversal verifies
+each object's parent chain inside the selected window before reading its name,
+states or available actions. These library types accept no JSON authority.
+The provider bridge must authenticate the fixed broker before accepting an
+original connection FD; passing claimed UID/PID/session fields is insufficient.
+
 ## Native interaction and qualification
 
 The dialog uses the native palette, fonts, focus and accessibility of Qt Widgets.
@@ -62,3 +94,11 @@ disposable desktop profile and actual tester UID, verifies the real Wayland
 socket owner, runs the fixtures on Wayland, and launches the production dialog
 for expiry, changed-input and disconnect checks. Its proposals are synthetic;
 these tests neither issue a policy capability nor establish native scope grants.
+
+The registered `accessibility` scenario additionally authenticates a real kernel
+client and native Kate window/display, runs the production policy-owned dialog
+through expiry and withdrawal, rejects an unconfirmed snapshot, and checks that
+closing the originating connection revokes pending consent. Its document is
+synthetic. It does not press Allow, issue a native grant or qualify semantic
+mutations. Synthetic policy tests exercise issuance postconditions separately
+and must not be reported as native human confirmation evidence.

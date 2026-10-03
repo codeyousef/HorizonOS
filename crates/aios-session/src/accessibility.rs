@@ -121,6 +121,7 @@ impl WindowBinding {
         Ok(out)
     }
     pub fn identity_sha256(&self)->Result<String>{aios_policy::digest(self)}
+    pub(crate) fn selected_display(&self)->&DisplayBinding{&self.display}
     fn current(&self)->Result<Bus>{
         self.display.verify()?;
         let bus=Bus::open(&self.display)?;
@@ -139,13 +140,16 @@ impl WindowBinding {
         let deadline=Instant::now()+Duration::from_secs(2);check(deadline,control)?;
         let bus=self.current()?;
         let snapshot_id=Uuid::new_v4().to_string();let mut nodes=Vec::new();
-        let mut queue=VecDeque::from([(self.path.clone(),0u8)]);let mut visited=HashSet::new();
+        let mut queue=VecDeque::from([(self.path.clone(),0u8,OwnedObjectPath::try_from(ROOT).map_err(|_|ErrorCode::TargetChanged)?)]);let mut visited=HashSet::new();
         let mut bytes=0;let mut truncated=false;
-        while let Some((path,depth))=queue.pop_front(){
+        while let Some((path,depth,parent))=queue.pop_front(){
             check(deadline,control)?;
             if !visited.insert(path.clone()){return Err(ErrorCode::TargetChanged);}
             if nodes.len()>=300{truncated=true;break;}
             let p=bus.accessible(&self.app.owner,path.as_str())?;
+            // A same-process object reference alone does not prove membership
+            // in the selected window. Verify each native parent before content.
+            if p.get_property::<Object>("Parent").map_err(error)?!=(self.app.owner.clone(),parent){return Err(ErrorCode::TargetChanged);}
             let role:u32=p.call("GetRole",&()).map_err(error)?;
             // Do not even query protected names, text, actions or children.
             if matches!(role,16|40|60){
@@ -181,7 +185,7 @@ impl WindowBinding {
                 check(deadline,control)?;
                 let child:Object=p.call("GetChildAtIndex",&(i as i32,)).map_err(error)?;
                 if child.0!=self.app.owner{return Err(ErrorCode::PermissionDenied);}
-                queue.push_back((child.1,depth+1));
+                queue.push_back((child.1,depth+1,path.clone()));
             }
         }
         check(deadline,control)?;self.verify()?;check(deadline,control)?;

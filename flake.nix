@@ -52,6 +52,8 @@
       consentUi = pkgs.callPackage ./nix/packages/consent-ui.nix { };
       consentUiTests = pkgs.callPackage ./nix/packages/consent-ui.nix { testing = true; };
       core = (productPackage "aios-core" "aios-session" "aios-sessiond").overrideAttrs (old: {
+        AIOS_CONSENT_UI = "${consentUi}/bin/aios-scope-dialog";
+        AIOS_CONSENT_NATIVE = "${consentUi}/bin/.aios-scope-dialog-wrapped";
         AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";
         AIOS_KWIN_WRAPPER = "${pkgs.kdePackages.kwin}/bin/.kwin_wayland_wrapper-wrapped";
         AIOS_ATSPI_LAUNCHER = "${pkgs.at-spi2-core}/libexec/.at-spi-bus-launcher-wrapped";
@@ -118,6 +120,8 @@
       lock-resolution = pkgs.mkShell { packages = [ pkgs.cargo pkgs.rustc ]; };
       default = pkgs.mkShell {
         packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy pkg-config sqlite ];
+        AIOS_CONSENT_UI = "${consentUi}/bin/aios-scope-dialog";
+        AIOS_CONSENT_NATIVE = "${consentUi}/bin/.aios-scope-dialog-wrapped";
         AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";
         AIOS_KWIN_WRAPPER = "${pkgs.kdePackages.kwin}/bin/.kwin_wayland_wrapper-wrapped";
         AIOS_ATSPI_LAUNCHER = "${pkgs.at-spi2-core}/libexec/.at-spi-bus-launcher-wrapped";

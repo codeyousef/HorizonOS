@@ -4,6 +4,19 @@ use aios_session::{accessibility::WindowBinding,display::DisplayBinding};
 use aios_protocol::contracts::ErrorCode;
 use std::{fs,io::Read,os::{fd::{OwnedFd,FromRawFd,AsRawFd},unix::fs::{DirBuilderExt,PermissionsExt,OpenOptionsExt}},path::PathBuf,process::{Child,Command,Stdio},sync::atomic::AtomicU8,time::{Duration,Instant}};
 use serde_json::{Value,json};
+use aios_policy::{consent::{NativeDesktop,ReadPresentation,SelectedWindow}, CurrentResources,Scope,Policy};
+
+struct NativeResources<'a>{ display:&'a DisplayBinding,window:&'a WindowBinding }
+impl CurrentResources for NativeResources<'_>{
+    fn resolve(&self,field:&str,kind:&str,handle:&str)->aios_policy::Result<String>{
+        if field=="selected_session" && kind=="graphical-session" && handle==self.display.session.id {
+            self.display.verify()?;aios_policy::digest(self.display)
+        } else if field=="window_handle" && kind=="scope-owner-expiry" && handle==self.window.handle {
+            self.window.verify()?;self.window.identity_sha256()
+        } else {Err(ErrorCode::PermissionDenied)}
+    }
+    fn dynamic_arguments(&self,_:&str,_:&Value,_:&Scope)->aios_policy::Result<()>{Err(ErrorCode::UnsupportedCapability)}
+}
 
 struct Kate { child:Child,directory:PathBuf, native:Option<(u32,OwnedFd)> }
 impl Kate {
@@ -86,10 +99,67 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.snapshot","data").unwrap(),&serde_json::to_value(&snapshot).unwrap()).unwrap();
     let cancelled=AtomicU8::new(1);
     assert!(matches!(window.snapshot(&cancelled),Err(ErrorCode::Cancelled)));
+    // The real originating kernel peer and actual selected Kate/display scope
+    // reach the production native transport. These scenarios never press Allow.
+    let (proof,_peer)=std::os::unix::net::UnixStream::pair().unwrap();
+    let peer=aios_session::identity::authenticate(&proof).unwrap();
+    let subject=aios_policy::Subject{uid:peer.uid,pid:peer.pid,start_ticks:peer.start_ticks,boot_id:peer.boot_id.clone(),
+        session:peer.logind_session.as_ref().map(|id|aios_policy::Session{id:id.clone(),remote:peer.remote,kind:peer.session_type.clone().unwrap()}),
+        client:aios_policy::Client::Unix{connection_id:uuid::Uuid::new_v4().to_string()}};
+    let policy=Policy::new(peer.boot_id.clone(),aios_policy::registry_revision()).unwrap();
+    let resources=NativeResources{display:&display,window:&window};
+    let propose=|expiry|policy.propose_graphical_read(policy.authenticated_user_intent(subject.clone(),uuid::Uuid::new_v4().to_string(),
+        "Explain the selected synthetic document",aios_policy::Mode::Ask).unwrap(),
+        NativeDesktop{uid,boot_id:display.boot_id.clone(),session_id:display.session.id.clone(),identity_sha256:aios_policy::digest(&display).unwrap(),socket_name:display.socket_name.clone()},
+        ReadPresentation{target:"This disposable NixOS VM".into(),profile:"Local CPU, no model invoked in this scenario".into(),goal:"Explain the selected synthetic document".into(),
+            windows:vec![SelectedWindow{handle:window.handle.clone(),identity_sha256:window.identity_sha256().unwrap(),name:window.name.clone(),window:window.title.clone()}],evidence:vec![]},expiry).unwrap();
+    let mut expiring=propose(1200).launch(&policy,&subject,&resources).expect("pinned native consent launch");
+    let native_expiry=loop {
+        aios_session::identity::verify(&proof,&peer).unwrap();
+        match expiring.poll(&policy,&subject,&resources){
+            Ok(None)=>std::thread::sleep(Duration::from_millis(10)),
+            Ok(Some(_))=>panic!("expiry scenario created authority without native human Allow"),
+            Err(error)=>break error,
+        }
+    };
+    assert!(matches!(native_expiry,ErrorCode::ApprovalExpired|ErrorCode::PermissionDenied));
+    let mut withdrawn=propose(90_000).launch(&policy,&subject,&resources).unwrap();
+    std::thread::sleep(Duration::from_millis(350));
+    assert!(matches!(withdrawn.poll(&policy,&subject,&resources),Ok(None)));
+    let start=Instant::now();withdrawn.withdraw();let withdrawal_ms=start.elapsed().as_millis();
+    assert!(withdrawal_ms<1000);
+    assert!(matches!(withdrawn.poll(&policy,&subject,&resources),Err(ErrorCode::Cancelled)));
+    let (proof,peer_socket)=std::os::unix::net::UnixStream::pair().unwrap();
+    let origin=aios_session::ui_read::OriginatingClient::authenticate(proof).unwrap();
+    let mut task=aios_session::ui_read::NativeReadTask::begin(origin,window.clone(),"Explain the selected synthetic document",aios_policy::Mode::Ask,
+        "This disposable NixOS VM".into(),"Local CPU, no model invoked in this scenario".into(),std::sync::Arc::new(AtomicU8::new(0))).unwrap();
+    assert!(matches!(task.snapshot(),Err(ErrorCode::AuthRequired)),"unconfirmed task exposed accessibility content");
+    drop(task);drop(peer_socket);
+    let (proof,peer_socket)=std::os::unix::net::UnixStream::pair().unwrap();
+    let origin=aios_session::ui_read::OriginatingClient::authenticate(proof).unwrap();
+    let mut task=aios_session::ui_read::NativeReadTask::begin(origin,window.clone(),"Explain the selected synthetic document",aios_policy::Mode::Ask,
+        "This disposable NixOS VM".into(),"Local CPU, no model invoked in this scenario".into(),std::sync::Arc::new(AtomicU8::new(0))).unwrap();
+    drop(peer_socket);
+    assert!(matches!(task.poll_confirmation(),Err(ErrorCode::Cancelled)),"disconnected original peer retained pending consent");
+    assert!(matches!(task.snapshot(),Err(ErrorCode::Cancelled)));
+    let (proof,peer_socket)=std::os::unix::net::UnixStream::pair().unwrap();
+    let origin=aios_session::ui_read::OriginatingClient::authenticate(proof).unwrap();
+    let mut task=aios_session::ui_read::NativeReadTask::begin(origin,window.clone(),"Explain the selected synthetic document",aios_policy::Mode::Ask,
+        "This disposable NixOS VM".into(),"Local CPU, no model invoked in this scenario".into(),std::sync::Arc::new(AtomicU8::new(0))).unwrap();
+    let stop=task.stop_handle().unwrap();std::thread::sleep(Duration::from_millis(350));
+    let start=Instant::now();stop.stop();let independent_stop_ms=start.elapsed().as_millis();
+    assert!(independent_stop_ms<100);
+    assert!(matches!(task.poll_confirmation(),Err(ErrorCode::Cancelled)));
+    assert!(matches!(task.snapshot(),Err(ErrorCode::Cancelled)));drop(peer_socket);
     kate.stop_native();
     if kate.child.try_wait().unwrap().is_none(){kate.child.kill().unwrap();}kate.child.wait().unwrap();
     let stale=window.verify();assert!(stale.is_err(),"closed native app owner was accepted");
     println!("NATIVE_KATE_SNAPSHOT={}",json!({"evidence_kind":"real-native-app-and-synthetic-document-no-policy-grant","display":display,"window":native,
         "window_identity_sha256":window.identity_sha256().unwrap(),"node_count":snapshot.nodes.len(),"truncated":snapshot.truncated,"snapshot_id":snapshot.snapshot_id,
         "cancelled_before_query":true,"closed_owner_denial":format!("{:?}",stale.unwrap_err())}));
+    println!("NATIVE_POLICY_CONSENT={}",json!({"evidence_kind":"real-native-client-display-window-and-production-consent-transport-no-allow-or-grant",
+        "uid":uid,"origin_pid":subject.pid,"origin_start_ticks":subject.start_ticks,"session_id":display.session.id,
+        "native_window_identity_sha256":window.identity_sha256().unwrap(),"expiry_denial":format!("{native_expiry:?}"),"withdrawal_ms":withdrawal_ms,
+        "withdrawal_reuse_denied":true,"unconfirmed_snapshot_denied":true,"origin_disconnect_revoked_pending_read":true,
+        "independent_stop_ms":independent_stop_ms,"independent_stop_revoked_pending_read":true,"policy_revision":aios_policy::registry_revision()}));
 }
