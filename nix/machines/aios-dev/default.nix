@@ -77,6 +77,17 @@ in {
   environment.etc."aios/installation-uuid".text = installationUUID + "\n";
   environment.etc."aios/expected-dmi-uuid".text = guestUUID + "\n";
   environment.etc."aios/guest-role".text = "development\n";
+  environment.etc."aios/management-channel".text = "ssh-development\n";
+  environment.etc."aios/target-authority.json" = {
+    mode = "0444";
+    text = builtins.toJSON {
+      schema_version = 1; os_id = "nixos"; os_version = "26.05";
+      installation_uuid = installationUUID; dmi_uuid = guestUUID;
+      guest_role = "development"; disk_serial = "AIOS_DEV_ROOT";
+      disk_device = "vda"; root_partition = "vda2"; root_filesystem = "btrfs";
+      management_channel = "ssh-development";
+    };
+  };
   systemd.services.aios-bootstrap-identity = {
     description = "Publish verified Horizon OS VM identity";
     wantedBy = [ "multi-user.target" ]; before = [ "sshd.service" ];

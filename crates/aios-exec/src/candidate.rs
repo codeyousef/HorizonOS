@@ -239,8 +239,15 @@ pub struct InstalledTemplate {
     owner: u32,
     path: PathBuf,
     root_ancestors: bool,
+    target: Option<crate::native::VerifiedTarget>,
+    authority: Option<crate::native::InstalledAuthority>,
 }
 impl InstalledTemplate {
+    pub fn from_installed() -> Result<Self> {
+        let target = crate::native::VerifiedTarget::enroll()?;
+        let authority = target.authority()?;
+        Self::open(&authority.template_path, &authority.manifest_sha256)
+    }
     pub fn open(package: &str, manifest_sha256: &str) -> Result<Self> {
         if unsafe { libc::getuid() } != 0 || unsafe { libc::geteuid() } != 0 {
             return Err(Error::Authority);
@@ -248,7 +255,22 @@ impl InstalledTemplate {
         if !store(package) || !digest(manifest_sha256) {
             return Err(Error::Invalid);
         }
-        Self::load(Path::new(package), manifest_sha256, 0, true)
+        let target = crate::native::VerifiedTarget::enroll()?;
+        let authority = target.authority()?;
+        if package != authority.template_path || manifest_sha256 != authority.manifest_sha256 {
+            return Err(Error::Integrity);
+        }
+        let mut value = Self::load(Path::new(package), manifest_sha256, 0, true)?;
+        if value.catalog.content().base_template_revision != authority.base_template_revision
+            || value.catalog.revision() != authority.catalog_revision
+            || value.catalog.content().lock_sha256 != authority.lock_sha256
+        {
+            return Err(Error::Integrity);
+        }
+        value.target = Some(target);
+        value.authority = Some(authority);
+        value.verify()?;
+        Ok(value)
     }
     fn load(path: &Path, expected: &str, owner: u32, root_ancestors: bool) -> Result<Self> {
         let root = anchor(path, owner, root_ancestors)?;
@@ -305,9 +327,16 @@ impl InstalledTemplate {
             owner,
             path: path.into(),
             root_ancestors,
+            target: None,
+            authority: None,
         })
     }
     fn verify(&self) -> Result<()> {
+        if let Some(target) = &self.target {
+            if self.authority.as_ref() != Some(&target.authority()?) {
+                return Err(Error::TargetChanged);
+            }
+        }
         let current = anchor(&self.path, self.owner, self.root_ancestors)?;
         if (current.metadata()?.dev(), current.metadata()?.ino())
             != (self.root.metadata()?.dev(), self.root.metadata()?.ino())
@@ -377,6 +406,7 @@ pub struct CandidateStore {
     path: PathBuf,
     owner: u32,
     root_ancestors: bool,
+    target: Option<crate::native::VerifiedTarget>,
 }
 impl CandidateStore {
     /// Administrator creates this root-owned 0755 directory via the NixOS module.
@@ -384,7 +414,11 @@ impl CandidateStore {
         if unsafe { libc::getuid() } != 0 || unsafe { libc::geteuid() } != 0 {
             return Err(Error::Authority);
         }
-        Self::load(Path::new("/var/lib/aios/candidates"), 0, true)
+        let target = crate::native::VerifiedTarget::enroll()?;
+        let mut value = Self::load(Path::new("/var/lib/aios/candidates"), 0, true)?;
+        value.target = Some(target);
+        value.verify_anchor()?;
+        Ok(value)
     }
     fn load(path: &Path, owner: u32, root_ancestors: bool) -> Result<Self> {
         let root = anchor(path, owner, root_ancestors)?;
@@ -394,9 +428,13 @@ impl CandidateStore {
             path: path.into(),
             owner,
             root_ancestors,
+            target: None,
         })
     }
     fn verify_anchor(&self) -> Result<()> {
+        if let Some(target) = &self.target {
+            target.recheck()?;
+        }
         let current = anchor(&self.path, self.owner, self.root_ancestors)?;
         if (current.metadata()?.dev(), current.metadata()?.ino())
             != (self.root.metadata()?.dev(), self.root.metadata()?.ino())

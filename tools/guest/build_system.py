@@ -173,6 +173,13 @@ def verify_template(realized, closure, enrolled, source_manifest, expected_locks
     if set(authority) != keys or authority["schema_version"] != 1 or source.canonical(authority) != authority_bytes:
         raise ValueError("built template authority schema/canonical bytes differ")
     template = Path(store_path(authority["template_path"]))
+    target_authority = source.decode((Path(realized) / "etc/aios/target-authority.json").read_bytes())
+    expected_target = {"schema_version":1,"os_id":"nixos","os_version":"26.05",
+        "installation_uuid":enrolled["installation_uuid"],"dmi_uuid":enrolled["dmi_uuid"],
+        "guest_role":"development","disk_serial":"AIOS_DEV_ROOT","disk_device":"vda",
+        "root_partition":"vda2","root_filesystem":"btrfs","management_channel":"ssh-development"}
+    if target_authority != expected_target:
+        raise ValueError("built native target authority differs from enrollment")
     if str(template) not in closure:
         raise ValueError("installed system does not retain trusted template")
     manifest_bytes = read_template_file(template, "template.json")
@@ -215,7 +222,8 @@ def verify_template(realized, closure, enrolled, source_manifest, expected_locks
     catalog = source.decode(read_template_file(template, "catalog.json"))
     if authority["lock_sha256"] != expected_locks["flake.lock"] or catalog["catalog_revision"] != authority["catalog_revision"] or catalog["content"]["base_template_revision"] != authority["base_template_revision"]:
         raise ValueError("built template catalog/lock identity differs")
-    return {"authority": authority, "manifest": manifest, "root_owned_readonly_inventory_verified": True,
+    return {"authority": authority, "target_authority":target_authority,"native_target_runtime_verified":False,
+            "manifest": manifest, "root_owned_readonly_inventory_verified": True,
             "retained_in_system_closure_verified": True, "running_installed_authority_verified": False}
 
 

@@ -168,6 +168,14 @@ def main():
                     raise RuntimeError("managed machine changed protected transport/baseline")
                 machine_checks.append({"name":name,"value":value})
             authority_attr = machine_reference + '#nixosConfigurations.aios-dev.config.environment.etc."aios/template-authority.json".text'
+            target_attr = machine_reference + '#nixosConfigurations.aios-dev.config.environment.etc."aios/target-authority.json".text'
+            target_authority = json.loads(json.loads(run(["nix", "eval", "--json", *locked, *pure, target_attr])))
+            expected_target = {"schema_version":1,"os_id":"nixos","os_version":"26.05",
+                "installation_uuid":identity["installation_uuid"],"dmi_uuid":identity["dmi_uuid"],
+                "guest_role":"development","disk_serial":"AIOS_DEV_ROOT","disk_device":"vda",
+                "root_partition":"vda2","root_filesystem":"btrfs","management_channel":"ssh-development"}
+            if target_authority != expected_target:
+                raise RuntimeError("native target authority differs from enrolled machine")
             authority_bytes = json.loads(run(["nix", "eval", "--json", *locked, *pure, authority_attr])).encode()
             authority = json.loads(authority_bytes)
             template_outputs = json.loads(run(["nix", "build", "--json", "--no-link", *locked, *pure,
@@ -213,6 +221,7 @@ def main():
             if packaged_contract != contract:
                 raise RuntimeError("packaged template changed code/catalog identity")
             template_evidence = {"path":str(template_path), "authority":authority,
+                "target_authority":target_authority,"native_target_runtime_verified":False,
                 "manifest":manifest,"root_owned_readonly_inventory_verified":True,
                 "pure_packaged_catalog_verified":True,"installed_running_authority_verified":False,
                 "source_file_count":len(listed), "runtime_closure":json.loads(run(["nix","path-info","--json","--recursive",str(template_path)]))}

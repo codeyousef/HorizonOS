@@ -339,6 +339,7 @@ pub struct Ledger {
     connection: Connection,
     durable_file: Option<File>,
     directory: Option<File>,
+    target: Option<crate::native::VerifiedTarget>,
 }
 impl Ledger {
     /// No path/connection selector is exposed by the product. The administrator
@@ -347,6 +348,7 @@ impl Ledger {
         if unsafe { libc::getuid() } != 0 || unsafe { libc::geteuid() } != 0 {
             return Err(Error::Authority);
         }
+        let target = crate::native::VerifiedTarget::enroll()?;
         let path = std::path::Path::new("/var/lib/aios/transactions");
         let directory = super::candidate::root_ledger_directory(path)?;
         let proc = std::path::PathBuf::from(format!(
@@ -385,9 +387,11 @@ impl Ledger {
             | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
             | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
         let connection = Connection::open_with_flags(db, flags)?;
+        target.recheck()?;
         let mut ledger = Self::initialize(connection)?;
         ledger.durable_file = Some(file);
         ledger.directory = Some(directory);
+        ledger.target = Some(target);
         ledger.sync()?;
         Ok(ledger)
     }
@@ -438,6 +442,7 @@ impl Ledger {
             connection,
             durable_file: None,
             directory: None,
+            target: None,
         })
     }
     fn sync(&self) -> Result<()> {
@@ -449,12 +454,37 @@ impl Ledger {
         }
         Ok(())
     }
+    fn verify_target(&self) -> Result<()> {
+        if let Some(target) = &self.target {
+            target.recheck()?;
+        }
+        Ok(())
+    }
+    fn verify_plan_target(&self, plan: &PreparedPlan) -> Result<()> {
+        self.verify_target()?;
+        if self
+            .target
+            .as_ref()
+            .is_some_and(|target| target.target() != &plan.target)
+        {
+            return Err(Error::TargetChanged);
+        }
+        Ok(())
+    }
     pub fn register(
         &mut self,
         plan: &PreparedPlan,
         candidate: &crate::candidate::Candidate,
         store: &crate::candidate::CandidateStore,
     ) -> Result<Status> {
+        self.verify_target()?;
+        if self
+            .target
+            .as_ref()
+            .is_some_and(|target| target.target() != &plan.target)
+        {
+            return Err(Error::TargetChanged);
+        }
         store.verify(candidate)?;
         let manifest = candidate.manifest();
         if candidate.digest() != plan.candidate_sha256
@@ -501,6 +531,7 @@ impl Ledger {
         self.status(&plan.plan_id, plan.requester.uid)
     }
     pub fn get_plan(&self, id: &str, uid: u32) -> Result<PreparedPlan> {
+        self.verify_target()?;
         if !uuid(id) {
             return Err(Error::Invalid);
         }
@@ -543,6 +574,7 @@ impl Ledger {
         })
     }
     fn transition(&mut self, id: &str, expected: &Status, next: State, kind: &str) -> Result<()> {
+        self.verify_target()?;
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -582,6 +614,7 @@ impl Ledger {
         now: u64,
     ) -> Result<Status> {
         let plan = self.get_plan(id, uid)?;
+        self.verify_plan_target(&plan)?;
         if &plan.target != target || &plan.baseline != baseline {
             return Err(Error::TargetChanged);
         }
@@ -647,6 +680,7 @@ impl Ledger {
         proof: &VerifiedWorkerStop,
     ) -> Result<Status> {
         let plan = self.get_plan(id, uid)?;
+        self.verify_plan_target(&plan)?;
         if proof.plan_id != id || proof.candidate_sha256 != plan.candidate_sha256 {
             return Err(Error::Integrity);
         }
@@ -666,6 +700,7 @@ impl Ledger {
         baseline: &Baseline,
     ) -> Result<Status> {
         let plan = self.get_plan(id, uid)?;
+        self.verify_plan_target(&plan)?;
         let s = self.status(id, uid)?;
         if s.cancel_requested {
             return Err(Error::State);
@@ -706,6 +741,7 @@ impl Ledger {
         reboot_required: bool,
     ) -> Result<FinalPlan> {
         let plan = self.get_plan(id, uid)?;
+        self.verify_plan_target(&plan)?;
         let s = self.status(id, uid)?;
         if s.state == State::AwaitingApproval {
             let prior = self.final_plan(id, uid)?;
@@ -777,6 +813,8 @@ impl Ledger {
     /// This preparation core cannot mint an activation receipt or execute. The
     /// qualified approval/guard adapter must be connected before this can succeed.
     pub fn execute(&self, id: &str, uid: u32, hash: &str) -> Result<()> {
+        let plan = self.get_plan(id, uid)?;
+        self.verify_plan_target(&plan)?;
         let s = self.status(id, uid)?;
         if s.state != State::AwaitingApproval || s.final_plan_sha256.as_deref() != Some(hash) {
             return Err(Error::State);

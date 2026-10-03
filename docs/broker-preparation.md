@@ -6,6 +6,10 @@ D-Bus endpoint, construct worker verification proofs, obtain polkit approval or
 activate systems. The packaged `aios-execd` refuses all runtime requests while
 those adapters remain unavailable. Non-root callers cannot gain authority through
 command-line arguments, environment variables or fixture switches.
+Root daemon startup runs the fixed native target and installed-template preflight;
+failure returns `BROKER_NATIVE_PREFLIGHT_FAILED`. A successful preflight still
+returns the unavailable-runtime response until authenticated request/approval
+adapters exist. Startup does not create candidate directories or a SQLite ledger.
 
 ## Candidate artifacts
 
@@ -30,8 +34,29 @@ base/catalog/lock revisions. Its reference keeps the template in the system
 closure. Protected tmpfiles declarations create candidate and ledger directories.
 This configuration does not enable a broker or grant a user root authority.
 It requires an enrolled public management identity before a template can be built.
-The installed record must be read and verified by a native authenticated root
-adapter; merely passing its serialized fields remains insufficient authority.
+The native root adapter reads this fixed record from the current system closure;
+client path/hash selection must equal that installed authority. Canonical schema
+and base/catalog/lock/manifest bindings are checked independently before intake.
+
+`VerifiedTarget` is a non-deserializable native capability. Its production
+constructor requires UID/EUID zero with the full root UID mapping, then reads
+the canonical installed target enrollment and actual NixOS release, installation
+UUID, hardware DMI UUID, boot ID, machine ID, guest role, disk serial and management
+marker. The UUID device link must resolve to the enrolled root partition; actual
+root mount filesystem/source and sysfs partition-to-disk ancestry must agree.
+All resolved ancestors and links must be administrator/kernel owned, with no
+untrusted directory writes except the protected sticky Nix store. Reads are
+bounded, reject final symlinks and compare file identity/change metadata.
+
+Candidate/template and ledger production openers mint this capability before
+accessing persistent roots. They recheck enrollment and native observations at
+use time; template preparation also rechecks the current installed authority.
+New plans and build/finalization operations must match the live verified target.
+Old plan inspection can expose historical data after reboot without authorizing
+another build. Host-side pinned SSH verification remains the development transport
+gate. This local code does not replace authenticated system-bus/logind subjects;
+those adapters and native running/profile/boot-selected baseline capture are still
+required before runtime endpoints can be enabled.
 
 The template manifest lists bounded, normalized paths, modes, sizes and hashes.
 It must contain the fixed flake, lock and generated catalog. Reserved managed/

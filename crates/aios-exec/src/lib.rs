@@ -1,6 +1,7 @@
 //! Deterministic broker preparation. No model shell, arbitrary Nix, or activation.
 pub mod candidate;
 pub mod ledger;
+pub mod native;
 use aios_protocol::contracts::canonical_json;
 use serde::Serialize;
 use sha2::{Digest, Sha256};

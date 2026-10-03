@@ -35,7 +35,7 @@ def main():
     relatives = ("crates/aios-exec/src/lib.rs", "crates/aios-exec/src/main.rs",
         "crates/aios-exec/src/candidate.rs", "crates/aios-exec/src/ledger.rs",
         "crates/aios-exec/src/candidate/tests.rs", "crates/aios-exec/src/ledger/tests.rs",
-        "crates/aios-state/src/lib.rs")
+        "crates/aios-state/src/lib.rs", "crates/aios-exec/src/native.rs", "crates/aios-exec/src/native/tests.rs")
     for relative in relatives:
         data = (release / relative).read_bytes()
         out = run(["nix", "develop", *locked, reference, "--command", "rustfmt", "--edition", "2024", "--emit", "stdout", "--config", "skip_children=true"], data)
@@ -43,7 +43,7 @@ def main():
                           "formatted_sha256": hashlib.sha256(out).hexdigest(), "formatted_source": out.decode()})
     print("AIOS_BROKER_PREPARATION_FORMAT " + json.dumps(formatted, sort_keys=True), flush=True)
     unit = run(["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-exec", "--lib"], timeout=180)
-    if b"24 passed; 0 failed" not in unit:
+    if b"34 passed; 0 failed" not in unit:
         raise RuntimeError("broker fixture test count changed")
     outputs = json.loads(run(["nix", "build", "--json", "--no-link", *locked,
         "--option", "pure-eval", "true", "--option", "allow-import-from-derivation", "false",
@@ -65,12 +65,12 @@ def main():
     closure = json.loads(run(["nix","path-info","--json","--recursive",package]))
     print("AIOS_BROKER_PREPARATION " + json.dumps({"evidence_kind":"real-guest-rust-filesystem-sqlite-fixtures-and-package-denials",
         "target_identity":identity,"package":package,"executable_sha256":hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
-        "fixture_tests_passed":24,"denials":denials,"runtime_closure":closure,"commands":commands,
+        "fixture_tests_passed":34,"denials":denials,"runtime_closure":closure,"commands":commands,
         "installed_root_template_verified":False,"root_candidate_registration_verified":False,
-        "root_ledger_execution_verified":False,"isolated_worker_verified":False,"system_activation_verified":False,
+        "root_ledger_execution_verified":False,"native_target_runtime_verified":False,"authenticated_bus_peer_verified":False,"isolated_worker_verified":False,"system_activation_verified":False,
         "limitations":["Filesystem/SQLite tests execute the real library as the dev UID with fixture templates, grants and build output.",
         "Production constructors have no fixture/environment override; actual root runtime remains unavailable.",
-        "Native target and peer verification, builder output/worker-stop proof adapters, polkit, guard and live recovery remain to connect/qualify."]}, sort_keys=True))
+        "Native target/config intake is implemented but root runtime remains unqualified; bus peer identity, builder output/stop proofs, polkit, guard and recovery remain to connect/qualify."]}, sort_keys=True))
 
 
 if __name__ == "__main__":
