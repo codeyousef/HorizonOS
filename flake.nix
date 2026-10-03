@@ -52,6 +52,10 @@
       consentUi = pkgs.callPackage ./nix/packages/consent-ui.nix { };
       consentUiTests = pkgs.callPackage ./nix/packages/consent-ui.nix { testing = true; };
       core = (productPackage "aios-core" "aios-session" "aios-sessiond").overrideAttrs (old: {
+        AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";
+        AIOS_KWIN_WRAPPER = "${pkgs.kdePackages.kwin}/bin/.kwin_wayland_wrapper-wrapped";
+        AIOS_ATSPI_LAUNCHER = "${pkgs.at-spi2-core}/libexec/.at-spi-bus-launcher-wrapped";
+        AIOS_KATE_NATIVE = "${pkgs.kdePackages.kate}/bin/.kate-wrapped";
         postInstall = (old.postInstall or "") + ''
           install -Dm644 ${./nix/packages/aios-sessiond.service} "$out/share/systemd/user/aios-sessiond.service"
           substituteInPlace "$out/share/systemd/user/aios-sessiond.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-sessiond"
@@ -114,6 +118,11 @@
       lock-resolution = pkgs.mkShell { packages = [ pkgs.cargo pkgs.rustc ]; };
       default = pkgs.mkShell {
         packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy pkg-config sqlite ];
+        AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";
+        AIOS_KWIN_WRAPPER = "${pkgs.kdePackages.kwin}/bin/.kwin_wayland_wrapper-wrapped";
+        AIOS_ATSPI_LAUNCHER = "${pkgs.at-spi2-core}/libexec/.at-spi-bus-launcher-wrapped";
+        AIOS_KATE_NATIVE = "${pkgs.kdePackages.kate}/bin/.kate-wrapped";
+        AIOS_KATE_LAUNCH = "${pkgs.kdePackages.kate}/bin/kate";
         AIOS_LLAMA_BRIDGE = "${llamaBridge}";
         AIOS_LLAMA_SOURCE = "${pkgs.llama-cpp.src}";
       };

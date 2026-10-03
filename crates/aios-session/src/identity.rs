@@ -42,7 +42,7 @@ impl Peer {
     }
 }
 
-fn process(pid: u32, uid: u32) -> Result<(u64, String), ErrorCode> {
+pub(crate) fn process(pid: u32, uid: u32) -> Result<(u64, String), ErrorCode> {
     let path = format!("/proc/{pid}");
     if fs::metadata(&path).map_err(|_| ErrorCode::TargetChanged)?.uid() != uid { return Err(ErrorCode::PermissionDenied); }
     let value = fs::read_to_string(format!("{path}/stat")).map_err(|_| ErrorCode::TargetChanged)?;
@@ -123,18 +123,18 @@ fn logind_session(pid: u32, uid: u32) -> Result<(String, bool, String), ErrorCod
 #[derive(Debug,Clone,PartialEq,Eq,Serialize)]
 pub struct GraphicalSession {
     pub id:String, pub uid:u32, pub remote:bool, pub kind:String,
-    pub class:String, pub state:String, pub active:bool,
+    pub class:String, pub state:String, pub active:bool, pub locked:bool,
 }
 fn graphical_snapshot(session:&Proxy<'_>)->Result<GraphicalSession,ErrorCode>{
     let (uid,_):(u32,OwnedObjectPath)=session.get_property("User").map_err(lookup_error)?;
     Ok(GraphicalSession { id:session.get_property("Id").map_err(lookup_error)?,uid,
         remote:session.get_property("Remote").map_err(lookup_error)?,kind:session.get_property("Type").map_err(lookup_error)?,
         class:session.get_property("Class").map_err(lookup_error)?,state:session.get_property("State").map_err(lookup_error)?,
-        active:session.get_property("Active").map_err(lookup_error)? })
+        active:session.get_property("Active").map_err(lookup_error)?,locked:session.get_property("LockedHint").map_err(lookup_error)? })
 }
 fn validate_graphical(session:&GraphicalSession,requested_id:&str,uid:u32)->Result<(),ErrorCode>{
     if session.id!=requested_id || session.uid!=uid {return Err(ErrorCode::PermissionDenied);}
-    if session.remote || !session.active || session.class!="user" || session.state!="active" || !matches!(session.kind.as_str(),"x11"|"wayland") {return Err(ErrorCode::PermissionDenied);}
+    if session.remote || !session.active || session.locked || session.class!="user" || session.state!="active" || !matches!(session.kind.as_str(),"x11"|"wayland") {return Err(ErrorCode::PermissionDenied);}
     Ok(())
 }
 pub fn observe_graphical_session(id:&str,uid:u32)->Result<GraphicalSession,ErrorCode>{
@@ -151,7 +151,9 @@ pub fn observe_graphical_session(id:&str,uid:u32)->Result<GraphicalSession,Error
     // Do not weaken that isolation to observe a privileged provider.
     let manager=Proxy::new(&conn,owner.as_str(),"/org/freedesktop/login1","org.freedesktop.login1.Manager").map_err(lookup_error)?;
     let path:OwnedObjectPath=manager.call("GetSession",&(id,)).map_err(lookup_error)?;
-    let session=Proxy::new(&conn,owner.as_str(),path.as_str(),"org.freedesktop.login1.Session").map_err(lookup_error)?;
+    let session=zbus::blocking::proxy::Builder::new(&conn).destination(owner.as_str()).map_err(lookup_error)?
+        .path(path.as_str()).map_err(lookup_error)?.interface("org.freedesktop.login1.Session").map_err(lookup_error)?
+        .cache_properties(zbus::proxy::CacheProperties::No).build().map_err(lookup_error)?;
     let before=graphical_snapshot(&session)?;validate_graphical(&before,id,uid)?;
     let after:zbus::fdo::ConnectionCredentials=bus.call("GetConnectionCredentials",&(owner.as_str(),)).map_err(lookup_error)?;
     if graphical_snapshot(&session)?!=before || after.unix_user_id()!=Some(0) || after.process_id()!=Some(pid) || bus.call::<_,_,String>("GetNameOwner",&("org.freedesktop.login1",)).map_err(lookup_error)?!=owner {return Err(ErrorCode::TargetChanged);}
@@ -160,9 +162,9 @@ pub fn observe_graphical_session(id:&str,uid:u32)->Result<GraphicalSession,Error
 #[cfg(test)] mod graphical_tests {
     use super::*;
     #[test] fn explicit_selected_graphical_identity_never_uses_a_guessed_desktop(){
-        let s=GraphicalSession{id:"fixture-selected".into(),uid:1000,remote:false,kind:"wayland".into(),class:"user".into(),state:"active".into(),active:true};
+        let s=GraphicalSession{id:"fixture-selected".into(),uid:1000,remote:false,kind:"wayland".into(),class:"user".into(),state:"active".into(),active:true,locked:false};
         assert_eq!(validate_graphical(&s,"fixture-selected",1000),Ok(()));
-        for changed in [GraphicalSession{uid:1001,..s.clone()},GraphicalSession{remote:true,..s.clone()},GraphicalSession{active:false,..s.clone()},GraphicalSession{kind:"tty".into(),..s.clone()},GraphicalSession{class:"manager".into(),..s.clone()},GraphicalSession{state:"closing".into(),..s.clone()}] {assert_eq!(validate_graphical(&changed,"fixture-selected",1000),Err(ErrorCode::PermissionDenied));}
+        for changed in [GraphicalSession{uid:1001,..s.clone()},GraphicalSession{remote:true,..s.clone()},GraphicalSession{active:false,..s.clone()},GraphicalSession{locked:true,..s.clone()},GraphicalSession{kind:"tty".into(),..s.clone()},GraphicalSession{class:"manager".into(),..s.clone()},GraphicalSession{state:"closing".into(),..s.clone()}] {assert_eq!(validate_graphical(&changed,"fixture-selected",1000),Err(ErrorCode::PermissionDenied));}
         assert_eq!(validate_graphical(&s,"newest",1000),Err(ErrorCode::PermissionDenied));
     }
 }
