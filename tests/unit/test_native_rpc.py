@@ -24,7 +24,7 @@ class NativeRpcTests(unittest.TestCase):
             "release_digest":"a"*64,"artifact_path":str(self.provenance)}
         self.proof = {"uid":1000,"root_bus_owner_uid":0,"root_bus_owner_pid":50,
             "native_caller_and_baseline_verified":True,"typed_denials_verified":True,"reconnect_denials_verified":True,
-            "durable_pre_effect_cancellation_verified":True,"bus_ownership_policy_verified":True,
+            "durable_pre_effect_cancellation_verified":True,"bus_ownership_policy_verified":True,"system_and_packages_verified":True,
             "trusted_confirmation_verified":False,"activation_performed":False}
 
     def test_detach_is_rejected_before_loading_target_or_starting_rpc(self):

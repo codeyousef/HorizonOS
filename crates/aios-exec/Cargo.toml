@@ -7,11 +7,13 @@ publish.workspace = true
 [dependencies]
 aios-protocol = { path = "../aios-protocol" }
 aios-state = { path = "../aios-state" }
+aios-system = { path = "../aios-system" }
 blocking = "1.6"
 libc = "0.2"
 rusqlite = { version = "0.40", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+time = { version = "0.3", features = ["formatting"] }
 sha2 = "0.10"
 uuid = { version = "=1.26.1", features = ["v4"] }
 zbus = { version = "5.19", features = ["blocking-api"] }

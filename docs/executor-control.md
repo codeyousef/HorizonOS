@@ -3,8 +3,22 @@
 `aios-execd --serve` owns `org.aios.Executor1` on the system bus at
 `/org/aios/Executor1`. The packaged systemd unit starts it as root. Bus policy
 reserves `org.aios` ownership and allows only the fixed control methods and
-introspection at this path. The running broker denies program execution,
+introspection at reviewed paths. It also owns `org.aios.System1` and exports
+`/org/aios/System1` and `/org/aios/Packages1`. All three interfaces authenticate
+native callers through the same admission and identity checks. The running broker denies program execution,
 including inherited worker threads and the x32 syscall route.
+
+System1 `Info` observes NixOS and systemd directly without executing a detector.
+Packages1 `Info` and `Search` read the installed administrator-reviewed catalog.
+Action members accept the strict versioned invoke envelope and fix the reviewed
+action in server code. Duplicate/unknown fields, action substitution and forged
+authority are rejected. Provider outputs pass their normative result schema.
+Search cursors bind the full native caller, exact query/limit and catalog revision,
+expire after 30 seconds, and have finite per-UID/global budgets. A reconnect cannot
+reuse a cursor. No private results are emitted as signals. Capabilities identify
+the available read providers; the remaining action contracts stay unavailable.
+Direct service writes require authorization, and package planning methods await
+their native plan adapters. Catalog metadata alone never starts a package install.
 
 `Prepare` accepts the strict `urn:aios:executor-prepare-request:v1` contract in
 `schemas/api/executor-prepare-request.json`. It contains a client UUID nonce,

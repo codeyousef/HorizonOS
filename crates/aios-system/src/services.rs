@@ -77,6 +77,20 @@ fn small(value: String) -> Result<String, ErrorCode> {
     Ok(value)
 }
 
+/// Read systemd's native observation without spawning a detector. The fixed
+/// root-owned manager connection is pinned and rechecked across the read.
+pub fn read_virtualization() -> Result<String, ErrorCode> {
+    let connection = system_connection()?;
+    let owner = root_owner(&connection, "org.freedesktop.systemd1")?;
+    let manager = fresh_proxy(&connection, &owner, "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager")?;
+    let value: String = manager.get_property("Virtualization").map_err(dbus_error)?;
+    let value = if value.is_empty() { "none".to_owned() } else { small(value)? };
+    if root_owner(&connection, "org.freedesktop.systemd1")? != owner {
+        return Err(ErrorCode::StaleEvidence);
+    }
+    Ok(value)
+}
+
 pub fn read_service_status(name: &str, service_id: &str) -> Result<ServiceStatus, ErrorCode> {
     let started = Instant::now();
     macro_rules! property {

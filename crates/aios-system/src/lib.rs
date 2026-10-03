@@ -79,6 +79,16 @@ fn virtualization() -> Result<String, ErrorCode> {
 }
 
 pub fn observe_system_info() -> ProviderResult<SystemInfo> {
+    system_info_with(virtualization)
+}
+
+/// System-bus brokers can observe systemd directly while retaining an execve
+/// denial. No caller-provided virtualization assertion or endpoint is accepted.
+pub fn observe_system_info_native() -> ProviderResult<SystemInfo> {
+    system_info_with(services::read_virtualization)
+}
+
+fn system_info_with(detector: fn() -> Result<String, ErrorCode>) -> ProviderResult<SystemInfo> {
     let observed_at = OffsetDateTime::now_utc().format(&Rfc3339).expect("valid UTC timestamp");
     let observation = (|| {
         let (os_id, os_version) = os_release(&bounded(Path::new("/etc/os-release"), 4096)?)?;
@@ -90,7 +100,7 @@ pub fn observe_system_info() -> ProviderResult<SystemInfo> {
         } else { None };
         Ok(SystemInfo { os_id, os_version, current_closure, generation,
             boot_id: boot_id(&bounded(Path::new("/proc/sys/kernel/random/boot_id"), 128)?)?,
-            architecture: std::env::consts::ARCH.to_owned(), virtualization: virtualization()? })
+            architecture: std::env::consts::ARCH.to_owned(), virtualization: detector()? })
     })();
     let (status, complete, data, error) = match observation {
         Ok(info) if info.generation.is_some() => (ResultStatus::Ok, true, Some(info), None),

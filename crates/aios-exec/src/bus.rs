@@ -21,6 +21,7 @@ use std::{
     time::Duration,
 };
 use zbus::{DBusError, Message, message::Header, names::ErrorName};
+mod system;
 
 pub const NAME: &str = "org.aios.Executor1";
 pub const PATH: &str = "/org/aios/Executor1";
@@ -191,6 +192,7 @@ struct Runtime {
     ledger: Ledger,
     candidates: CandidateStore,
     owners: BTreeMap<String, Owner>,
+    reads: system::ReadState,
 }
 impl Runtime {
     fn open() -> crate::Result<Self> {
@@ -213,6 +215,7 @@ impl Runtime {
             ledger,
             candidates,
             owners: BTreeMap::new(),
+            reads: system::ReadState::default(),
         })
     }
     fn owner(&self, id: &str, caller: &VerifiedCaller) -> Result<&Owner> {
@@ -224,6 +227,7 @@ impl Runtime {
     }
     fn cleanup(&mut self) -> crate::Result<()> {
         self.authorizer.bus().target().recheck()?;
+        self.reads.cleanup()?;
         let now = boottime_ms()?;
         let mut expired = vec![];
         for (id, owner) in &self.owners {
@@ -361,6 +365,8 @@ impl Runtime {
     }
     fn dispatch(&mut self, caller: &VerifiedCaller, operation: Operation) -> Result<Value> {
         match operation {
+            Operation::SystemCapabilities(scope) => system::capabilities(scope),
+            Operation::SystemAction(scope, expected, request) => self.reads.dispatch(caller, scope, expected, &request),
             Operation::Capabilities => Ok(envelope(
                 "capabilities",
                 json!({"interface":NAME,"prepare":true,"private_plans":true,
@@ -420,6 +426,8 @@ impl Runtime {
 }
 
 enum Operation {
+    SystemCapabilities(system::Scope),
+    SystemAction(system::Scope, &'static str, String),
     Capabilities,
     Prepare(String),
     GetPlan(String),
@@ -536,7 +544,7 @@ impl Executor {
     }
 }
 
-/// The registered service owns one fixed native bus name. No caller bus/address
+/// The registered service owns fixed native bus names. No caller bus/address
 /// selector, test authority flag, name replacement or private broadcast exists.
 pub fn serve() -> crate::Result<()> {
     let runtime = Runtime::open()?;
@@ -546,6 +554,12 @@ pub fn serve() -> crate::Result<()> {
         runtime: runtime.clone(),
         active: Arc::new(AtomicUsize::new(0)),
     };
+    for registered in [
+        connection.object_server().at(system::SYSTEM_PATH, system::System { executor:executor.clone() }),
+        connection.object_server().at(system::PACKAGES_PATH, system::Packages { executor:executor.clone() }),
+    ] {
+        if !registered.map_err(|_|Error::Authority)? { return Err(Error::Conflict); }
+    }
     if !connection
         .object_server()
         .at(PATH, executor)
@@ -553,11 +567,10 @@ pub fn serve() -> crate::Result<()> {
     {
         return Err(Error::Conflict);
     }
-    let reply = connection
-        .request_name_with_flags(NAME, zbus::fdo::RequestNameFlags::DoNotQueue.into())
-        .map_err(|_| Error::Authority)?;
-    if reply != zbus::fdo::RequestNameReply::PrimaryOwner {
-        return Err(Error::Conflict);
+    for name in [system::NAME, NAME] {
+        let reply = connection.request_name_with_flags(name, zbus::fdo::RequestNameFlags::DoNotQueue.into())
+            .map_err(|_|Error::Authority)?;
+        if reply != zbus::fdo::RequestNameReply::PrimaryOwner { return Err(Error::Conflict); }
     }
     loop {
         std::thread::sleep(Duration::from_secs(5));
@@ -568,11 +581,9 @@ pub fn serve() -> crate::Result<()> {
             "org.freedesktop.DBus",
         )
         .map_err(|_| Error::Authority)?;
-        let owner: String = bus
-            .call("GetNameOwner", &(NAME,))
-            .map_err(|_| Error::Authority)?;
-        if connection.unique_name().map(|s| s.as_str()) != Some(owner.as_str()) {
-            return Err(Error::TargetChanged);
+        for name in [system::NAME, NAME] {
+            let owner: String = bus.call("GetNameOwner", &(name,)).map_err(|_|Error::Authority)?;
+            if connection.unique_name().map(|s|s.as_str()) != Some(owner.as_str()) { return Err(Error::TargetChanged); }
         }
         runtime.lock().map_err(|_| Error::Conflict)?.cleanup()?;
     }

@@ -368,6 +368,12 @@ impl InstalledTemplate {
     pub fn catalog(&self) -> &Catalog {
         &self.catalog
     }
+    pub(crate) fn recheck(&self) -> Result<()> {
+        if let Some(target) = &self.target { target.recheck()?; }
+        self.verify()?;
+        if let Some(target) = &self.target { target.recheck()?; }
+        Ok(())
+    }
     pub fn digest(&self) -> &str {
         &self.template_sha256
     }

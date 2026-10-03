@@ -86,6 +86,16 @@ class JobTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             controller.commands("build-packages", release, "evil#output")
 
+    def test_workspace_lock_resolution_does_not_refresh_unrelated_registry_packages(self):
+        release = self.root / "source"
+        release.mkdir()
+        self.assertEqual(controller.commands("resolve-lock", release)[1][-2:], ["cargo", "generate-lockfile"])
+        (release / "Cargo.lock").write_text("existing lock fixture")
+        commands = controller.commands("resolve-lock", release)
+        self.assertEqual(commands[1][-3:], ["cargo", "update", "--workspace"])
+        self.assertEqual(commands[0], ["nix", "flake", "lock", "path:" + str(release)])
+        self.assertIn("--no-write-lock-file", commands[1])
+
     def test_optional_profile_jobs_are_separate_locked_conversion_operations(self):
         release = Path("/home/dev/aios-releases") / ("a" * 64)
         for profile in ("low", "high"):

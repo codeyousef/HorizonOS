@@ -108,7 +108,10 @@ def commands(kind, release, package=None, job_directory=None):
         return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "--workspace"],
                 ["python3", "-m", "unittest", "discover", "-s", "tests/unit", "-q"]]
     if kind == "resolve-lock":
-        return [["nix", "flake", "lock", reference], ["nix", "develop", *locked, reference + "#lock-resolution", "--command", "cargo", "generate-lockfile"]]
+        # A workspace dependency change must not refresh unrelated locked
+        # registry packages. Initial resolution still creates a missing lock.
+        cargo = ["cargo", "update", "--workspace"] if (release / "Cargo.lock").exists() else ["cargo", "generate-lockfile"]
+        return [["nix", "flake", "lock", reference], ["nix", "develop", *locked, reference + "#lock-resolution", "--command", *cargo]]
     if kind == "system-info-smoke":
         return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-cli", "--test", "system_info", "--", "--nocapture"]]
     if kind == "service-inspection-smoke":

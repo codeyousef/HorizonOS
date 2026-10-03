@@ -42,12 +42,14 @@ version = "0.1.0"
 dependencies = [
  "aios-protocol",
  "aios-state",
+ "aios-system",
  "blocking",
  "libc",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2",
+ "time",
  "uuid",
  "zbus",
 ]
