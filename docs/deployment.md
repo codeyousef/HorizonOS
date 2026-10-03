@@ -307,7 +307,11 @@ The host controls the verified official installer, pins its console-published
 SSH key, boots the installed image, verifies installation/DMI/disk/management
 identity, and checks one active local tester Wayland session with live KWin and
 Plasma processes. It captures the synthetic desktop through QMP and requests
-graceful ACPI shutdown. The report qualifies this runner and base desktop only;
+the scoped QMP stop for that owned disposable VM. The read-only probe is fixed
+public source sent over pinned SSH, so corrected probes can inspect a retained
+image without reinstalling it. Host-controller and image-source digests are
+reported separately. Disposable QMP stop is not evidence of graceful KDE logout.
+The report qualifies this runner and base desktop only;
 product application actions and AI functionality have their own acceptance gates.
 
 The image can be built without activation in the verified development guest:

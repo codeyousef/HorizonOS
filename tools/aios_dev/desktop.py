@@ -4,7 +4,9 @@ Only the registered desktop image and probe are available. Failed installations
 are retained for inspection; a resume never formats or restarts an attempted job.
 """
 from datetime import datetime, timezone
+import base64
 import os
+import re
 from pathlib import Path
 import time
 import uuid
@@ -14,6 +16,7 @@ from .config import VMConfig, invalid, load_config, read_json
 from .errors import DevctlError, ExitCode
 
 PROFILE = "synthetic-disposable-plasma-wayland-v1"
+PROBE = Path(__file__).resolve().parents[1] / "guest/desktop_probe.py"
 
 
 def identifier(value):
@@ -88,7 +91,11 @@ def prepare(owner):
 
 def observe(config):
     trust, identity = guest.enrolled_identity(config)
-    status, output, _ = sync.exchange([*guest.ssh_arguments(config)[:-1], "/run/current-system/sw/bin/aios-desktop-test-probe"], [b""], response_limit=65536, timeout=20)
+    # Like the registered job controller, only fixed public probe source enters
+    # this unprivileged SSH operation. No caller script/argument is accepted.
+    encoded = base64.b64encode(PROBE.read_bytes()).decode()
+    command = '/run/current-system/sw/bin/python3 -I -c "import base64;exec(compile(base64.b64decode(\'' + encoded + '\'),\'<aios-desktop-probe>\',\'exec\'))"'
+    status, output, _ = sync.exchange([*guest.ssh_arguments(config)[:-1], command], [b""], response_limit=65536, timeout=20)
     if status:
         raise DevctlError(ExitCode.UNMET_PREREQUISITE, "DESKTOP_NOT_READY", "Synthetic desktop session is not ready", details={"upstream_exit": status})
     try:
@@ -99,8 +106,9 @@ def observe(config):
                  and isinstance(value["session_id"], str) and 0 < len(value["session_id"]) <= 64
                  and isinstance(value["processes"], list) and 2 <= len(value["processes"]) <= 8
                  and {item["name"] for item in value["processes"]} == {"kwin_wayland", "plasmashell"}
-                 and all(set(item) == {"pid", "uid", "name"} and type(item["pid"]) is int and item["pid"] > 0 and type(item["uid"]) is int and item["uid"] == value["tester_uid"] for item in value["processes"]))
-    except (ValueError, TypeError, KeyError, UnicodeError):
+                 and all(set(item) == {"pid", "uid", "name", "executable"} and type(item["pid"]) is int and item["pid"] > 0 and type(item["uid"]) is int and item["uid"] == value["tester_uid"]
+                         and isinstance(item["executable"], str) and re.fullmatch(r"/nix/store/[a-z0-9]{32}-[A-Za-z0-9.+_-]+/bin/" + item["name"], item["executable"]) for item in value["processes"]))
+    except (ValueError, TypeError, KeyError, UnicodeError, StopIteration):
         valid = False
     if not valid:
         raise provision.failure(ExitCode.VERIFICATION_FAILURE, "DESKTOP_PROBE_MISMATCH", "Desktop probe does not match this live synthetic session")
@@ -166,9 +174,9 @@ def run(owner, run_id=None):
             screenshot = step("vm console --capture", lambda: vm.console(config, capture=True))
             report["screenshot_sha256"] = provision.digest_file(Path(screenshot["artifact_path"]))
             guest.enrolled_identity(config)
-            step("vm stop --graceful (desktop)", lambda: vm.stop(config, graceful=True))
+            step("vm stop (owned disposable)", lambda: vm.stop(config))
             report["assertions"] = {"active_local_tester_wayland_session": True, "kwin_and_plasmashell_same_uid": True,
-                                    "pinned_ssh_identity": True, "qmp_capture_and_cold_shutdown": True, "host_launched_kvm": True}
+                                    "pinned_ssh_identity": True, "qmp_capture_and_owned_shutdown": True, "host_launched_kvm": True}
     except DevctlError as error:
         code = error.exit_code
         report["error"] = {"code": error.code, "message": str(error), **error.details}

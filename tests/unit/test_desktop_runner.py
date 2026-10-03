@@ -1,5 +1,6 @@
 """Host boundary fixtures; no desktop/runtime success is established here."""
 import contextlib
+import base64
 import io
 import json
 from pathlib import Path
@@ -25,7 +26,7 @@ class DesktopTests(unittest.TestCase):
         self.config = VMConfig.from_data(Path(self.temp.name), EXAMPLE)
         self.identity = {"boot_id": "synthetic-boot-fixture"}
         self.response = {"schema_version": 1, "profile": desktop.PROFILE, "boot_id": self.identity["boot_id"], "tester_uid": 1001,
-                         "session_id": "2", "processes": [{"pid": 45, "uid": 1001, "name": "kwin_wayland"}, {"pid": 46, "uid": 1001, "name": "plasmashell"}]}
+                         "session_id": "2", "processes": [{"pid": 45, "uid": 1001, "name": "kwin_wayland", "executable": "/nix/store/" + "a"*32 + "-kwin/bin/kwin_wayland"}, {"pid": 46, "uid": 1001, "name": "plasmashell", "executable": "/nix/store/" + "b"*32 + "-plasma/bin/plasmashell"}]}
 
     def invoke(self, arguments):
         output = io.StringIO()
@@ -67,7 +68,7 @@ class DesktopTests(unittest.TestCase):
     def observe(self, value):
         with patch("aios_dev.guest.enrolled_identity", return_value=({"host_key_fingerprint": "fixture"}, self.identity)), patch("aios_dev.guest.ssh_arguments", return_value=["ssh", "identity"]), patch("aios_dev.sync.exchange", return_value=(0, json.dumps(value).encode(), b"")) as exchange:
             result = desktop.observe(self.config)
-        self.assertEqual(exchange.call_args.args[0][-1], "/run/current-system/sw/bin/aios-desktop-test-probe")
+        self.assertIn(base64.b64encode(desktop.PROBE.read_bytes()).decode(), exchange.call_args.args[0][-1])
         self.assertEqual(exchange.call_args.args[1], [b""])
         return result
 
@@ -80,7 +81,7 @@ class DesktopTests(unittest.TestCase):
     def test_fixed_probe_requires_current_boot_and_same_uid_processes(self):
         self.assertEqual(self.observe(self.response)["desktop"], self.response)
         for value in ({**self.response, "boot_id": "old"}, {**self.response, "profile": "production"}, {**self.response, "schema_version": True},
-                      {**self.response, "processes": [{"pid": 45, "uid": 0, "name": "kwin_wayland"}, self.response["processes"][1]]},
+                      {**self.response, "processes": [{**self.response["processes"][0], "uid": 0}, self.response["processes"][1]]},
                       {**self.response, "processes": []}, {**self.response, "extra": "untrusted"}):
             with self.assertRaises(DevctlError) as caught:
                 self.observe(value)
@@ -91,6 +92,7 @@ class DesktopTests(unittest.TestCase):
             with self.assertRaises(DevctlError):
                 desktop.observe(self.config)
         exchange.assert_not_called()
+
 
 
 if __name__ == "__main__":

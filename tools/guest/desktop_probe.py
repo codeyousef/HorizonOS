@@ -24,10 +24,14 @@ def main():
         if value == {"User": str(uid), "Name": "tester", "Type": "wayland", "Class": "user", "Active": "yes", "Remote": "no", "State": "active"}:
             sessions.append(session)
     processes = []
-    for line in command(["/run/current-system/sw/bin/ps", "-eo", "pid=,uid=,comm="]).splitlines():
-        pid, owner, name = line.split(maxsplit=2)
-        if int(owner) == uid and name in {"kwin_wayland", "plasmashell"}:
-            processes.append({"pid": int(pid), "uid": uid, "name": name})
+    expected = {str(Path("/run/current-system/sw/bin").joinpath(name).resolve(strict=True)): name for name in ("kwin_wayland", "plasmashell")}
+    # Nix wrappers change Linux comm (which is also truncated to 15 bytes).
+    # Match the full argv[0] to this running closure's package links instead.
+    for line in command(["/run/current-system/sw/bin/ps", "-u", "tester", "-o", "pid=,uid=,args="]).splitlines():
+        pid, owner, arguments = line.split(maxsplit=2)
+        executable = arguments.split(" ", 1)[0]
+        if int(owner) == uid and executable in expected:
+            processes.append({"pid": int(pid), "uid": uid, "name": expected[executable], "executable": executable})
     if len(sessions) != 1 or {item["name"] for item in processes} != {"kwin_wayland", "plasmashell"}:
         raise ValueError("Synthetic Wayland session is not ready")
     print(json.dumps({"schema_version": 1, "profile": profile, "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
