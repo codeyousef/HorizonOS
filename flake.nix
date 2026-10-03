@@ -49,6 +49,8 @@
         AIOS_STATE_CATALOG_JSON = builtins.toJSON stateContract.catalog;
       });
       cli = productPackage "aios-cli" "aios-cli" "aiosctl";
+      consentUi = pkgs.callPackage ./nix/packages/consent-ui.nix { };
+      consentUiTests = pkgs.callPackage ./nix/packages/consent-ui.nix { testing = true; };
       core = (productPackage "aios-core" "aios-session" "aios-sessiond").overrideAttrs (old: {
         postInstall = (old.postInstall or "") + ''
           install -Dm644 ${./nix/packages/aios-sessiond.service} "$out/share/systemd/user/aios-sessiond.service"
@@ -94,8 +96,8 @@
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios;
       nixosModules.production = import ./nix/modules/aios/production.nix;
-      packages.${system} = { aios-model-artifact = modelArtifact; aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
-      checks.${system}.host-unit = devTools;
+      packages.${system} = { aios-consent-ui = consentUi; aios-model-artifact = modelArtifact; aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
+      checks.${system} = { host-unit = devTools; consent-ui = consentUiTests; };
       lib.stateContract = stateContract;
       lib.catalogPackages = builtins.listToAttrs (map (entry: {
         name = entry.id;
