@@ -19,6 +19,7 @@ fn run() -> io::Result<()> {
     let path = match args.as_slice() {
         [] => PathBuf::from(format!("/run/user/{}/aios/session.sock", nix::unistd::geteuid())),
         [flag, path] if flag == "--socket" => PathBuf::from(path),
+        [flag, path, _, _] if flag == "--qualification-inference" => PathBuf::from(path),
         _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, "usage: aios-sessiond [--socket PRIVATE_PATH]")),
     };
     if !path.is_absolute() { return Err(io::Error::new(io::ErrorKind::InvalidInput,"socket must be absolute")); }
@@ -30,7 +31,15 @@ fn run() -> io::Result<()> {
     if !info.is_dir() || info.uid() != nix::unistd::geteuid().as_raw() || info.mode() & 0o077 != 0 {
         return Err(io::Error::new(io::ErrorKind::PermissionDenied,"socket parent must be private and owned"));
     }
-    let state: SharedState = Arc::new(Mutex::new(State::default()));
+    let endpoint = match args.as_slice() {
+        [] => Some(aios_session::inference::Endpoint::installed()),
+        [flag, _, model_socket, pid] if flag == "--qualification-inference" => Some(
+            aios_session::inference::Endpoint::qualification(PathBuf::from(model_socket), pid.parse().map_err(|_|io::Error::other("invalid model PID"))?)
+                .map_err(|_|io::Error::other("development inference qualification rejected"))?),
+        _ => None,
+    };
+    let state: SharedState = Arc::new(Mutex::new(if endpoint.is_some() { State::with_inference() } else { State::default() }));
+    if let Some(endpoint) = endpoint { let state=state.clone(); thread::spawn(move ||aios_session::inference::run(state,endpoint)); }
     // Default user deployment owns the public control name and the private
     // socket together. Isolated --socket fixtures export only the private API.
     let _bus = if args.is_empty() {

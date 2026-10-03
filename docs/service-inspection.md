@@ -36,10 +36,21 @@ typed invocation, submission, status, private paginated events, cancellation
 and forgetting. Task IDs and service handles are bound to the authenticated
 process identity and expire. A repeated nonce with the same typed request
 returns the same task; a changed request with that nonce returns `CONFLICT`.
-There is currently no inference runtime: submissions explicitly terminate
-with `MODEL_UNAVAILABLE` and perform no mutation. Task ownership does not yet
-support resuming from a different client process. Cancellation of these
-terminal tasks reports that state without pretending to interrupt a model.
+Default daemon startup connects on demand to the fixed, root-owned model
+socket for read-only `ask`/`diagnose` requests. A separate worker obtains fresh
+system information and requests a constrained final answer from local CPU
+inference. It independently parses the output and returns the attached evidence;
+it never dispatches a model-proposed action. Without an available model endpoint,
+the task terminates with `MODEL_UNAVAILABLE`. `act`/`automate` orchestration is
+currently unsupported. The isolated `--socket` fixture remains model-disabled.
+Task ownership does not support resuming from a different client connection.
+
+Queued cancellation stops before inference. Running cancellation remains in
+`cancelling` until the native context terminates; transport failures report their
+actual error. Forgetting or losing a requester cancels outstanding work. The
+90-second task deadline includes queueing and observation, and terminal results
+expire after five minutes. Events record real transitions without broadcasting
+question text or evidence.
 
 Build the `aios-core` and `aios-cli` flake packages in a verified development
 guest. `aios-core` contains the user daemon and its hardened systemd user unit.
@@ -73,9 +84,9 @@ public bus owner terminates the daemon so the service manager can restart it.
 
 `aiosctl status --json` reports the authenticated session's capabilities and
 availability. `aiosctl ask TEXT --json` submits a read-only question and reads
-its status through the same authenticated bus connection. Until inference
-is implemented, its explicit failed result is `MODEL_UNAVAILABLE`, with no
-answer fabricated and no mutation performed. The client pins and rechecks
+its terminal status through the same authenticated bus connection. Closing that
+connection revokes ongoing inference rather than leaving detached work. The
+client pins and rechecks
 the daemon's live owner identity; default endpoints ignore environment
 variables that redirect the bus or select another user's runtime directory.
 
@@ -86,12 +97,11 @@ cancellation and deletion JSON include version, task ID and operation.
 Stable D-Bus errors are named `org.aios.Error.CODE`, using the PRD's codes.
 The AIOS interface declares no task/evidence broadcast signals.
 
-Full module/image activation, system-bus project interfaces, persistent evidence storage,
-interactive grants, journal/process providers and inference are separate
-contracts still to be implemented. Private streams and public lifecycle calls
-have been qualified in two actual guest users. Reconnecting creates a new
-authenticated connection and cannot inherit a previous connection's authority.
-Active-work cancellation and trusted graphical grants remain separate contracts.
+Module/image activation, persistent evidence enrollment, interactive grants,
+journal/process diagnosis and the multi-step tool loop have separate contracts.
+Reconnecting creates a new authenticated connection and cannot inherit a
+previous connection's authority. Graphical selection remains an observation;
+selection alone does not authorize UI control.
 
 `python3 tools/devctl.py test --suite integration --provider service-inspection
 --json` runs the registered real guest CLI and daemon tests against the guest's
@@ -104,3 +114,11 @@ tests; they do not establish two-user desktop or privileged-policy acceptance.
 systemd user service, its effective hardening, default endpoints and restart.
 It refuses to replace an existing user service and cleans up only its own
 temporary runtime registration.
+
+`python3 tools/devctl.py test --suite integration --provider session-inference
+--json` runs actual native session and model daemons with private development
+qualification sockets. It verifies an evidence-backed question, nonce conflict,
+reconnect denials, queued and active cancellation, native context termination,
+private events, forgetting and unsupported write modes. This qualification is
+one real UID; it does not establish the installed model sandbox, two-user
+inference isolation, graphical consent or the complete orchestration loop.

@@ -85,3 +85,5 @@ pub mod contracts;
 
 pub mod validation;
 pub mod registry;
+
+pub mod inference;

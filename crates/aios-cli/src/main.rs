@@ -23,10 +23,16 @@ fn main() {
                 let client = aios_session::bus::Client::connect_user_bus()?;
                 let task = client.submit(&aios_session::Submit { mode: aios_session::Mode::Ask, text: text.clone(),
                     client_nonce: new_nonce(), context_handles: vec![], selected_app_handle: None, selected_session_handle: None })?;
-                client.status(&task)
+                let deadline=std::time::Instant::now()+std::time::Duration::from_secs(95);
+                loop {
+                    let status=client.status(&task)?;
+                    if matches!(status["state"].as_str(),Some("completed"|"failed"|"cancelled")) {break Ok(status);}
+                    if std::time::Instant::now()>=deadline {return Err(aios_protocol::contracts::ErrorCode::DeadlineExceeded);}
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
             })();
             match outcome {
-                Ok(value) => { let failed = value["state"] == "failed"; println!("{value}"); std::process::exit(if failed { 1 } else { 0 }); },
+                Ok(value) => { let failed = value["state"] != "completed"; println!("{value}"); std::process::exit(if failed { 1 } else { 0 }); },
                 Err(code) => api_error(code),
             }
         }

@@ -18,7 +18,7 @@ import uuid
 import snapshot as source
 
 PACKAGES = ("aios-core", "aios-model", "aios-desktop", "aios-cli", "aios-dev-tools")
-KINDS = {"resolve-lock", "build-packages", "build-system", "build-desktop-test", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "upstream-compatibility-smoke", "host-boundary-smoke", "protocol-conformance-smoke", "model-profile-low-smoke", "model-profile-high-smoke", "model-inference-smoke", "model-service-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "supervision-probe"}
+KINDS = {"resolve-lock", "build-packages", "build-system", "build-desktop-test", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "upstream-compatibility-smoke", "host-boundary-smoke", "protocol-conformance-smoke", "model-profile-low-smoke", "model-profile-high-smoke", "model-inference-smoke", "model-service-smoke", "session-inference-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "supervision-probe"}
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 LIMIT = 4 * 1024**2
 cancelled = False
@@ -151,6 +151,8 @@ def commands(kind, release, package=None, job_directory=None):
         return [["python3", str(release / "tools/guest/guard_state_smoke.py")]]
     if kind == "development-boundary-smoke":
         return [["python3", str(release / "tools/guest/development_boundary_smoke.py")]]
+    if kind == "session-inference-smoke":
+        return [["python3",str(release / "tools/guest/session_inference_smoke.py")]]
     if kind == "model-service-smoke":
         return [["python3",str(release / "tools/guest/model_service_smoke.py")]]
     if kind == "supervision-probe":

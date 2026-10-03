@@ -48,6 +48,11 @@ fn real_service_handle_and_task_lifecycle() {
     assert_eq!(client.call(request).unwrap().data.unwrap()["request_id"],task);
     let status = client.call(json!({"kind":"get_status","task_id":task})).unwrap().data.unwrap();
     assert_eq!(status["error"],"MODEL_UNAVAILABLE"); assert_eq!(status["mutation_performed"],false);
+    // Real polling must outlive the old 128-frame connection budget without
+    // losing the originating connection or granting authority after reconnect.
+    for _ in 0..150 {
+        assert_eq!(client.call(json!({"kind":"get_status","task_id":task})).unwrap().data.unwrap()["request_id"],task);
+    }
     let events = client.call(json!({"kind":"get_events","task_id":task,"after_sequence":0,"limit":1})).unwrap().data.unwrap();
     assert_eq!(events["events"].as_array().unwrap().len(),1); assert_eq!(events["complete"],false);
     let cancelled = client.call(json!({"kind":"cancel","task_id":task})).unwrap().data.unwrap();

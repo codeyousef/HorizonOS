@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Actual session lifecycle and local CPU model in a development guest.
+
+Private qualification sockets and one real UID; no production sandbox, trusted
+GUI grant, write tool, or complete orchestration-loop acceptance is claimed.
+"""
+import hashlib
+import json
+import os
+from pathlib import Path
+import pwd
+import subprocess
+import tempfile
+import time
+import uuid
+from model_service_smoke import Client
+
+
+def main():
+    release = Path(__file__).resolve().parents[2]
+    outputs = json.loads(subprocess.check_output(['nix','build','--json','--no-link','--no-update-lock-file','--no-write-lock-file',
+        'path:'+str(release)+'#aios-model','path:'+str(release)+'#aios-core'],timeout=900))
+    paths = [Path(value['outputs']['out']) for value in outputs]
+    model = next(p/'bin/aios-modeld' for p in paths if (p/'bin/aios-modeld').exists())
+    session = next(p/'bin/aios-sessiond' for p in paths if (p/'bin/aios-sessiond').exists())
+    source = json.loads((release/'models/source-lock.json').read_text())
+    store = Path(pwd.getpwuid(os.geteuid()).pw_dir)/'.aios-models'
+    artifact = store/('qwen3.5-2b-'+source['revision'])
+    observations = {}
+    with tempfile.TemporaryDirectory(prefix='session-inference-',dir=store) as temporary:
+        directory = Path(temporary); model_socket=directory/'model.sock'; session_socket=directory/'session.sock'
+        with (directory/'model.log').open('w') as model_log, (directory/'session.log').open('w') as session_log:
+            native = subprocess.Popen([str(model),'--qualification',str(artifact),str(model_socket)],stdout=model_log,stderr=model_log)
+            broker = None; clients = []
+            try:
+                deadline = time.monotonic()+5
+                while not model_socket.exists():
+                    if native.poll() is not None or time.monotonic()>deadline: raise RuntimeError('actual model daemon unavailable')
+                    time.sleep(.01)
+                broker = subprocess.Popen([str(session),'--qualification-inference',str(session_socket),str(model_socket),str(native.pid)],stdout=session_log,stderr=session_log)
+                deadline=time.monotonic()+5
+                while not session_socket.exists():
+                    if broker.poll() is not None or time.monotonic()>deadline: raise RuntimeError('actual session broker unavailable')
+                    time.sleep(.01)
+                client=Client(session_socket); other=Client(session_socket);clients.extend([client,other])
+                def call(operation):
+                    reply=client.call(operation)
+                    if reply['error']: raise RuntimeError('owned operation denied: '+str(reply['error']))
+                    return reply['data']
+                def submit(text,nonce=None,mode='ask'):
+                    return call({'kind':'submit','request':{'mode':mode,'text':text,'client_nonce':nonce or str(uuid.uuid4())}})['request_id']
+                def status(task): return call({'kind':'get_status','task_id':task})
+                def wait(task):
+                    until=time.monotonic()+95
+                    while time.monotonic()<until:
+                        result=status(task)
+                        if result['state'] in ('completed','failed','cancelled'): return result
+                        time.sleep(.025)
+                    raise RuntimeError('session task failed to terminate')
+                nonce=str(uuid.uuid4()); question='What operating system is running? Cite the provided observation.'
+                task=submit(question,nonce)
+                if submit(question,nonce)!=task: raise RuntimeError('idempotent submission changed ID')
+                changed=client.call({'kind':'submit','request':{'mode':'ask','text':'different question','client_nonce':nonce}})
+                if changed['error']['code']!='CONFLICT': raise RuntimeError('nonce drift admitted')
+                for kind in ('get_status','cancel','forget'):
+                    if other.call({'kind':kind,'task_id':task})['error']['code']!='PERMISSION_DENIED': raise RuntimeError('reconnected caller gained private task')
+                result=wait(task); observations['answer']=result
+                if result['state']!='completed' or result['output']['response']['kind']!='answer' or 'NixOS' not in result['output']['response']['text']:
+                    raise RuntimeError('actual evidence-backed answer failed')
+                evidence=result['output']['evidence'][0]
+                if result['output']['response']['evidence_ids']!=evidence['evidence_ids'] or evidence['data']['os_id']!='nixos' or result['mutation_performed']:
+                    raise RuntimeError('answer gained unenrolled evidence or effect')
+                # Open the model monitor after cold inference: idle private
+                # streams deliberately expire while a model is loading.
+                monitor=Client(model_socket);clients.append(monitor)
+                active=submit('Explain the observed NixOS system in great detail, using a long numbered list of at least 100 observations. Cite only the provided evidence.')
+                until=time.monotonic()+5
+                while not monitor.call({'kind':'get_status'})['data']['busy']:
+                    if status(active)['state'] in ('completed','failed','cancelled') or time.monotonic()>until: raise RuntimeError('actual generation did not remain active for cancellation probe')
+                    time.sleep(.005)
+                queued=submit('What OS is running?')
+                observations['queued_cancel']=call({'kind':'cancel','task_id':queued})
+                if wait(queued)['error']!='CANCELLED': raise RuntimeError('queued task did not cancel')
+                began=time.monotonic();observations['active_cancel']=call({'kind':'cancel','task_id':active}); observations['cancelled_status']=wait(active)
+                observations['cancel_ms']=int((time.monotonic()-began)*1000)
+                if observations['cancelled_status']['error']!='CANCELLED' or observations['cancel_ms']>2000: raise RuntimeError('active request did not cancel promptly')
+                until=time.monotonic()+2
+                while monitor.call({'kind':'get_status'})['data']['busy']:
+                    if time.monotonic()>until: raise RuntimeError('native CPU context survived cancellation')
+                    time.sleep(.01)
+                events=call({'kind':'get_events','task_id':active,'after_sequence':0,'limit':100});observations['events']=events
+                if not events['complete'] or events['events'][-1]['kind']!='cancelled' or any('text' in event for event in events['events']): raise RuntimeError('private actual event history mismatch')
+                if not call({'kind':'cancel','task_id':active})['already_terminal']: raise RuntimeError('terminal cancel not idempotent')
+                call({'kind':'forget','task_id':task})
+                if client.call({'kind':'get_status','task_id':task})['error']['code']!='TARGET_NOT_FOUND': raise RuntimeError('forgotten answer survived')
+                for mode in ('act','automate'):
+                    denied=wait(submit('Change system configuration',mode=mode))
+                    if denied['error']!='UNSUPPORTED_CAPABILITY' or denied['mutation_performed']: raise RuntimeError('unfinished write orchestration gained authority')
+                print('AIOS_SESSION_INFERENCE_VERIFIED='+json.dumps({'schema_version':1,'evidence_kind':'actual-session-native-cpu-model-development-qualification',
+                    'uid':os.geteuid(),'model_pid':native.pid,'session_pid':broker.pid,'model_package':str(model.parent.parent),'session_package':str(session.parent.parent),
+                    'model_manifest_sha256':hashlib.sha256((release/'models/lock.json').read_bytes()).hexdigest(),
+                    'results':observations,'two_real_uids_verified':False,'production_sandbox_verified':False,'trusted_graphical_confirmation_verified':False,'mutation_performed':False}),flush=True)
+            finally:
+                for value in clients: value.socket.close()
+                for process in (broker,native):
+                    if process and process.poll() is None:
+                        process.terminate()
+                        try: process.wait(timeout=5)
+                        except subprocess.TimeoutExpired: process.kill();process.wait(timeout=5)
+                print('AIOS_SESSION_INFERENCE_RETAINED_OBSERVATIONS='+json.dumps(observations),flush=True)
+                model_log.flush();session_log.flush()
+                print('AIOS_SESSION_INFERENCE_LOGS='+json.dumps({'model':(directory/'model.log').read_text(),'session':(directory/'session.log').read_text()}),flush=True)
+
+
+if __name__=='__main__': main()

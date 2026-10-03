@@ -1,13 +1,14 @@
 //! Private, peer-authenticated read-only control and task lifecycle.
 pub mod identity;
 pub mod bus;
+pub mod inference;
 use aios_protocol::{MAX_TASK_BYTES, read_frame_with_limit, write_frame, contracts::{Action, ErrorCode, ProviderError, parse_tool_call, canonical_json}};
 use aios_system::services::{service_result, validate_service_name};
 use identity::Peer;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json, value::RawValue};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, io, os::unix::net::UnixStream, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{collections::{HashMap, VecDeque}, io, os::unix::net::UnixStream, sync::{Arc, Mutex, atomic::{AtomicU8, Ordering}}, time::{Duration, Instant}};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
 
@@ -94,14 +95,41 @@ pub struct Response {
 pub struct TaskStatus {
     pub schema_version: u32, pub operation: String,
     pub request_id: String, pub mode: Mode, pub state: String,
-    pub submitted_at: String, pub mutation_performed: bool, pub error: ErrorCode,
+    pub submitted_at: String, pub mutation_performed: bool, pub error: Option<ErrorCode>,
+    pub output: Option<Value>,
 }
 
-struct Task { owner: Peer, expires: Instant, nonce: String, digest: [u8; 32], status: TaskStatus }
+struct Task {
+    owner: Peer, expires: Instant, nonce: String, digest: [u8; 32], status: TaskStatus,
+    deadline: Instant, control: Arc<AtomicU8>, text: Option<String>, events: Vec<Value>,
+}
+impl Task {
+    fn terminal(&self) -> bool { matches!(self.status.state.as_str(), "completed" | "failed" | "cancelled") }
+    fn event(&mut self, kind: &str) {
+        self.events.push(json!({"sequence":self.events.len()+1,"kind":kind,"request_id":self.status.request_id,"observed_at":now()}));
+    }
+    fn finish(&mut self, result: Result<Value, ErrorCode>) {
+        if self.terminal() { return; }
+        let cause = self.control.load(Ordering::Acquire);
+        let result = match result { Ok(_) if cause == 1 => Err(ErrorCode::Cancelled), Ok(_) if cause == 2 => Err(ErrorCode::DeadlineExceeded), other => other };
+        match result {
+            Ok(output) => { self.status.output = Some(output); self.status.state = "completed".into(); }
+            Err(error) => { self.status.error = Some(error); self.status.state = if error == ErrorCode::Cancelled { "cancelled" } else { "failed" }.into(); }
+        }
+        if let Some(mut text) = self.text.take() { inference::wipe(&mut text); }
+        self.expires = Instant::now() + Duration::from_secs(300);
+        let kind = self.status.state.clone(); self.event(&kind);
+        let last = self.events.last_mut().expect("terminal event");
+        last["code"] = json!(self.status.error); last["mutation_performed"] = json!(false);
+    }
+}
+impl Drop for Task {
+    fn drop(&mut self) { self.control.store(1, Ordering::Release); if let Some(text) = &mut self.text { inference::wipe(text); } }
+}
 struct UiCandidate { owner: Peer, expires: Instant, session: identity::GraphicalSession }
 struct Handle { owner: Peer, expires: Instant, unit: String }
 #[derive(Default)]
-pub struct State { tasks: HashMap<String, Task>, handles: HashMap<String, Handle>, ui_candidates: HashMap<String, UiCandidate> }
+pub struct State { tasks: HashMap<String, Task>, handles: HashMap<String, Handle>, ui_candidates: HashMap<String, UiCandidate>, queue: VecDeque<String>, inference_configured: bool, inference_available: bool }
 pub type SharedState = Arc<Mutex<State>>;
 
 fn now() -> String { OffsetDateTime::now_utc().format(&Rfc3339).expect("valid timestamp") }
@@ -109,11 +137,27 @@ fn uuid(value: &str) -> bool { Uuid::parse_str(value).is_ok_and(|id| id.to_strin
 fn provider<T: Serialize>(value: T) -> Result<Value, ErrorCode> { serde_json::to_value(value).map_err(|_| ErrorCode::InvalidArgument) }
 
 impl State {
+    pub fn with_inference() -> Self { Self { inference_configured: true, ..Self::default() } }
     fn prune(&mut self) {
         let time = Instant::now();
-        self.tasks.retain(|_, task| task.expires > time);
+        for task in self.tasks.values_mut() {
+            if !task.terminal() && task.deadline <= time {
+                let _=task.control.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire);
+                if task.status.state == "queued" { task.finish(Err(if task.control.load(Ordering::Acquire)==1 {ErrorCode::Cancelled}else{ErrorCode::DeadlineExceeded})); }
+                else if task.status.state != "cancelling" { task.status.state="cancelling".into(); task.event("deadline_requested"); }
+            }
+        }
+        self.tasks.retain(|_, task| !task.terminal() || task.expires > time);
+        self.queue.retain(|id| self.tasks.get(id).is_some_and(|task| !task.terminal()));
         self.handles.retain(|_, handle| handle.expires > time);
         self.ui_candidates.retain(|_, candidate| candidate.expires > time);
+    }
+    fn disconnect(&mut self, peer: &Peer) {
+        for task in self.tasks.values_mut().filter(|task| task.owner == *peer && !task.terminal()) {
+            let _=task.control.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
+            if task.status.state == "queued" { task.finish(Err(ErrorCode::Cancelled)); }
+            else if task.status.state != "cancelling" { task.status.state="cancelling".into(); task.event("requester_disconnected"); }
+        }
     }
     fn task(&self, id: &str, peer: &Peer) -> Result<&Task, ErrorCode> {
         if id.is_empty() || id.chars().count() > 128 { return Err(ErrorCode::InvalidArgument); }
@@ -125,7 +169,7 @@ impl State {
         self.prune();
         match operation {
             Operation::GetCapabilities => Ok(json!({"schema_version":1,"request_id":Uuid::new_v4().to_string(),"operation":"capabilities","actions":["system.info","system.service_status"],
-                "read_only":true,"inference_available":false,"ui_enabled":false,"ui_session_selection_available":true,"transport":"private-unix",
+                "read_only":true,"inference_available":self.inference_available,"inference_configured":self.inference_configured,"ui_enabled":false,"ui_session_selection_available":true,"transport":"private-unix",
                 "task_request_max_bytes":MAX_TASK_BYTES,"session_associated":peer.logind_session.is_some()})),
             Operation::SelectUiSession { session_id } => {
                 if self.ui_candidates.len()>=64 || self.ui_candidates.values().filter(|c|c.owner==*peer).count()>=8 {return Err(ErrorCode::ResourceExhausted);}
@@ -186,27 +230,38 @@ impl State {
                 }
                 if self.tasks.len() >= 64 || self.tasks.values().filter(|t| t.owner == *peer).count() >= 8 { return Err(ErrorCode::ResourceExhausted); }
                 let id = Uuid::new_v4().to_string();
-                // Never guess an action from text, execute a mutation or fake a
-                // model answer. Lifecycle remains available while model is absent.
-                let status = TaskStatus { schema_version: 1, operation: "task_status".into(), request_id: id.clone(), mode: request.mode, state: "failed".into(), submitted_at: now(),
-                    mutation_performed: false, error: ErrorCode::ModelUnavailable };
-                self.tasks.insert(id.clone(), Task { owner: peer.clone(), expires: Instant::now() + Duration::from_secs(300),
-                    nonce: request.client_nonce, digest, status });
+                let submitted_at = now();
+                let deadline = Instant::now() + Duration::from_secs(90);
+                let status = TaskStatus { schema_version: 1, operation: "task_status".into(), request_id: id.clone(), mode: request.mode,
+                    state: "queued".into(), submitted_at, mutation_performed: false, error: None, output: None };
+                let mut task = Task { owner: peer.clone(), expires: deadline + Duration::from_secs(300),
+                    nonce: request.client_nonce, digest, status, deadline, control: Arc::new(AtomicU8::new(0)), text: Some(request.text), events: vec![] };
+                task.event("accepted");
+                if !self.inference_configured { task.finish(Err(ErrorCode::ModelUnavailable)); }
+                else if matches!(request.mode, Mode::Act | Mode::Automate) { task.finish(Err(ErrorCode::UnsupportedCapability)); }
+                else { self.queue.push_back(id.clone()); }
+                self.tasks.insert(id.clone(), task);
                 Ok(json!({"request_id":id}))
             },
             Operation::GetStatus { task_id } => provider(&self.task(&task_id, peer)?.status),
             Operation::GetEvents { task_id, after_sequence, limit } => {
                 let task = self.task(&task_id, peer)?;
                 if !(1..=100).contains(&limit) { return Err(ErrorCode::InvalidArgument); }
-                let all = [json!({"sequence":1,"kind":"accepted","request_id":task_id,"observed_at":task.status.submitted_at}),
-                    json!({"sequence":2,"kind":"failed","request_id":task_id,"code":"MODEL_UNAVAILABLE","mutation_performed":false})];
-                let events = all.into_iter().filter(|event| event["sequence"].as_u64().unwrap() > after_sequence).take(limit as usize).collect::<Vec<_>>();
+                let events = task.events.iter().filter(|event| event["sequence"].as_u64().unwrap() > after_sequence).take(limit as usize).cloned().collect::<Vec<_>>();
                 let last = events.last().and_then(|e| e["sequence"].as_u64()).unwrap_or(after_sequence);
-                Ok(json!({"schema_version":1,"request_id":task_id,"operation":"task_events","events":events,"complete":last>=2,"next_sequence":last}))
+                Ok(json!({"schema_version":1,"request_id":task_id,"operation":"task_events","events":events,
+                    "complete":task.terminal() && last>=task.events.len() as u64,"next_sequence":last}))
             },
             Operation::Cancel { task_id } => {
                 self.task(&task_id, peer)?;
-                Ok(json!({"schema_version":1,"request_id":task_id,"operation":"cancellation","cancelled":false,"already_terminal":true,"mutation_performed":false}))
+                let task = self.tasks.get_mut(&task_id).expect("authenticated task");
+                let terminal = task.terminal();
+                if !terminal && task.control.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                    if task.status.state == "queued" { task.finish(Err(ErrorCode::Cancelled)); }
+                    else { task.status.state = "cancelling".into(); task.event("cancellation_requested"); }
+                }
+                Ok(json!({"schema_version":1,"request_id":task_id,"operation":"cancellation","cancelled":!terminal,
+                    "already_terminal":terminal,"mutation_performed":false,"boundary":"no_side_effects"}))
             },
             Operation::Forget { task_id } => {
                 self.task(&task_id, peer)?;
@@ -217,12 +272,18 @@ impl State {
     }
 }
 
+struct ConnectionOwner { state: SharedState, peer: Peer }
+impl Drop for ConnectionOwner { fn drop(&mut self) { if let Ok(mut state)=self.state.lock() { state.disconnect(&self.peer); } } }
+
 pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     let mut peer = identity::authenticate(&stream).map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "untrusted peer"))?;
     peer.connection_id = Some(Uuid::new_v4().to_string());
-    for _ in 0..128 {
+    let _owner = ConnectionOwner { state: state.clone(), peer: peer.clone() };
+    // A 90-second task must remain inspectable/cancellable on its original
+    // authenticated connection; short polling cannot force a reconnect.
+    for _ in 0..4096 {
         let Some(frame) = read_frame_with_limit(&mut stream, MAX_TASK_BYTES)? else { return Ok(()); };
         identity::verify(&stream, &peer).map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "peer changed"))?;
         let request: Request = serde_json::from_str(&frame).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid request"))?;

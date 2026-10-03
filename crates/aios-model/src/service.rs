@@ -20,9 +20,7 @@ pub(crate) fn wipe(bytes: &mut [u8]) {
 fn wipe_text(text: &mut String) { unsafe { wipe(text.as_bytes_mut()); } }
 struct Secret(String);
 impl Drop for Secret { fn drop(&mut self) { wipe_text(&mut self.0); } }
-impl Drop for Generation {
-    fn drop(&mut self) { wipe_text(&mut self.system_prompt);wipe_text(&mut self.user_prompt); }
-}
+
 
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 struct Owner { uid:u32,gid:u32,pid:i32,connection:Uuid }
