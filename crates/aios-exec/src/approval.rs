@@ -165,6 +165,9 @@ pub struct Authorizer {
     volatile: Volatile,
 }
 impl Authorizer {
+    pub(crate) fn bus(&self) -> &SystemBus {
+        &self.bus
+    }
     pub fn open() -> Result<Self> {
         let bus = SystemBus::connect()?;
         let policy = policy::InstalledPolicy::load(bus.target())?;

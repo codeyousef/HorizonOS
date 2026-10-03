@@ -19,15 +19,14 @@ let
   '';
   serviceUsers = [ "aios-state" "aios-observer" "aios-builder" "aios-model" ];
 in {
-  imports = [ ../../modules/aios ../../modules/aios/template.nix ] ++ lib.optional (builtins.pathExists ../../../managed.json) (
-    assert builtins.pathExists ../../../catalog.json;
-    assert builtins.readFile ../../../catalog.json == builtins.toJSON aiosStateContract.catalog;
+  imports = [ ../../modules/aios ../../modules/aios/template.nix (
+    assert !(builtins.pathExists ../../../managed.json) || (builtins.pathExists ../../../catalog.json && builtins.readFile ../../../catalog.json == builtins.toJSON aiosStateContract.catalog);
     import ../../state/managed.nix {
       catalog = aiosStateContract.catalog;
-      managedJSON = builtins.readFile ../../../managed.json;
+      managedJSON = if builtins.pathExists ../../../managed.json then builtins.readFile ../../../managed.json else builtins.toJSON aiosStateContract.defaults;
       installationStateVersion = "26.05";
     }
-  );
+  ) ];
   assertions = [ { assertion = valid; message = "Development enrollment must match the fixed schema and management identity."; } ];
   nixpkgs.hostPlatform = "x86_64-linux";
   system.stateVersion = "26.05";
@@ -65,7 +64,7 @@ in {
   services.displayManager.autoLogin.enable = false;
   services.pipewire = { enable = true; alsa.enable = true; pulse.enable = true; };
   security.rtkit.enable = true;
-  # No model, indexer or incomplete control plane is started by this base image.
+  # Executor1 serves authenticated preparation; model and indexer stay unloaded.
   services.aios.enable = false;
   services.aios.development = {
     enable = true;

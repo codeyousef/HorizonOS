@@ -40,14 +40,16 @@ def main():
         report["root_mountinfo"] = [line for line in mounts.splitlines()
             if len(line.split()) > 4 and line.split()[4] == "/"]
         report["uid_map"] = Path("/proc/self/uid_map").read_text().strip()
-        result = subprocess.run([str(executable)], capture_output=True, timeout=15, check=False)
-        report.update(argv=[str(executable)], upstream_exit=result.returncode)
+        argv = [str(executable), "--native-preflight"]
+        result = subprocess.run(argv, capture_output=True, timeout=15, check=False)
+        report.update(argv=argv, upstream_exit=result.returncode)
         if len(result.stdout) > 16384 or len(result.stderr) > 16384:
             raise ValueError("preflight output limit")
         value = json.loads(result.stdout)
         report["native_result"] = value
-        report["native_preflight_verified"] = result.returncode == 9 and value == {
-            "schema_version":1,"error":"BROKER_RUNTIME_ADAPTER_UNAVAILABLE"}
+        report["native_preflight_verified"] = result.returncode == 0 and value == {
+            "schema_version":1,"native_preflight_verified":True,"request_transport_available":True,
+            "authorization_available":False,"activation_available":False}
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         report["failure"] = type(error).__name__
     guard_report = {"schema_version":1,"evidence_kind":"actual-installed-root-guard-artifact-intake",

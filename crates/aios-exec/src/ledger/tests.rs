@@ -134,6 +134,33 @@ fn separate_baselines_and_immutable_candidate_survive_reopen() {
     );
 }
 #[test]
+fn broker_restart_cancels_only_pre_effect_plans_and_preserves_build_lock() {
+    let f = fixture();
+    let (mut l, p, _) = registered(&f);
+    l.cancel_abandoned_pre_effects().unwrap();
+    assert_eq!(l.status(&p.plan_id, 1000).unwrap().state, State::Cancelled);
+    assert_eq!(
+        l.history(&p.plan_id, 1000).unwrap().last().unwrap().2,
+        "broker-restarted-before-system-effects"
+    );
+    drop(l);
+    let reopened = ledger(&f);
+    assert_eq!(
+        reopened.status(&p.plan_id, 1000).unwrap().state,
+        State::Cancelled
+    );
+    drop(reopened);
+    let f = fixture();
+    let (mut l, p, _) = building(&f);
+    l.cancel_abandoned_pre_effects().unwrap();
+    assert_eq!(l.status(&p.plan_id, 1000).unwrap().state, State::Building);
+    let (other, candidate) = prepare(&f);
+    assert_eq!(
+        l.register(&other, &candidate, &f.store).unwrap_err(),
+        Error::Conflict
+    );
+}
+#[test]
 fn another_uid_and_changed_transaction_intent_cannot_reuse_plan() {
     let f = fixture();
     let (mut l, mut p, c) = registered(&f);

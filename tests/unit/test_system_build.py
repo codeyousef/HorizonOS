@@ -22,6 +22,16 @@ KEY = "ssh-ed25519 " + base64.b64encode(b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x0
 
 
 class SystemCandidateTests(unittest.TestCase):
+    def test_generated_executor_rejects_wants_only_stub_and_changed_privilege_or_command(self):
+        original = (ROOT / "nix/packages/aios-execd.service").read_bytes()
+        executable = "/nix/store/" + "a"*32 + "-fixture-executor/bin/aios-execd"
+        expected = original.replace(b"@EXECUTABLE@",executable.encode())
+        self.assertEqual(builder.executor_unit_bytes(expected,original,executable),hashlib.sha256(expected).hexdigest())
+        for observed in (b"[Unit]\n[Service]\n[Install]\nWantedBy=multi-user.target\n",
+            expected.replace(b"Type=dbus",b"Type=oneshot"), expected.replace(b"User=root",b"User=dev"),
+            expected.replace(b" --serve",b" --native-preflight")):
+            with self.assertRaises(ValueError): builder.executor_unit_bytes(observed,original,executable)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aios-system-candidate-")
         self.addCleanup(self.temp.cleanup)

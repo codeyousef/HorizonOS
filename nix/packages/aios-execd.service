@@ -1,0 +1,45 @@
+[Unit]
+Description=Horizon OS authenticated plan executor
+After=dbus.service polkit.service aios-bootstrap-identity.service
+Requires=dbus.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=dbus
+BusName=org.aios.Executor1
+ExecStart=@EXECUTABLE@ --serve
+User=root
+Group=root
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=10
+NoNewPrivileges=true
+# Native peer/service executable identity requires readonly proc inspection.
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+AmbientCapabilities=
+PrivateUsers=false
+PrivateTmp=true
+PrivateNetwork=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aios/candidates /var/lib/aios/transactions
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=~ptrace mount umount2 reboot kexec_load kexec_file_load
+TasksMax=64
+MemoryMax=512M
+LimitNOFILE=256
+
+[Install]
+WantedBy=multi-user.target

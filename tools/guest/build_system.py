@@ -221,6 +221,9 @@ def verify_template(realized, closure, enrolled, source_manifest, expected_locks
         observed.update((Path(parent) / name).relative_to(template).as_posix() for name in names)
     if observed != listed | {"template.json"} or not {"flake.nix", "flake.lock", "catalog.json", ENROLLMENT} <= listed:
         raise ValueError("template source inventory incomplete or has unlisted files")
+    required_contracts = {name for name in expected if name.startswith(("schemas/", "models/")) and name.endswith(".json")}
+    if not required_contracts <= listed:
+        raise ValueError("template omits normative contracts needed to rebuild its packages")
     catalog = source.decode(read_template_file(template, "catalog.json"))
     if authority["lock_sha256"] != expected_locks["flake.lock"] or catalog["catalog_revision"] != authority["catalog_revision"] or catalog["content"]["base_template_revision"] != authority["base_template_revision"]:
         raise ValueError("built template catalog/lock identity differs")
@@ -272,6 +275,28 @@ def verify_approval(realized, closure, source_manifest):
             raise ValueError("realized approval policy caches or implies authorization")
     return {"authority":record,"root_owned_readonly_policy_verified":True,"retained_in_system_closure_verified":True,
             "native_polkit_runtime_verified":False,"trusted_confirmation_ui_verified":False}
+
+
+def executor_unit_bytes(observed, original, executable):
+    """The generated image must import the reviewed unit, not a wants-only stub."""
+    expected = original.replace(b"@EXECUTABLE@", executable.encode())
+    if observed != expected or any(line not in observed.splitlines() for line in
+        (b"Type=dbus", b"BusName=org.aios.Executor1", b"User=root", b"Group=root",
+         ("ExecStart=" + executable + " --serve").encode())):
+        raise ValueError("generated image does not contain the reviewed Executor1 unit")
+    return hashlib.sha256(observed).hexdigest()
+
+
+def verify_executor_unit(realized, executor, template):
+    path = Path(realized) / "etc/systemd/system/aios-execd.service"
+    resolved = path.resolve(strict=True)
+    info = resolved.stat()
+    if not resolved.is_relative_to("/nix/store") or not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o222 or info.st_size > 65536:
+        raise ValueError("unprotected generated Executor1 unit")
+    original = read_template_file(Path(template), "nix/packages/aios-execd.service")
+    digest = executor_unit_bytes(resolved.read_bytes(), original, executor + "/bin/aios-execd")
+    return {"unit_path":str(path),"resolved_unit":str(resolved),"unit_sha256":digest,
+        "reviewed_base_unit_imported":True,"runtime_start_verified":False}
 
 
 def main():
@@ -341,6 +366,10 @@ def main():
         before = run(["nix", "path-info", "--json", "--recursive", previous["running"]], structured=True)
         after = run(["nix", "path-info", "--json", "--recursive", realized], structured=True)
         report["template_package"] = verify_template(realized, after, enrolled, manifest, expected_locks)
+        approval = report["template_package"]["approval_policy"]["authority"]
+        executor = approval["policy_path"].removesuffix("/share/aios/system-approval.json")
+        report["executor_unit"] = verify_executor_unit(realized, executor, report["template_package"]["authority"]["template_path"])
+        run(["systemd-analyze", "verify", "--man=no", str(Path(realized) / "etc/systemd/system/aios-execd.service")])
         report.update(built_output=realized, output_root=str(directory / "candidate-root"),
                       closure_diff={"added_paths": sorted(set(after)-set(before)), "removed_paths": sorted(set(before)-set(after)),
                                     "prior_nar_bytes": sum(v["narSize"] for v in before.values()),

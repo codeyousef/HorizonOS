@@ -65,6 +65,9 @@
         postInstall = (old.postInstall or "") + ''
           install -Dm644 ${./crates/aios-exec/policy/org.aios.executor.policy} "$out/share/polkit-1/actions/org.aios.executor.policy"
           install -Dm644 ${./crates/aios-exec/policy/system-approval.json} "$out/share/aios/system-approval.json"
+          install -Dm644 ${./crates/aios-exec/policy/org.aios.Executor1.conf} "$out/share/dbus-1/system.d/org.aios.Executor1.conf"
+          install -Dm644 ${./nix/packages/aios-execd.service} "$out/lib/systemd/system/aios-execd.service"
+          substituteInPlace "$out/lib/systemd/system/aios-execd.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-execd"
         '';
       });
       model = (productPackage "aios-model" "aios-model" "aios-modeld").overrideAttrs (old: {

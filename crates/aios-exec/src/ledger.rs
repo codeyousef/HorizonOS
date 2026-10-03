@@ -471,6 +471,21 @@ impl Ledger {
         }
         Ok(())
     }
+    pub(crate) fn cancel_abandoned_pre_effects(&mut self) -> Result<()> {
+        self.verify_target()?;
+        let plans: Vec<(String,u32)> = self.connection.prepare("SELECT id,subject FROM plans WHERE state IN ('RECEIVED','VALIDATING','PLANNED','BUILT','AWAITING_APPROVAL')")?
+            .query_map([],|row| Ok((row.get(0)?,row.get(1)?)))?.collect::<std::result::Result<_,_>>()?;
+        for (id, uid) in plans {
+            let status = self.status(&id, uid)?;
+            self.transition(
+                &id,
+                &status,
+                State::Cancelled,
+                "broker-restarted-before-system-effects",
+            )?;
+        }
+        Ok(())
+    }
     pub fn register(
         &mut self,
         plan: &PreparedPlan,

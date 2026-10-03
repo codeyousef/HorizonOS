@@ -93,7 +93,7 @@ def main():
     identity = snapshot.identity()
     commands = []
     services = {}
-    for unit in ("aios-initial-preflight.service", "polkit.service", "sshd.service"):
+    for unit in ("aios-initial-preflight.service", "polkit.service", "sshd.service", "aios-execd.service"):
         if snapshot.identity() != identity:
             raise ValueError("runtime target changed")
         argv = ["systemctl","show","--no-pager","--property=LoadState,ActiveState,SubState,Result,ExecMainStatus,MainPID,User,FragmentPath",unit]
@@ -126,6 +126,9 @@ def main():
     print("AIOS_INSTALLED_RUNTIME " + json.dumps(report,sort_keys=True),flush=True)
     if not proof["native_preflight_verified"] or services["aios-initial-preflight.service"]["Result"] != "success":
         raise RuntimeError("installed native root preflight has not passed")
+    service = services["aios-execd.service"]
+    if service["ActiveState"] != "active" or service["User"] != "root" or int(service["MainPID"]) <= 0:
+        raise RuntimeError("installed Executor1 root service is not active")
 
 
 if __name__ == "__main__":

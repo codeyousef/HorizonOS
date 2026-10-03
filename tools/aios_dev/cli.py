@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import acceptance, deploy, desktop, guest, jobs, provision, reenrollment, snapshots, sync, vm
+from . import acceptance, deploy, desktop, guest, jobs, native_rpc, provision, reenrollment, snapshots, sync, vm
 
 
 class Parser(argparse.ArgumentParser):
@@ -63,7 +63,7 @@ def parser() -> Parser:
     test.add_argument("--detach", action="store_true")
     test.add_argument("--desktop-run", metavar="RUN_UUID", help="resume only the registered disposable desktop workspace")
     test.add_argument("--bootstrap-case", choices=("all", *acceptance.CASES), help="run only the named disposable installer guard qualification")
-    test.add_argument("--provider", choices=("system-info", "service-inspection", "public-session", "model-compatibility", "upstream-compatibility", "host-boundary", "protocol-conformance", "model-profile-low", "model-profile-high", "model-inference", "model-service", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime", "installed-policy", "installed-development", "installed-guard"), help="run the named real product provider smoke in the verified guest")
+    test.add_argument("--provider", choices=("system-info", "service-inspection", "public-session", "model-compatibility", "upstream-compatibility", "host-boundary", "protocol-conformance", "model-profile-low", "model-profile-high", "model-inference", "model-service", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime", "installed-policy", "installed-development", "installed-guard", "installed-executor"), help="run the named real product provider smoke in the verified guest")
     controls = commands.add_parser("jobs").add_subparsers(dest="operation", required=True)
     for action in ("status", "cancel"):
         controls.add_parser(action).add_argument("--job", required=True)
@@ -118,6 +118,10 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         if args.provider is not None:
             if args.suite != "integration" or args.bootstrap_case is not None:
                 raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Provider smoke requires integration scope without a bootstrap case")
+            if args.provider == "installed-executor":
+                if args.detach:
+                    raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Installed Executor probe must retain its authenticated SSH session; --detach is unavailable")
+                return native_rpc.run(load_config(args.workspace))
             return jobs.start(load_config(args.workspace), args.provider + "-smoke", detach=args.detach)
         if args.bootstrap_case is not None:
             if args.suite != "integration" or args.detach:

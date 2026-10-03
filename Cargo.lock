@@ -42,6 +42,7 @@ version = "0.1.0"
 dependencies = [
  "aios-protocol",
  "aios-state",
+ "blocking",
  "libc",
  "rusqlite",
  "serde",

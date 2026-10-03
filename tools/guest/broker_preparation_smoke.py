@@ -6,6 +6,7 @@ No root runtime, worker, approval, activation or root candidate publication occu
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import xml.etree.ElementTree as ET
@@ -39,7 +40,8 @@ def main():
         "crates/aios-state/src/lib.rs", "crates/aios-exec/src/native.rs", "crates/aios-exec/src/native/tests.rs",
         "crates/aios-exec/src/caller.rs", "crates/aios-exec/src/caller/tests.rs",
         "crates/aios-exec/src/approval.rs", "crates/aios-exec/src/approval/policy.rs",
-        "crates/aios-exec/src/approval/polkit.rs", "crates/aios-exec/src/approval/tests.rs")
+        "crates/aios-exec/src/approval/polkit.rs", "crates/aios-exec/src/approval/tests.rs",
+        "crates/aios-exec/src/baseline.rs", "crates/aios-exec/src/bus.rs")
     for relative in relatives:
         data = (release / relative).read_bytes()
         out = run(["nix", "develop", *locked, reference, "--command", "rustfmt", "--edition", "2024", "--emit", "stdout", "--config", "skip_children=true"], data)
@@ -47,8 +49,14 @@ def main():
                           "formatted_sha256": hashlib.sha256(out).hexdigest(), "formatted_source": out.decode()})
     print("AIOS_BROKER_PREPARATION_FORMAT " + json.dumps(formatted, sort_keys=True), flush=True)
     unit = run(["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-exec", "--lib", "--", "--nocapture"], timeout=180)
-    if b"57 passed; 0 failed" not in unit:
-        raise RuntimeError("broker fixture test count changed")
+    summaries = re.findall(rb"test result: ok\. (\d+) passed; 0 failed; (\d+) ignored;", unit)
+    required = ("prepare_is_strict_typed_intent_not_a_serialized_plan_or_approval",
+        "cached_caller_scope_does_not_survive_uid_process_boot_or_reconnect_changes",
+        "broker_threads_and_their_children_cannot_execute_programs",
+        "fixed_boot_selection_has_no_wildcards_duplicate_or_traversal_fallback")
+    if len(summaries) != 1 or any(not re.search(rb"test [^\n]*" + name.encode() + rb" \.\.\. ok", unit) for name in required):
+        raise RuntimeError("required broker tests did not pass")
+    tests_passed, tests_ignored = map(int, summaries[0])
     observations = [json.loads(line.split("AIOS_BROKER_CALLER_OBSERVATIONS ", 1)[1]) for line in unit.decode().splitlines() if "AIOS_BROKER_CALLER_OBSERVATIONS " in line]
     if len(observations) != 1 or observations[0]["uid"] != os.getuid() or observations[0]["boot_id"] != identity["boot_id"] or observations[0]["logind_uid"] != 0:
         raise RuntimeError("native read-only caller observations missing or mismatched")
@@ -62,6 +70,17 @@ def main():
         raise RuntimeError("unexpected executor output count")
     package = outputs[0]["outputs"]["out"]
     executable = str(Path(package) / "bin/aios-execd")
+    bus_path = Path(package) / "share/dbus-1/system.d/org.aios.Executor1.conf"
+    service_path = Path(package) / "lib/systemd/system/aios-execd.service"
+    service_source = (release / "nix/packages/aios-execd.service").read_bytes().replace(b"@EXECUTABLE@", executable.encode())
+    for path, expected in ((bus_path, (release / "crates/aios-exec/policy/org.aios.Executor1.conf").read_bytes()),
+                           (service_path, service_source)):
+        if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_mode & 0o222 or path.read_bytes() != expected:
+            raise RuntimeError("packaged transport policy/unit differs from reviewed source")
+    bus_document = ET.fromstring(bus_path.read_bytes())
+    if not any(node.attrib == {"own_prefix": "org.aios"} for node in bus_document.findall("policy/deny")):
+        raise RuntimeError("transport name reservation missing")
+    run(["systemd-analyze", "verify", "--man=no", str(service_path)])
     policy_path = Path(package) / "share/aios/system-approval.json"
     action_path = Path(package) / "share/polkit-1/actions/org.aios.executor.policy"
     for path, original in ((policy_path, release / "crates/aios-exec/policy/system-approval.json"),
@@ -88,13 +107,16 @@ def main():
     closure = json.loads(run(["nix","path-info","--json","--recursive",package]))
     print("AIOS_BROKER_PREPARATION " + json.dumps({"evidence_kind":"real-guest-rust-filesystem-sqlite-fixtures-and-package-denials",
         "target_identity":identity,"package":package,"executable_sha256":hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
-        "fixture_tests_passed":54,"actual_read_only_bus_tests_passed":2,"actual_polkit_availability_tests_passed":1,
+        "rust_library_tests_passed":tests_passed,"rust_library_tests_ignored":tests_ignored,
+        "actual_read_only_bus_tests_passed":2,"actual_polkit_availability_tests_passed":1,
         "actual_read_only_polkit_owner_tests_passed":int(polkit[0]["owner_identity_verified"]),"native_caller_observations":observations[0],"polkit_observations":polkit[0],
-        "approval_policy_sha256":hashlib.sha256(policy_path.read_bytes()).hexdigest(),"polkit_action_sha256":hashlib.sha256(action_path.read_bytes()).hexdigest(),"denials":denials,"runtime_closure":closure,"commands":commands,
+        "approval_policy_sha256":hashlib.sha256(policy_path.read_bytes()).hexdigest(),"polkit_action_sha256":hashlib.sha256(action_path.read_bytes()).hexdigest(),
+        "bus_policy_sha256":hashlib.sha256(bus_path.read_bytes()).hexdigest(),"service_unit_sha256":hashlib.sha256(service_path.read_bytes()).hexdigest(),
+        "packaged_transport_unit_verified":True,"denials":denials,"runtime_closure":closure,"commands":commands,
         "installed_root_template_verified":False,"root_candidate_registration_verified":False,
         "root_ledger_execution_verified":False,"native_target_runtime_verified":False,"authenticated_bus_peer_verified":False,"isolated_worker_verified":False,"system_activation_verified":False,
         "limitations":["Filesystem/SQLite tests execute the real library as the dev UID with fixture templates, grants and build output.",
-        "Production constructors have no fixture/environment override; actual root runtime remains unavailable.",
+        "Production constructors have no fixture/environment override; this check does not qualify the installed root transport.",
         "Actual dev-UID bus credentials/process/logind and connection-change denials are read-only checks; no production root VerifiedCaller is minted.",
         "Polkit availability is observed on the running image. Absent service proves refusal only; owner/catalog checks run only when the native service is installed. No CheckAuthorization or trusted UI confirmation occurs.",
         "Native target/config and caller intake are implemented but root runtime remains unqualified; original user-daemon forwarding, builder output/stop proofs, polkit, guard and recovery remain to connect/qualify."]}, sort_keys=True))

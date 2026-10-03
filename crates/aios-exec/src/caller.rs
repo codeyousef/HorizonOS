@@ -63,6 +63,7 @@ struct Snapshot {
 
 /// No serde, public constructor, root override, or authority derived from JSON.
 /// This capability is bound to the broker connection which authenticated it.
+#[derive(Clone)]
 pub struct VerifiedCaller {
     snapshot: Snapshot,
     broker_epoch: uuid::Uuid,
@@ -74,13 +75,16 @@ impl VerifiedCaller {
 }
 
 /// Fixed native endpoint, created only after full installed target verification.
-/// A future zbus method adapter must pass its injected header, never request data.
+/// The zbus method adapter passes its injected header, never request data.
 pub struct SystemBus {
     connection: Connection,
     target: VerifiedTarget,
     epoch: uuid::Uuid,
 }
 impl SystemBus {
+    pub(crate) fn connection(&self) -> Connection {
+        self.connection.clone()
+    }
     pub(crate) fn target(&self) -> &VerifiedTarget {
         &self.target
     }
@@ -130,11 +134,15 @@ impl SystemBus {
         })
     }
     pub fn authenticate(&self, header: &Header<'_>) -> Result<VerifiedCaller> {
-        self.target.recheck()?;
         if header.message_type() != zbus::message::Type::MethodCall {
             return Err(Error::Authority);
         }
         let sender = header.sender().ok_or(Error::Authority)?.as_str();
+        self.authenticate_sender(sender)
+    }
+    /// Only the native method adapter may pass its injected header's sender.
+    pub(crate) fn authenticate_sender(&self, sender: &str) -> Result<VerifiedCaller> {
+        self.target.recheck()?;
         let snapshot = capture(&self.connection, sender)?;
         requesting_user(&snapshot.caller)?;
         if snapshot.caller.boot_id != self.target.target().boot_id {

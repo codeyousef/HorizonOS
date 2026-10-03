@@ -7,6 +7,12 @@
   };
   security.polkit.enable = true;
   environment.systemPackages = [ aiosExecutor ];
+  services.dbus.packages = [ aiosExecutor ];
+  systemd.packages = [ aiosExecutor ];
+  systemd.services.aios-execd = {
+    wantedBy = [ "multi-user.target" ];
+    overrideStrategy = "asDropin";
+  };
   environment.etc."aios/approval-authority.json" = {
     mode = "0444";
     text = builtins.toJSON {
