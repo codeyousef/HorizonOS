@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import acceptance, guest, jobs, provision, snapshots, sync, vm
+from . import acceptance, deploy, guest, jobs, provision, snapshots, sync, vm
 
 
 class Parser(argparse.ArgumentParser):
@@ -60,13 +60,16 @@ def parser() -> Parser:
     test.add_argument("--suite", choices=("unit", "integration", "desktop"), required=True)
     test.add_argument("--detach", action="store_true")
     test.add_argument("--bootstrap-case", choices=("all", *acceptance.CASES), help="run only the named disposable installer guard qualification")
-    test.add_argument("--provider", choices=("system-info", "service-inspection", "public-session", "model-compatibility", "model-inference", "model-service", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime", "installed-policy"), help="run the named real product provider smoke in the verified guest")
+    test.add_argument("--provider", choices=("system-info", "service-inspection", "public-session", "model-compatibility", "model-inference", "model-service", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime", "installed-policy", "installed-development"), help="run the named real product provider smoke in the verified guest")
     controls = commands.add_parser("jobs").add_subparsers(dest="operation", required=True)
     for action in ("status", "cancel"):
         controls.add_parser(action).add_argument("--job", required=True)
     controls.add_parser("probe", help="registered 30-second supervision fixture").add_argument("--detach", action="store_true")
     commands.add_parser("benchmark").add_argument("--profile", choices=("normal", "low", "high"), required=True)
-    commands.add_parser("deploy").add_argument("--mode", choices=("test", "commit"), required=True)
+    deployment = commands.add_parser("deploy", help="explicit VM-only developer code authority")
+    deployment.add_argument("--mode", choices=("register", "status", "test", "commit"), required=True)
+    deployment.add_argument("--transaction", help="resume or inspect a registered transaction UUID")
+    deployment.add_argument("--acknowledge-guest-root", action="store_true", help="acknowledge developer Nix code as guest-root authority")
     logs = commands.add_parser("logs")
     logs.add_argument("--unit", required=True)
     logs.add_argument("--user")
@@ -90,6 +93,8 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         return guest.enroll(load_config(args.workspace), args.trust_file)
     if args.command == "sync":
         return sync.synchronize(load_config(args.workspace))
+    if args.command == "deploy":
+        return deploy.run(load_config(args.workspace), args.mode, args.transaction, args.acknowledge_guest_root)
     if args.command == "lock":
         return jobs.start(load_config(args.workspace), "resolve-lock", detach=args.detach)
     if args.command == "build":

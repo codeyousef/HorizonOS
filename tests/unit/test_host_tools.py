@@ -229,7 +229,7 @@ class CommandTests(unittest.TestCase):
         return status, result
 
     def test_every_pending_command_fails_without_execution(self):
-        commands = ["test --suite integration", "test --suite desktop", "benchmark --profile normal", "deploy --mode test", "deploy --mode commit", "logs --unit aios-sessiond --user tester"]
+        commands = ["test --suite integration", "test --suite desktop", "benchmark --profile normal", "logs --unit aios-sessiond --user tester"]
         with tempfile.TemporaryDirectory() as workspace, patch("aios_dev.doctor.subprocess.run") as run:
             for command in commands:
                 with self.subTest(command=command):

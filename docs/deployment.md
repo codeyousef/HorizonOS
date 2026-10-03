@@ -207,6 +207,28 @@ the command; the package's own Nix store path is not a writable VM workspace.
 
 ## Enrolled development system candidate
 
+The installed VM-only helper can register an immutable source snapshot through
+the pinned host transport:
+
+```sh
+python3 tools/devctl.py deploy --mode register --acknowledge-guest-root --json
+python3 tools/devctl.py deploy --mode status --transaction <returned-uuid> --json
+```
+
+Developer-supplied Nix code is guest-root authority. The explicit acknowledgement
+applies to registration and to test/commit requests. This route accepts typed
+operations and UUIDs only; it invokes the fixed installed helper through its
+development-only sudo rule without a password prompt. It never transfers a
+private key or runs a caller-provided command. The host saves transaction intent
+before calling the helper, validates the root receipt against the published
+manifest and installed helper source hash, and rechecks identity after the call.
+Retry registration with the same UUID or inspect status after a disconnect;
+changed boot, closure, configuration or target requires a fresh transaction.
+Registration retains a separate root-owned readonly source copy and a durable
+receipt. It does not build or activate that source. `deploy --mode test` and
+`deploy --mode commit` with the transaction UUID and acknowledgement currently
+return `GUARDED_ACTIVATION_UNAVAILABLE` until independent recovery is qualified.
+
 `nixosConfigurations.aios-dev` uses the administrator-owned development machine
 module. It describes the enrolled Btrfs subvolumes/EFI layout, key-only SSH,
 non-wheel developer account, root-only Nix trust, Plasma 6 on Wayland and the
