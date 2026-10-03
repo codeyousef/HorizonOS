@@ -21,6 +21,12 @@ from test_guest import EXAMPLE, IDENTITY
 
 
 class SourceTests(unittest.TestCase):
+    def test_only_registered_optional_source_manifests_cross_snapshot_boundary(self):
+        for name in ("models/source-locks/low.json", "models/source-locks/high.json"):
+            self.assertFalse(contract.excluded(name))
+        for name in ("models/source-locks/model.safetensors", "models/source-locks/extra.json", "models/source-locks/low.gguf", "models/weights/high.json"):
+            self.assertTrue(contract.excluded(name))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aios-source-")
         self.addCleanup(self.temp.cleanup)

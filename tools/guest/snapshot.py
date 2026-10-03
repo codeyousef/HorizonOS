@@ -58,6 +58,7 @@ def excluded(name):
     path = relative_path(name)
     # Public model metadata is source; model weight payloads are excluded.
     model_metadata = len(path.parts) == 2 and path.name in {"manifest.schema.json", "lock.json", "source-lock.json", "profiles.json", "README.md"}
+    model_metadata = model_metadata or name in {"models/source-locks/low.json", "models/source-locks/high.json"}
     model_template = len(path.parts) > 2 and path.parts[1] == "templates"
     model_payload = path.parts[0] == "models" and not (model_metadata or model_template)
     return model_payload or any(p in PRIVATE_PARTS or p.startswith(".env") or p.startswith("result-") for p in path.parts) or path.name in PRIVATE_NAMES or path.name == MANIFEST or path.stem.lower() in PRIVATE_STEMS or path.suffix.lower() in PRIVATE_SUFFIXES

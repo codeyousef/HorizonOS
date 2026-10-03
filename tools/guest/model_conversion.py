@@ -9,7 +9,22 @@ import pwd
 import shutil
 import stat
 import subprocess
+import sys
 import urllib.request
+
+PROFILES = {"normal": ("Qwen/Qwen3.5-2B", "15852e8c16360a2fea060d615a32b45270f8a8fc"),
+            "low": ("Qwen/Qwen3.5-0.8B", "2fc06364715b967f1860aea9cf38778875588b17"),
+            "high": ("Qwen/Qwen3.5-4B", "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")}
+
+
+def source_lock(release, profile):
+    if profile not in PROFILES:
+        raise ValueError("unregistered model profile")
+    path = release / ("models/source-lock.json" if profile == "normal" else "models/source-locks/" + profile + ".json")
+    lock = json.loads(path.read_text())
+    if (lock["repository"], lock["revision"]) != PROFILES[profile] or lock["runtime"]["revision"] != "b64739ea393b3c9d07cc9907e0a611f707838051" or lock["inference_backend"] != "cpu":
+        raise RuntimeError("unexpected registered model/runtime")
+    return lock
 
 
 def digest(path):
@@ -73,22 +88,20 @@ def fetch(destination, expected, url):
     partial.chmod(0o444);partial.rename(destination)
 
 
-def main():
+def convert(release, profile="normal"):
     if os.geteuid() == 0 or 'ID=nixos' not in Path('/etc/os-release').read_text():
         raise RuntimeError("conversion requires the non-root verified NixOS development job")
-    release = Path(__file__).resolve().parents[2]
-    lock = json.loads((release / "models/source-lock.json").read_text())
-    if lock["repository"] != "Qwen/Qwen3.5-2B" or lock["revision"] != "15852e8c16360a2fea060d615a32b45270f8a8fc":
-        raise RuntimeError("unexpected registered model")
+    lock = source_lock(release, profile)
     home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
     store = private(home / ".aios-models")
-    directory = private(store / ("qwen3.5-2b-" + lock["revision"]))
+    directory = private(store / (lock["repository"].split("/")[1].lower() + "-" + lock["revision"]))
     descriptor = os.open(directory / "conversion.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,0o600)
     with os.fdopen(descriptor,"r+") as lockfile:
         fcntl.flock(lockfile,fcntl.LOCK_EX)
         source = private(directory / "source")
-        if shutil.disk_usage(directory).free < 15 * 1024**3:
-            raise RuntimeError("conversion requires 15 GiB free including recovery reserve")
+        reserve = max(15 * 1024**3, sum(item["bytes"] for item in lock["files"]) * 3 + 8 * 1024**3)
+        if shutil.disk_usage(directory).free < reserve:
+            raise RuntimeError("conversion space reserve unavailable")
         for artifact in lock["files"]:
             name = artifact["name"]
             if Path(name).name != name:
@@ -100,6 +113,24 @@ def main():
         for path in (upstream,runtime):
             if not str(path).startswith('/nix/store/') or path.resolve() != path:
                 raise RuntimeError("runtime build identity mismatch")
+        receipt_path = directory / "conversion.json"
+        if receipt_path.exists():
+            info = receipt_path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1:
+                raise RuntimeError("unsafe existing conversion receipt")
+            receipt = json.loads(receipt_path.read_text())
+            output = directory / "model-q4_k_m.gguf"
+            info = output.lstat()
+            if (receipt.get("source") != lock or receipt.get("profile", "normal") != profile
+                    or receipt.get("runtime_path") != str(runtime)
+                    or receipt.get("converter_sha256") != digest(upstream / "convert_hf_to_gguf.py")
+                    or receipt.get("quantizer_sha256") != digest(runtime / "bin/llama-quantize")
+                    or not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1
+                    or info.st_mode & 0o222 or info.st_size != receipt["artifact"]["bytes"]
+                    or digest(output) != receipt["artifact"]["sha256"]):
+                raise RuntimeError("existing converted artifact identity mismatch")
+            print("AIOS_MODEL_CONVERSION=" + json.dumps(receipt), flush=True)
+            return receipt
         full = directory / "model-f16.gguf"
         output = directory / "model-q4_k_m.gguf"
         env = {**os.environ,"HF_HUB_OFFLINE":"1","TRANSFORMERS_OFFLINE":"1","OMP_NUM_THREADS":"4"}
@@ -107,7 +138,7 @@ def main():
         subprocess.run(["python3",str(upstream / "convert_hf_to_gguf.py"),str(source),"--outfile",str(full),"--outtype","f16"],env=env,check=True,timeout=900)
         subprocess.run([str(runtime / "bin/llama-quantize"),str(full),str(output),"Q4_K_M","4"],env=env,check=True,timeout=900)
         output.chmod(0o444)
-        receipt={"schema_version":1,"evidence_kind":"real-official-weight-conversion","source":lock,
+        receipt={"schema_version":1,"profile":profile,"evidence_kind":"real-official-weight-conversion","source":lock,
                  "artifact":{"filename":output.name,"bytes":output.stat().st_size,"sha256":digest(output)},
                  "runtime_path":str(runtime),"converter_sha256":digest(upstream / "convert_hf_to_gguf.py"),
                  "quantizer_sha256":digest(runtime / "bin/llama-quantize"),
@@ -116,6 +147,13 @@ def main():
                  "model_directory":str(directory),"quality_qualified":False,"performance_qualified":False}
         (directory / "conversion.json").write_text(json.dumps(receipt,indent=2)+'\n')
         print("AIOS_MODEL_CONVERSION="+json.dumps(receipt),flush=True)
+        return receipt
+
+
+def main():
+    if len(sys.argv) > 2:
+        raise ValueError("only a registered profile may be selected")
+    convert(Path(__file__).resolve().parents[2], sys.argv[1] if len(sys.argv) == 2 else "normal")
 
 
 if __name__ == "__main__":

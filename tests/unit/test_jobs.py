@@ -62,6 +62,19 @@ class JobTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             controller.commands("build-packages", release, "evil#output")
 
+    def test_optional_profile_jobs_are_separate_locked_conversion_operations(self):
+        release = Path("/home/dev/aios-releases") / ("a" * 64)
+        for profile in ("low", "high"):
+            command = controller.commands("model-profile-" + profile + "-smoke", release)[0]
+            self.assertEqual(command[-1], profile)
+            self.assertIn("--no-update-lock-file", command)
+            self.assertIn("--no-write-lock-file", command)
+            self.assertIn("path:" + str(release) + "#model-conversion", command)
+        with self.assertRaises(ValueError):
+            controller.commands("model-profile-auto-smoke", release)
+        inference = controller.commands("model-inference-smoke", release)[0]
+        self.assertNotIn("#model-conversion", " ".join(inference))
+
     def test_logs_remove_credentials_control_codes_and_private_key_blocks(self):
         raw = "password=fixturesecret\nAuthorization: BearerToken\n" + "-----BEGIN " + "OPENSSH PRIVATE KEY-----\nfixturesecret\n-----END " + "OPENSSH PRIVATE KEY-----\n\x1b[31mpublic\x1b[0m\x00"
         clean = controller.sanitize(raw)

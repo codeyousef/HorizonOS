@@ -171,6 +171,22 @@ mod tests {
         assert!(request.parse_output(r#"{"kind":"tool_call","action_id":"system.info","arguments":{}}"#).is_ok());
         assert!(request.parse_output(r#"{"kind":"tool_call","action_id":"shell.run","arguments":{}}"#).is_err());
     }
+    #[test] fn optional_profiles_never_fall_back_and_mutating_tools_are_unavailable() {
+        for profile in [Profile::Low, Profile::High] {
+            let mut candidate = request();
+            candidate.profile = profile;
+            assert_eq!(candidate.validate(), Err(ErrorCode::ModelUnavailable));
+            assert_eq!(candidate.grammar(), Err(ErrorCode::ModelUnavailable));
+        }
+        let mut candidate = request();
+        candidate.response_mode = ResponseMode::Decision;
+        candidate.allowed_tools = vec![ReadTool::SystemInfo, ReadTool::SystemServiceStatus];
+        for action in ["packages.install", "system.service_restart", "files.move", "shell.run"] {
+            let output = serde_json::json!({"kind":"tool_call","action_id":action,"arguments":{}});
+            assert_eq!(candidate.parse_output(&output.to_string()), Err(ErrorCode::ModelOutputInvalid));
+            assert!(serde_json::from_value::<ReadTool>(serde_json::Value::String(action.into())).is_err());
+        }
+    }
     #[test] fn client_cannot_supply_grammar_or_unknown_identity_fields() {
         for raw in [r#"{"kind":"get_status","uid":0}"#,r#"{"kind":"get_status","kind":"get_status"}"#,
             r#"{"kind":"generate","grammar":"root ::= anything"}"#] { assert!(parse_operation(raw).is_err()); }

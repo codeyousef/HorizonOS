@@ -93,6 +93,11 @@
       lib.stateContract = stateContract;
       lib.managedState = import ./tests/nix/managed.nix { inherit nixpkgs stateContract; };
       lib.developmentBoundary = import ./tests/nix/development.nix { inherit nixpkgs; };
+      lib.upstreamCompatibility = import ./tests/nix/upstreams.nix {
+        inherit pkgs nixpkgs;
+        imageAttributes = builtins.attrNames self.nixosConfigurations;
+        packageAttributes = builtins.attrNames self.packages.${system};
+      };
       devShells.${system} = {
       lock-resolution = pkgs.mkShell { packages = [ pkgs.cargo pkgs.rustc ]; };
       default = pkgs.mkShell {
@@ -103,6 +108,7 @@
         packages = [ conversionPython llamaBridge ];
         AIOS_LLAMA_SOURCE = "${pkgs.llama-cpp.src}";
         AIOS_LLAMA_BRIDGE = "${llamaBridge}";
+        AIOS_PROFILE_SECCOMP = "${pkgs.libseccomp.lib}/lib/libseccomp.so.2";
         PYTHONPATH = "${pkgs.llama-cpp.src}/gguf-py";
         HF_HUB_OFFLINE = "1";
       };

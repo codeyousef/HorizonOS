@@ -27,3 +27,19 @@ Compatibility probes establish loading, template use, constrained output and
 cancellation. They do not establish held-out answer quality, factual citation
 verification, resource benchmarks or a completed model daemon. Those release
 gates must be qualified separately with the actual pinned model.
+
+`source-locks/low.json` and `source-locks/high.json` pin the optional official
+0.8B and 4B candidates independently. Their registered development jobs are
+`devctl test --suite integration --provider model-profile-low` and
+`--provider model-profile-high`. Each job verifies original source hashes,
+converts and quantizes on the CPU, then starts a bounded child probe with
+network syscalls denied. Conversion receipts can be reused only when source,
+runtime, converter, quantizer and read-only artifact identities still match.
+Optional compatibility never silently replaces the normal model or enables a
+product profile. Quality and performance qualifications remain separate gates.
+
+`devctl test --suite integration --provider upstream-compatibility` records
+locked package metadata, licenses, exposed image/package attributes, observed
+CPU features and the current native inference closure. Package availability is
+distinct from installed functionality. Original artifact conversion hashes
+remain attached to their artifacts when later binary rebuilds change hashes.
