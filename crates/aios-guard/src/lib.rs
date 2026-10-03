@@ -1,6 +1,7 @@
 //! Deterministic activation/recovery protocol. No client commands or shell API.
 //! The real root activation/health adapter is not yet qualified or enabled.
 pub mod activation;
+pub mod native;
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,9 @@ pub enum Error {
     Health,
     Adapter,
     RecoveryRequired,
+    Authority,
+    Integrity,
+    BootSelection,
 }
 impl From<rusqlite::Error> for Error {
     fn from(_: rusqlite::Error) -> Self {

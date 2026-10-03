@@ -6,6 +6,34 @@ immutable plan and effect journal. Its current executable exposes only the pure
 `--check-plan` stdin interface. Other invocations return exit 9 with
 `GUARD_RUNTIME_ADAPTER_UNAVAILABLE`.
 
+The fixed root-only `--native-preflight` mode captures installed target identity,
+running and profile closures, the selected systemd-boot generation and its EFI
+payloads, the installed guard, Nix and systemd executables, and `CLOCK_BOOTTIME`.
+Native target checks are reused as a library; this does not depend on the broker
+daemon or the model. Store fingerprints use bounded streaming reads, protected
+traversal, root ownership, readonly files and before/after inode/content metadata.
+The running executable must match the installed guard by path, digest and inode.
+
+The boot reader supports the locked development image's UEFI/systemd-boot layout.
+It requires one exact generation, one immutable system init, and one kernel and
+initrd entry. EFI kernel/initrd bytes must match the selected closure. Ambiguous
+generation patterns, malformed EFI variables, a pending one-shot entry or a
+conflicting firmware default fail intake. Running state and the system profile
+are recorded independently of boot selection. This proves the selected loader
+entry; it does not promise recovery from firmware or kernel failure.
+
+`NativeIntake` is not deserializable. Its artifact-binding method compares the
+actual prior pointers, retained guard and candidate file hashes with a typed
+plan. It provides no authorization, build provenance, durable plan registration,
+GC retention, health approval, armed process or activation effect. Model-only
+runtime intake is still unavailable. These remaining checks must precede any
+use of the activation adapter.
+
+Fresh development image instrumentation records the actual installed root guard
+preflight in a protected RAM file. The registered `installed-guard` observer
+checks root ownership, executable hash, boot/installation identity and EFI
+payload agreement before accepting that proof. Nonroot invocation is denied.
+
 ## Plan and ledger contract
 
 Version 1 plans bind the installation, DMI, machine and boot identities, guest

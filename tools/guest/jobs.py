@@ -18,7 +18,7 @@ import uuid
 import snapshot as source
 
 PACKAGES = ("aios-core", "aios-model", "aios-desktop", "aios-cli", "aios-dev-tools")
-KINDS = {"resolve-lock", "build-packages", "build-system", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "model-inference-smoke", "model-service-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "supervision-probe"}
+KINDS = {"resolve-lock", "build-packages", "build-system", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "model-compatibility-smoke", "model-inference-smoke", "model-service-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "supervision-probe"}
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 LIMIT = 4 * 1024**2
 cancelled = False
@@ -128,6 +128,8 @@ def commands(kind, release, package=None, job_directory=None):
         return [["python3", str(release / "tools/guest/installed_policy_smoke.py")]]
     if kind == "installed-development-smoke":
         return [["python3", str(release / "tools/guest/installed_development_smoke.py")]]
+    if kind == "installed-guard-smoke":
+        return [["python3", str(release / "tools/guest/installed_guard_smoke.py")]]
     if kind == "installed-runtime-smoke":
         return [["python3", str(release / "tools/guest/installed_runtime_smoke.py")]]
     if kind == "managed-state-smoke":

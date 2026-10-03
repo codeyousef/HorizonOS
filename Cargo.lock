@@ -32,6 +32,8 @@ dependencies = [
 name = "aios-guard"
 version = "0.1.0"
 dependencies = [
+ "aios-exec",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",

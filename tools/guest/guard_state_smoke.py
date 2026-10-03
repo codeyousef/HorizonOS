@@ -44,7 +44,8 @@ def main():
     locked = ["--no-update-lock-file", "--no-write-lock-file"]
     formatted = []
     for relative in ("crates/aios-guard/src/lib.rs", "crates/aios-guard/src/main.rs",
-                     "crates/aios-guard/src/activation.rs", "crates/aios-guard/tests/guard.rs"):
+                     "crates/aios-guard/src/activation.rs", "crates/aios-guard/src/native.rs",
+                     "crates/aios-exec/src/native.rs", "crates/aios-guard/tests/guard.rs"):
         original = (release / relative).read_bytes()
         result = subprocess.check_output(["nix", "develop", *locked, reference,
             "--command", "rustfmt", "--edition", "2024", "--emit", "stdout",
@@ -70,6 +71,8 @@ def main():
             raise RuntimeError("invalid plan denial changed: " + name)
         if expected == 9 and response != {"schema_version": 1, "error": "GUARD_RUNTIME_ADAPTER_UNAVAILABLE"}:
             raise RuntimeError("unqualified runtime acquired an execution path")
+        if expected == 5 and response != {"schema_version": 1, "error": "GUARD_NATIVE_INTAKE_FAILED", "reason": "Authority"}:
+            raise RuntimeError("nonroot native guard intake was not denied")
         checks.append({"name": name, "exit": result.returncode, "response": response})
         return response
 
@@ -88,12 +91,18 @@ def main():
     check("oversize", b" " * 65537, 2)
     check("no-live-runtime", b"", 9, args=())
     check("no-command-fallback", b'{"command":"true"}', 9, args=("--execute",))
+    check("actual-nonroot-native-intake", b"", 5, args=("--native-preflight",))
     reboot = copy.deepcopy(plan)
     reboot["candidate"]["closure"]["kernel_sha256"] = "f" * 64
     if not check("separate-reboot", json.dumps(reboot).encode(), 0)["reboot_required"]:
         raise RuntimeError("kernel change bypassed reboot classification")
     closure_info = json.loads(subprocess.check_output(["nix", "path-info", "--json", "--recursive", package], timeout=30))
+    current_wrapper = Path("/run/current-system/bin/switch-to-configuration")
+    wrapper = current_wrapper.read_text()
     print("AIOS_GUARD_STATE " + json.dumps({"evidence_kind": "real-guest-package-with-fixture-plans",
+        "installed_activation_wrapper": {"path":str(current_wrapper.resolve(strict=True)),
+            "sha256":hashlib.sha256(current_wrapper.read_bytes()).hexdigest(),
+            "boot_adapter_exports":[line for line in wrapper.splitlines() if line.startswith("export INSTALL_BOOTLOADER=")]},
         "package": package, "executable_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
         "checks": checks, "runtime_closure": closure_info, "real_activation_verified": False,
         "independent_guard_survival_verified": False, "authenticated_heartbeat_verified": False,

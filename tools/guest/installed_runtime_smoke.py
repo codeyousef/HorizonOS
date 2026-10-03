@@ -71,12 +71,13 @@ def installed_diagnostics():
         "template_extra_files":sorted(observed-wanted),"template_missing_files":sorted(wanted-observed)}
 
 
-def protected_preflight():
+def protected_preflight(*, guard=False):
     for name in ("/", "/run", "/run/aios-initial-preflight"):
         info = Path(name).lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
             raise ValueError("unprotected initial preflight directory")
-    descriptor = os.open("/run/aios-initial-preflight/result.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    name = "guard.json" if guard else "result.json"
+    descriptor = os.open("/run/aios-initial-preflight/" + name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, "rb") as handle:
         before = os.fstat(handle.fileno())
         if not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or stat.S_IMODE(before.st_mode) != 0o644 or before.st_size > 16384:

@@ -50,13 +50,37 @@ def main():
             "schema_version":1,"error":"BROKER_RUNTIME_ADAPTER_UNAVAILABLE"}
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         report["failure"] = type(error).__name__
+    guard_report = {"schema_version":1,"evidence_kind":"actual-installed-root-guard-artifact-intake",
+        "uid":os.getuid(),"effective_uid":os.geteuid(),"native_artifact_intake_verified":False,
+        "authorization_verified":False,"activation_performed":False,
+        "boot_id":Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+        "installation_uuid":Path("/etc/aios/installation-uuid").read_text().strip()}
+    try:
+        guard = Path("/run/current-system/sw/bin/aios-guard").resolve(strict=True)
+        info = guard.stat()
+        if not guard.is_relative_to("/nix/store") or not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o222:
+            raise ValueError("unsafe installed guard")
+        argv=[str(guard),"--native-preflight"]
+        observed=subprocess.run(argv,capture_output=True,timeout=60,check=False)
+        if len(observed.stdout)>16384 or len(observed.stderr)>16384:
+            raise ValueError("guard intake output limit")
+        value=json.loads(observed.stdout)
+        guard_report.update(argv=argv,upstream_exit=observed.returncode,native_result=value,
+            executable=str(guard),executable_sha256=hashlib.sha256(guard.read_bytes()).hexdigest())
+        guard_report["native_artifact_intake_verified"]=observed.returncode==0 and value.get("native_artifact_intake_verified") is True and value.get("authorization_verified") is False and value.get("activation_performed") is False and value.get("runtime_adapter_available") is False
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        guard_report["failure"]=type(error).__name__
+    guard_destination=destination.parent/"guard.json"
+    descriptor=os.open(guard_destination,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o644)
+    with os.fdopen(descriptor,"w") as handle:
+        json.dump(guard_report,handle,sort_keys=True);handle.write("\n");handle.flush();os.fsync(handle.fileno())
     descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
     with os.fdopen(descriptor, "w") as handle:
         json.dump(report, handle, sort_keys=True)
         handle.write("\n")
         handle.flush()
         os.fsync(handle.fileno())
-    return 0 if report["native_preflight_verified"] else 6
+    return 0 if report["native_preflight_verified"] and guard_report["native_artifact_intake_verified"] else 6
 
 
 if __name__ == "__main__":

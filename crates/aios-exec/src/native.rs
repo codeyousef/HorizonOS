@@ -2,6 +2,7 @@
 use crate::ledger::Target;
 use crate::{Error, Result, canonical, digest, store, uuid};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     fs::{self, OpenOptions},
     io::Read,
@@ -401,6 +402,16 @@ pub struct VerifiedTarget {
     enrollment: Enrollment,
     target: Target,
 }
+
+/// Read-only fingerprint from an administrator-owned immutable store object.
+/// This evidence does not confer approval or permission to execute the object.
+#[derive(Clone, Debug, Serialize)]
+pub struct StoreArtifact {
+    pub path: PathBuf,
+    pub sha256: String,
+    pub size: u64,
+    pub executable: bool,
+}
 impl VerifiedTarget {
     pub fn enroll() -> Result<Self> {
         root()?;
@@ -426,6 +437,171 @@ impl VerifiedTarget {
         }
         let observed = observe(&current)?;
         check_snapshot(&current, &observed, &self.target)
+    }
+    /// Compiled runtime adapters use this protected traversal; clients cannot
+    /// supply paths to it through the product protocol.
+    pub fn resolve_store_object(&self, path: &Path) -> Result<PathBuf> {
+        self.recheck()?;
+        let selected = resolved(path, Path::new("/nix/store"))?;
+        self.recheck()?;
+        Ok(selected)
+    }
+    pub fn store_artifact(&self, path: &Path, max: u64, executable: bool) -> Result<StoreArtifact> {
+        if max == 0 || max > 256 * 1024 * 1024 {
+            return Err(Error::Invalid);
+        }
+        self.recheck()?;
+        let selected = resolved(path, Path::new("/nix/store"))?;
+        let before = fs::symlink_metadata(&selected)?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
+            .open(&selected)?;
+        let info = file.metadata()?;
+        if !info.is_file()
+            || info.uid() != 0
+            || info.mode() & 0o222 != 0
+            || (executable && info.mode() & 0o111 == 0)
+            || info.len() > max
+            || (before.dev(), before.ino()) != (info.dev(), info.ino())
+        {
+            return Err(Error::Ownership);
+        }
+        let mut hasher = Sha256::new();
+        let mut buffer = [0; 65536];
+        let mut count = 0u64;
+        loop {
+            let n = file.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            count = count.checked_add(n as u64).ok_or(Error::Integrity)?;
+            if count > max {
+                return Err(Error::Integrity);
+            }
+            hasher.update(&buffer[..n]);
+        }
+        let after = file.metadata()?;
+        if count != info.len()
+            || (
+                info.dev(),
+                info.ino(),
+                info.len(),
+                info.mtime(),
+                info.mtime_nsec(),
+                info.ctime(),
+                info.ctime_nsec(),
+            ) != (
+                after.dev(),
+                after.ino(),
+                after.len(),
+                after.mtime(),
+                after.mtime_nsec(),
+                after.ctime(),
+                after.ctime_nsec(),
+            )
+            || fs::symlink_metadata(&selected)?.ino() != info.ino()
+        {
+            return Err(Error::TargetChanged);
+        }
+        self.recheck()?;
+        Ok(StoreArtifact {
+            path: selected,
+            sha256: format!("{:x}", hasher.finalize()),
+            size: count,
+            executable,
+        })
+    }
+    pub fn store_text(&self, path: &Path) -> Result<String> {
+        let artifact = self.store_artifact(path, 65536, false)?;
+        let data = read(path, Path::new("/nix/store"), false, 65536)?;
+        if crate::sha256(&data) != artifact.sha256
+            || resolved(path, Path::new("/nix/store"))? != artifact.path
+        {
+            return Err(Error::TargetChanged);
+        }
+        self.recheck()?;
+        String::from_utf8(data).map_err(|_| Error::Invalid)
+    }
+    pub fn verify_system_enrollment(&self, closure: &str) -> Result<()> {
+        if !store(closure) {
+            return Err(Error::Invalid);
+        }
+        self.recheck()?;
+        let path = Path::new(closure).join("etc/aios/target-authority.json");
+        let bytes = read(&path, Path::new("/nix/store"), true, 65536)?;
+        let enrollment: Enrollment = serde_json::from_slice(&bytes)?;
+        enrollment.validate()?;
+        if enrollment != self.enrollment || canonical(&enrollment)? != bytes {
+            return Err(Error::TargetChanged);
+        }
+        self.recheck()
+    }
+    pub fn systemd_boot_payload_sha256(&self, name: &str, max: u64) -> Result<String> {
+        let file = name.strip_prefix("/EFI/nixos/").ok_or(Error::Invalid)?;
+        if file.is_empty()
+            || file.len() > 256
+            || !file
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
+            || matches!(file, "." | "..")
+            || max == 0
+            || max > 256 * 1024 * 1024
+        {
+            return Err(Error::Invalid);
+        }
+        self.recheck()?;
+        let bytes = read(
+            &Path::new("/boot/EFI/nixos").join(file),
+            Path::new("/boot/EFI/nixos"),
+            false,
+            max,
+        )?;
+        let digest = crate::sha256(&bytes);
+        self.recheck()?;
+        Ok(digest)
+    }
+    /// Fixed installed systemd-boot files only; no general privileged read API.
+    pub fn systemd_boot_file(&self, entry: Option<&str>) -> Result<Vec<u8>> {
+        self.recheck()?;
+        let path = match entry {
+            None => PathBuf::from("/boot/loader/loader.conf"),
+            Some(name) => {
+                let number = name
+                    .strip_prefix("nixos-generation-")
+                    .and_then(|s| s.strip_suffix(".conf"))
+                    .ok_or(Error::Invalid)?;
+                if number.is_empty()
+                    || number.len() > 10
+                    || number.starts_with('0')
+                    || !number.bytes().all(|b| b.is_ascii_digit())
+                {
+                    return Err(Error::Invalid);
+                }
+                Path::new("/boot/loader/entries").join(name)
+            }
+        };
+        let data = read(&path, Path::new("/boot/loader"), false, 65536)?;
+        self.recheck()?;
+        Ok(data)
+    }
+    pub fn firmware_boot_override(&self, once: bool) -> Result<Option<Vec<u8>>> {
+        self.recheck()?;
+        let root = Path::new("/sys/firmware/efi/efivars");
+        resolved(root, Path::new("/sys"))?;
+        let name = if once {
+            "LoaderEntryOneShot"
+        } else {
+            "LoaderEntryDefault"
+        };
+        let path = root.join(format!("{name}-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"));
+        let value = match fs::symlink_metadata(&path) {
+            Ok(_) => Some(read(&path, root, false, 4096)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(_) => return Err(Error::Io),
+        };
+        self.recheck()?;
+        Ok(value)
     }
     pub(crate) fn authority(&self) -> Result<InstalledAuthority> {
         self.recheck()?;
