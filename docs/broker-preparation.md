@@ -15,6 +15,24 @@ both from its trusted installation configuration, never a client or model messag
 A store prefix alone is not trusted provenance. Production constructors require
 actual UID/EUID zero and have no fixture/path override exposed by the executable.
 
+The administrator flake produces `aios-template` from the reviewed public source
+domains in `nix/state/template-inputs.nix`. Every selected source file is included
+in the code revision by path, normalized mode, byte length and SHA-256. The package
+adds the generated locked catalog and the enrolled public management identity;
+its canonical `template.json` binds that exact inventory. Mutable managed data,
+candidate metadata, development job manifests and host private files are excluded.
+Source size/path bounds agree with the broker contract. Nix copies source data as
+0444 files in 0555 directories; installed Nix store objects are root owned.
+
+The development NixOS configuration installs an independent 0444
+`/etc/aios/template-authority.json` with the package path, manifest SHA-256 and
+base/catalog/lock revisions. Its reference keeps the template in the system
+closure. Protected tmpfiles declarations create candidate and ledger directories.
+This configuration does not enable a broker or grant a user root authority.
+It requires an enrolled public management identity before a template can be built.
+The installed record must be read and verified by a native authenticated root
+adapter; merely passing its serialized fields remains insufficient authority.
+
 The template manifest lists bounded, normalized paths, modes, sizes and hashes.
 It must contain the fixed flake, lock and generated catalog. Reserved managed/
 candidate metadata cannot be supplied by template entries. Root-owned readonly
@@ -99,5 +117,5 @@ the executor package for non-root denials. Tests use dev-owned fixture directori
 fixture templates/targets/grants/build outputs and SQL-abort injection. They do not
 prove root installation, native guest/peer verification, enforced worker quotas,
 real disk-full recovery, polkit, guard survival, activation or boot. These remain
-required, including installed template packaging, root GC retention and native
+required, including installed template qualification, root GC retention and native
 runtime adapters. Host private keys and credentials remain outside all candidates.

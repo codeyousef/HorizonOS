@@ -34,15 +34,15 @@
         doCheck = false;
         meta.mainProgram = program;
       };
+      templateInputs = import ./nix/state/template-inputs.nix { root = ./.; };
       stateContract = import ./nix/state/catalog.nix {
         inherit pkgs;
         nixpkgsRevision = nixpkgs.rev;
         lockSha256 = builtins.hashFile "sha256" ./flake.lock;
-        baseTemplateRevision = builtins.hashString "sha256" (builtins.concatStringsSep "\n" (map builtins.readFile [
-          ./flake.nix ./nix/state/catalog.nix ./nix/state/managed.nix ./nix/machines/aios-dev/default.nix
-          ./crates/aios-state/src/lib.rs ./crates/aios-state/src/main.rs ./crates/aios-state/Cargo.toml
-          ./crates/aios-protocol/src/contracts.rs ./Cargo.lock
-        ]));
+        baseTemplateRevision = builtins.hashString "sha256" (builtins.toJSON templateInputs.files);
+      };
+      systemTemplate = pkgs.callPackage ./nix/packages/system-template.nix {
+        root = ./.; inherit templateInputs stateContract;
       };
       state = (productPackage "aios-state" "aios-state" "aios-state-check").overrideAttrs (_: {
         AIOS_STATE_CATALOG_JSON = builtins.toJSON stateContract.catalog;
@@ -73,13 +73,13 @@
     in {
       nixosConfigurations.aios-dev = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
+        specialArgs = { aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ];
       };
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios;
       nixosModules.production = import ./nix/modules/aios/production.nix;
-      packages.${system} = { aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
+      packages.${system} = { aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system}.host-unit = devTools;
       lib.stateContract = stateContract;
       lib.managedState = import ./tests/nix/managed.nix { inherit nixpkgs stateContract; };

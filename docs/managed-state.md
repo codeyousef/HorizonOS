@@ -12,8 +12,11 @@ record and the entire catalog with SHA-256. Package mappings are template code;
 clients select only IDs. All initial entries are free. Future unfree entries need
 an exact per-ID permission acknowledgement; broad `allowUnfree` is denied.
 
-The base revision binds the reviewed catalog/template, machine module, compiler
-and canonicalizer. The catalog also binds the lock hash, Nixpkgs revision, platform
+The base revision binds the canonical path/mode/size/hash inventory of every
+reviewed public template source file, including the machine modules, compiler,
+canonicalizer, native runtime, service definitions and build tooling. Public
+enrollment is separately bound by the template manifest. The catalog also binds
+the lock hash, Nixpkgs revision, platform
 and installation `system.stateVersion`. The initial baseline is `26.05`; updating
 a package set does not change it. A root broker must bind these artifacts to its
 installed template before accepting a build. This compiler is not that broker.

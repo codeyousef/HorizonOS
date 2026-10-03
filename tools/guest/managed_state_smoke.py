@@ -70,6 +70,7 @@ def main():
     executable = str(Path(package) / "bin/aios-state-check")
     actual_catalog = json.loads(run([executable, "--catalog"]))
     defaults = json.loads(run([executable, "--defaults"]))
+    run(["nix", "eval", "--raw", *locked, *pure, reference + "#aios-template.drvPath"], expected=1)
     if actual_catalog != contract["catalog"] or defaults != contract["defaults"]:
         raise RuntimeError("installed Rust catalog and template catalog/defaults diverge")
     checks = []
@@ -128,6 +129,7 @@ def main():
     source_manifest = source.decode((release / source.MANIFEST).read_bytes())
     source.verify_tree(release, source_manifest, published=True)
     machine_checks = []
+    template_evidence = None
     with tempfile.TemporaryDirectory(prefix="managed-machine-", dir=environment.get("TMPDIR")) as directory:
         working = Path(directory)
         try:
@@ -165,6 +167,55 @@ def main():
                 if value != expected:
                     raise RuntimeError("managed machine changed protected transport/baseline")
                 machine_checks.append({"name":name,"value":value})
+            authority_attr = machine_reference + '#nixosConfigurations.aios-dev.config.environment.etc."aios/template-authority.json".text'
+            authority_bytes = json.loads(run(["nix", "eval", "--json", *locked, *pure, authority_attr])).encode()
+            authority = json.loads(authority_bytes)
+            template_outputs = json.loads(run(["nix", "build", "--json", "--no-link", *locked, *pure,
+                "--option", "substituters", "https://cache.nixos.org", machine_reference + "#aios-template"], timeout=600))
+            template_path = Path(template_outputs[0]["outputs"]["out"])
+            if len(template_outputs) != 1 or str(template_path) != authority["template_path"]:
+                raise RuntimeError("template output differs from independently evaluated installed authority")
+            manifest_bytes = (template_path / "template.json").read_bytes()
+            manifest = json.loads(manifest_bytes)
+            if compact(manifest) != manifest_bytes or hashlib.sha256(manifest_bytes).hexdigest() != authority["manifest_sha256"]:
+                raise RuntimeError("template manifest disagrees with installed authority")
+            listed = {entry["path"] for entry in manifest["files"]}
+            actual_files = set()
+            for parent, directories, names in os.walk(template_path):
+                directory_path = Path(parent)
+                if directory_path.is_symlink() or directory_path.stat().st_uid != 0 or directory_path.stat().st_mode & 0o7777 != 0o555:
+                    raise RuntimeError("template directory is not readonly root owned")
+                for name in directories:
+                    if (directory_path / name).is_symlink():
+                        raise RuntimeError("template contains a symlink directory")
+                for name in names:
+                    path = directory_path / name
+                    if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_mode & 0o7777 != 0o444:
+                        raise RuntimeError("template file is not readonly root owned")
+                    actual_files.add(path.relative_to(template_path).as_posix())
+            if listed | {"template.json"} != actual_files or len(listed) != len(manifest["files"]):
+                raise RuntimeError("template inventory differs from manifest")
+            for entry in manifest["files"]:
+                data = (template_path / entry["path"]).read_bytes()
+                if entry["mode"] != 0o644 or len(data) != entry["size"] or hashlib.sha256(data).hexdigest() != entry["sha256"]:
+                    raise RuntimeError("template source bytes differ from manifest")
+            for field, expected in (("base_template_revision", contract["catalog"]["content"]["base_template_revision"]),
+                                    ("catalog_revision", contract["catalog"]["catalog_revision"]),
+                                    ("lock_sha256", contract["catalog"]["content"]["lock_sha256"])):
+                if authority[field] != expected:
+                    raise RuntimeError("installed authority revisions differ from generated catalog")
+            if json.loads((template_path / "catalog.json").read_bytes()) != contract["catalog"] or json.loads((template_path / build_system.ENROLLMENT).read_bytes()) != enrolled:
+                raise RuntimeError("template altered catalog or enrolled public management identity")
+            if any(path in listed for path in ("managed.json", "candidate.json", "source.identity.json", "MANIFEST.json", ".git/config")):
+                raise RuntimeError("mutable candidate/metadata leaked into template")
+            # The packaged source must evaluate through its own imports, with no IFD.
+            packaged_contract = json.loads(run(["nix", "eval", "--json", *locked, *pure, "path:" + str(template_path) + "#lib.stateContract"]))
+            if packaged_contract != contract:
+                raise RuntimeError("packaged template changed code/catalog identity")
+            template_evidence = {"path":str(template_path), "authority":authority,
+                "manifest":manifest,"root_owned_readonly_inventory_verified":True,
+                "pure_packaged_catalog_verified":True,"installed_running_authority_verified":False,
+                "source_file_count":len(listed), "runtime_closure":json.loads(run(["nix","path-info","--json","--recursive",str(template_path)]))}
             # Changing the frozen catalog must fail before consuming managed data.
             catalog_file = working / "catalog.json"
             catalog_file.chmod(0o600)
@@ -179,7 +230,7 @@ def main():
     if source.identity() != identity:
         raise RuntimeError("guest identity changed after managed-state checks")
     print("AIOS_MANAGED_STATE " + json.dumps({"evidence_kind":"real-guest-locked-catalog-module-and-package-with-fixture-manifests",
-        "target_identity":identity,"catalog":contract["catalog"],"module_cases":cases,"checks":checks,"previews":previews,"machine_candidate_checks":machine_checks,
+        "target_identity":identity,"catalog":contract["catalog"],"module_cases":cases,"checks":checks,"previews":previews,"machine_candidate_checks":machine_checks,"template_package":template_evidence,
         "package":package,"executable_sha256":hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
         "runtime_closure":closure,"commands":commands,"root_candidate_registration_verified":False,
         "system_activation_verified":False,"application_capabilities_verified":False,"postgresql_readiness_verified":False,

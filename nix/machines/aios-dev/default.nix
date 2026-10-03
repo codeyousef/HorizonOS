@@ -19,7 +19,7 @@ let
   '';
   serviceUsers = [ "aios-state" "aios-observer" "aios-builder" "aios-model" ];
 in {
-  imports = [ ../../modules/aios ] ++ lib.optional (builtins.pathExists ../../../managed.json) (
+  imports = [ ../../modules/aios ../../modules/aios/template.nix ] ++ lib.optional (builtins.pathExists ../../../managed.json) (
     assert builtins.pathExists ../../../catalog.json;
     assert builtins.readFile ../../../catalog.json == builtins.toJSON aiosStateContract.catalog;
     import ../../state/managed.nix {

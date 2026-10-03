@@ -136,6 +136,89 @@ def pointers():
             "booted": store_path(Path("/run/booted-system").resolve(strict=True))}
 
 
+def read_template_file(root, name):
+    """Read readonly Nix source data; never grant authority from this observation."""
+    parts = source.relative_path(name).parts
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        for component in parts[:-1]:
+            info = os.fstat(descriptor)
+            if info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o555:
+                raise ValueError("unsafe template parent")
+            child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        info = os.fstat(descriptor)
+        if info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o555:
+            raise ValueError("unsafe template file parent")
+        file_descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=descriptor)
+        with os.fdopen(file_descriptor, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o444 or info.st_size > 16 * 1024**2:
+                raise ValueError("unsafe template file")
+            data = handle.read(16 * 1024**2 + 1)
+            after = os.fstat(handle.fileno())
+            if len(data) != info.st_size or (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (info.st_size, info.st_mtime_ns, info.st_ctime_ns):
+                raise ValueError("template changed during observation")
+            return data
+    finally:
+        os.close(descriptor)
+
+
+def verify_template(realized, closure, enrolled, source_manifest, expected_locks):
+    """Verify actual built authority/retention against independently frozen source."""
+    authority_bytes = (Path(realized) / "etc/aios/template-authority.json").read_bytes()
+    authority = source.decode(authority_bytes)
+    keys = {"schema_version", "template_path", "manifest_sha256", "base_template_revision", "catalog_revision", "lock_sha256"}
+    if set(authority) != keys or authority["schema_version"] != 1 or source.canonical(authority) != authority_bytes:
+        raise ValueError("built template authority schema/canonical bytes differ")
+    template = Path(store_path(authority["template_path"]))
+    if str(template) not in closure:
+        raise ValueError("installed system does not retain trusted template")
+    manifest_bytes = read_template_file(template, "template.json")
+    manifest = source.decode(manifest_bytes)
+    if source.canonical(manifest) != manifest_bytes or hashlib.sha256(manifest_bytes).hexdigest() != authority["manifest_sha256"]:
+        raise ValueError("built authority manifest hash differs")
+    if set(manifest) != {"schema_version", "files"} or manifest["schema_version"] != 1:
+        raise ValueError("built template manifest schema differs")
+    files = manifest["files"]
+    if not 1 <= len(files) <= 4096 or files != sorted(files, key=lambda item: item["path"]):
+        raise ValueError("invalid template source inventory")
+    expected = {item["path"]: item for item in source_manifest["files"]}
+    listed = set()
+    for item in files:
+        if set(item) != {"path", "mode", "size", "sha256"} or item["path"] in listed or item["mode"] != 0o644:
+            raise ValueError("invalid template file entry")
+        source.relative_path(item["path"])
+        listed.add(item["path"])
+        data = read_template_file(template, item["path"])
+        if len(data) != item["size"] or hashlib.sha256(data).hexdigest() != item["sha256"]:
+            raise ValueError("built template ownership/bytes differ")
+        if item["path"] == ENROLLMENT:
+            if data != source.canonical(enrolled):
+                raise ValueError("built template enrollment differs")
+        elif item["path"] != "catalog.json":
+            original = expected.get(item["path"])
+            if original is None or original["sha256"] != item["sha256"] or original["size"] != item["size"]:
+                raise ValueError("template includes unreviewed source")
+    observed = set()
+    for parent, directories, names in os.walk(template):
+        info = Path(parent).lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o7777 != 0o555:
+            raise ValueError("unsafe built template directory")
+        for name in directories:
+            if (Path(parent) / name).is_symlink():
+                raise ValueError("template symlink directory")
+        observed.update((Path(parent) / name).relative_to(template).as_posix() for name in names)
+    if observed != listed | {"template.json"} or not {"flake.nix", "flake.lock", "catalog.json", ENROLLMENT} <= listed:
+        raise ValueError("template source inventory incomplete or has unlisted files")
+    catalog = source.decode(read_template_file(template, "catalog.json"))
+    if authority["lock_sha256"] != expected_locks["flake.lock"] or catalog["catalog_revision"] != authority["catalog_revision"] or catalog["content"]["base_template_revision"] != authority["base_template_revision"]:
+        raise ValueError("built template catalog/lock identity differs")
+    return {"authority": authority, "manifest": manifest, "root_owned_readonly_inventory_verified": True,
+            "retained_in_system_closure_verified": True, "running_installed_authority_verified": False}
+
+
 def main():
     if len(sys.argv) != 2:
         raise ValueError("registered job directory required")
@@ -201,6 +284,7 @@ def main():
                 raise ValueError("built system enrollment differs")
         before = run(["nix", "path-info", "--json", "--recursive", previous["running"]], structured=True)
         after = run(["nix", "path-info", "--json", "--recursive", realized], structured=True)
+        report["template_package"] = verify_template(realized, after, enrolled, manifest, expected_locks)
         report.update(built_output=realized, output_root=str(directory / "candidate-root"),
                       closure_diff={"added_paths": sorted(set(after)-set(before)), "removed_paths": sorted(set(before)-set(after)),
                                     "prior_nar_bytes": sum(v["narSize"] for v in before.values()),
