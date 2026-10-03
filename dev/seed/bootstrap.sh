@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run manually in the official NixOS installer console, never on the host.
+# Registered host console operation in the official installer, never on the host.
 set -euo pipefail
 export LC_ALL=C
 seed=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -20,6 +20,12 @@ serial=$(cat disk.serial)
 [[ $serial == AIOS_DEV_ROOT ]] || die 'Unexpected disk serial'
 [[ $(tr '[:upper:]' '[:lower:]' </sys/class/dmi/id/product_uuid) == "$guest_uuid" ]] || die 'DMI UUID mismatch'
 [[ $(cat authorized.uuid) == "$guest_uuid" ]] || die 'No matching host provisioning authorization'
+[[ -f source/flake.lock && -f source/Cargo.lock && -f source/nix/machines/aios-dev/default.nix ]] || die 'Pinned Horizon OS image source is missing'
+[[ ! -e source/nix/machines/aios-dev/enrollment.json ]] || die 'Seed source cannot override machine enrollment'
+[[ $(wc -l <dev.pub) == 1 ]] || die 'Expected one public development key'
+ssh-keygen -lf dev.pub -E sha256 >/dev/null || die 'Invalid public development key'
+public_key=$(awk '{print $1 " " $2}' dev.pub)
+[[ $public_key =~ ^ssh-ed25519\ [A-Za-z0-9+/=]+$ ]] || die 'Expected an Ed25519 development key'
 
 disks=()
 while read -r name observed type; do
@@ -74,15 +80,29 @@ mkdir -p /mnt/{home,nix,var,boot}
 for directory in home nix var; do mount -o "subvol=@$directory,compress=zstd" "${disk}2" "/mnt/$directory"; done
 mount -o umask=0077 "${disk}1" /mnt/boot
 nixos-generate-config --root /mnt
-cp source/nix/machines/aios-dev/bootstrap.nix /mnt/etc/nixos/bootstrap.nix
-cp source/tools/guest/identity.py /mnt/etc/nixos/identity.py
-cp dev.pub /mnt/etc/nixos/dev.pub
-printf '%s\n' "$guest_uuid" >/mnt/etc/nixos/guest.uuid
-printf '%s\n' "$installation_uuid" >/mnt/etc/nixos/installation.uuid
-cat >/mnt/etc/nixos/configuration.nix <<'NIX'
-{ ... }: { imports = [ ./hardware-configuration.nix ./bootstrap.nix ]; }
-NIX
-nixos-install --root /mnt --no-root-passwd
+# Initial provisioning installs the same pinned full image used by system-build
+# verification. This path is reachable only after fresh-disk identity checks;
+# it is not an update/deployment route for an existing installation.
+candidate=/mnt/etc/nixos/horizon
+[[ ! -e $candidate ]] || die 'Initial image candidate already exists'
+mkdir "$candidate"
+cp -r source/. "$candidate/"
+chmod -R u+w "$candidate"
+printf '{"authorized_key":"%s","disk_serial":"AIOS_DEV_ROOT","dmi_uuid":"%s","guest_role":"development","installation_uuid":"%s","management_channel":"ssh-development","schema_version":1}' \
+  "$public_key" "$guest_uuid" "$installation_uuid" >"$candidate/nix/machines/aios-dev/enrollment.json"
+nixos-install --root /mnt --no-root-passwd --no-channel-copy \
+  --flake "path:$candidate#aios-dev" --no-update-lock-file --no-write-lock-file \
+  --option pure-eval true --option allow-import-from-derivation false \
+  --substituters https://cache.nixos.org --max-jobs 2 --cores 4
+cmp source/flake.lock "$candidate/flake.lock" || die 'Installer changed the Nix lock'
+cmp source/Cargo.lock "$candidate/Cargo.lock" || die 'Installer changed the Cargo lock'
+nixos-enter --root /mnt -c 'set -eu
+test -r /etc/aios/target-authority.json
+test -r /etc/aios/template-authority.json
+test -r /etc/aios/approval-authority.json
+test -x /run/current-system/sw/bin/aios-dev-deploy
+printf "AIOS_INITIAL_IMAGE=%s\n" "$(readlink -f /nix/var/nix/profiles/system)"
+'
 install -d -m 0755 /mnt/etc/ssh
 ssh-keygen -q -t ed25519 -N '' -f /mnt/etc/ssh/ssh_host_ed25519_key
 printf '\nInstallation finished. The host console workflow completes tester setup and unmounting.\n'

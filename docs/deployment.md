@@ -24,6 +24,23 @@ refused. The read-only seed contains public source, UUIDs, disk serial, explicit
 fresh-disk authorization and the dedicated public SSH key. The private key stays
 on the host.
 
+Fresh provisioning installs the pinned `nixosConfigurations.aios-dev` image,
+including the desktop, installed target/template/approval records and the narrow
+VM-only developer helper. Enrollment is generated from the verified VM and
+installation UUIDs and the dedicated public key; seed source cannot provide its
+own enrollment file. The installer builds in the target virtual disk, keeps both
+locks unchanged, uses pure evaluation and disables import-from-derivation. This
+is initial installation after fresh-disk checks. Updates use the separate guarded
+developer deployment contract. Existing minimal bootstrap guests retain their
+current configuration until an explicitly supported recovery or deployment.
+
+Initial setup installs a fixed development preflight probe for the first boot.
+Its root-owned systemd unit invokes only the installed executor's native startup
+checks and writes a read-only result under `/run/aios-initial-preflight`. It accepts
+no requests, confirms no user intent and applies no product effects. A successful
+preflight still reports that the runtime adapter is unavailable. This probe is
+initial-image verification instrumentation, not the product executor service.
+
 QEMU runs as the current user with KVM, CPU host, virtio devices, local GTK,
 private OVMF VARS, SMBIOS UUID, `AIOS_DEV_ROOT` serial, local Unix control sockets
 and IPv4 loopback port forwarding. QMP control verifies PID/start time, user,

@@ -7,10 +7,24 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import base64
+import hashlib
+import sys
 
 
 def main():
     release = Path(__file__).resolve().parents[2]
+    subprocess.run(["bash", "-n", str(release / "dev/seed/bootstrap.sh")], check=True, timeout=10)
+    sys.path.insert(0, str(release / "tools"))
+    from aios_dev.vm import finish_console_command
+    import snapshot
+    identity = snapshot.identity()
+    _, encoded_finish = finish_console_command({"plan":{"guest_uuid":identity["dmi_uuid"],"installation_uuid":identity["installation_uuid"]}})
+    finish = base64.b64decode(encoded_finish, validate=True)
+    subprocess.run(["bash", "-n"], input=finish, check=True, timeout=10)
+    initial_probe = subprocess.run(["python3", str(release / "tools/guest/initial_preflight.py")], capture_output=True, timeout=10)
+    if initial_probe.returncode != 5 or json.loads(initial_probe.stdout) != {"schema_version":1,"error":"INITIAL_PREFLIGHT_ROOT_REQUIRED"}:
+        raise RuntimeError("initial native preflight allowed nonroot execution")
     reference = "path:" + str(release)
     locked = ["--no-update-lock-file", "--no-write-lock-file"]
     cases = json.loads(subprocess.check_output(["nix", "eval", "--json", *locked, reference + "#lib.developmentBoundary"], timeout=120))
@@ -52,6 +66,9 @@ def main():
     subprocess.run(["python3", "-m", "unittest", "discover", "-s", "tests/unit", "-p", "test_dev_deploy.py", "-v"], cwd=release, check=True, timeout=60)
     print("AIOS_DEVELOPMENT_BOUNDARY " + json.dumps({"evidence_kind":"real-guest-package-and-module-evaluation","module_cases":cases,
         "package":package,"nonroot_denials":attempts,"source_copy_fixture_tests":14,
+        "initial_image_script_syntax":{"argv":["bash","-n",str(release / "dev/seed/bootstrap.sh")],"upstream_exit":0,"fresh_installation_verified":False},
+        "initial_native_preflight_nonroot_denial":{"argv":["python3",str(release / "tools/guest/initial_preflight.py")],"upstream_exit":5,"actual_uid":os.getuid()},
+        "initial_finish_syntax":{"argv":["bash","-n"],"upstream_exit":0,"script_sha256":hashlib.sha256(finish).hexdigest(),"executed":False},
         "root_registration_verified":False,"guarded_activation_verified":False,"production_boot_verified":False,
         "limitations":["Filesystem-copy and target checks are fixtures under the dev UID.","The helper has not been installed in the running system; no VM sudo or activation performed.","Guarded test/commit and production isolation remain unimplemented/unverified."]}, sort_keys=True))
 

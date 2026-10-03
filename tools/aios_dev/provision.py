@@ -178,6 +178,8 @@ def source_files(root: Path) -> list[Path]:
         if not name:
             continue
         relative = Path(name)
+        if name == "nix/machines/aios-dev/enrollment.json":
+            raise invalid("Bootstrap enrollment is generated only from the verified fresh target and public key")
         if relative.is_absolute() or ".." in relative.parts or any(p in PRIVATE_PARTS or p.startswith(".env") for p in relative.parts) or relative.suffix in PRIVATE_SUFFIXES:
             raise invalid("Tracked source contains a forbidden/private path")
         if relative.parts[0] not in SOURCE_ROOTS and name not in SOURCE_FILES:

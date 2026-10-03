@@ -49,6 +49,8 @@ def finish_console_command(record):
     # Only canonical UUIDs from the already validated provisioning record enter
     # this registered script. The generated tester secret never leaves the guest.
     plan = record["plan"]
+    probe_source = Path(__file__).resolve().parents[1] / "guest/initial_preflight.py"
+    probe = base64.b64encode(probe_source.read_bytes()).decode()
     script = """#!/usr/bin/env bash
 set -euo pipefail
 test "$(sed -n 's/^ID=//p' /etc/os-release)" = nixos
@@ -59,13 +61,48 @@ test "$(findmnt --noheadings --output UUID /mnt)" = INSTALLATION_UUID
 nixos-enter --root /mnt -c 'set -eu
 test "$(cat /etc/aios/installation-uuid)" = INSTALLATION_UUID
 test "$(cat /etc/aios/guest-role)" = development
+test "$(cat /etc/aios/management-channel)" = ssh-development
+test -r /etc/aios/approval-authority.json
+'
+# Fixed initial-image instrumentation only, installed before its first boot.
+# No arbitrary command/path/request is accepted and no activation is performed.
+test ! -e /mnt/root/aios-initial-preflight.py
+echo PREFLIGHT_SOURCE | base64 -d >/mnt/root/aios-initial-preflight.py
+chmod 0500 /mnt/root/aios-initial-preflight.py
+test ! -e /mnt/etc/systemd/system.control/aios-initial-preflight.service
+mkdir -p /mnt/etc/systemd/system.control/multi-user.target.wants
+cat >/mnt/etc/systemd/system.control/aios-initial-preflight.service <<'UNIT'
+[Unit]
+Description=Horizon OS initial installed native preflight
+Requires=aios-bootstrap-identity.service
+After=aios-bootstrap-identity.service dbus.service
+[Service]
+Type=oneshot
+ExecStart=/run/current-system/sw/bin/python3 -I /root/aios-initial-preflight.py
+RuntimeDirectory=aios-initial-preflight
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+RemainAfterExit=yes
+Restart=no
+UMask=0022
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+[Install]
+WantedBy=multi-user.target
+UNIT
+ln -s ../aios-initial-preflight.service /mnt/etc/systemd/system.control/multi-user.target.wants/aios-initial-preflight.service
+nixos-enter --root /mnt -c 'set -eu
+test "$(cat /etc/aios/installation-uuid)" = INSTALLATION_UUID
+test "$(cat /etc/aios/guest-role)" = development
 umask 077
 head -c 48 /dev/urandom | base64 > /root/.aios-tester-secret
 { printf "tester:"; cat /root/.aios-tester-secret; } | chpasswd
 '
 umount -R /mnt
 sync
-""".replace("GUEST_UUID", plan["guest_uuid"]).replace("INSTALLATION_UUID", plan["installation_uuid"])
+""".replace("GUEST_UUID", plan["guest_uuid"]).replace("INSTALLATION_UUID", plan["installation_uuid"]).replace("PREFLIGHT_SOURCE", probe)
     return encoded_console_script(script, "AIOS_FINISH_EXIT")
 
 

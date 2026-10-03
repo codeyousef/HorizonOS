@@ -2,16 +2,20 @@
 fn main() {
     let root = unsafe { libc::getuid() } == 0 && unsafe { libc::geteuid() } == 0;
     if root {
+        let mut stage = "target-enrollment";
         let preflight = (|| -> aios_exec::Result<()> {
             let target = aios_exec::native::VerifiedTarget::enroll()?;
+            stage = "installed-template";
             let _template = aios_exec::candidate::InstalledTemplate::from_installed()?;
+            stage = "native-approval-authority";
             let _approval_engine = aios_exec::approval::Authorizer::open()?;
+            stage = "target-recheck";
             target.recheck()
         })();
         if let Err(reason) = preflight {
             println!(
                 "{}",
-                serde_json::json!({"schema_version":1,"error":"BROKER_NATIVE_PREFLIGHT_FAILED","reason":format!("{reason:?}")})
+                serde_json::json!({"schema_version":1,"error":"BROKER_NATIVE_PREFLIGHT_FAILED","stage":stage,"reason":format!("{reason:?}")})
             );
             std::process::exit(9);
         }

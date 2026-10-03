@@ -139,6 +139,15 @@ class ProvisionTests(unittest.TestCase):
         with patch("aios_dev.provision.run", return_value=subprocess.CompletedProcess([], 0, "tools/link.py\0", "")), self.assertRaises(DevctlError):
             source_files(self.root)
 
+    def test_seed_cannot_supply_existing_machine_enrollment(self):
+        name = "nix/machines/aios-dev/enrollment.json"
+        target = self.root / name
+        target.parent.mkdir(parents=True)
+        target.write_text('{"schema_version":1}')
+        completed = subprocess.CompletedProcess([], 0, name + "\0", "")
+        with patch("aios_dev.provision.run", return_value=completed), self.assertRaisesRegex(DevctlError, "generated only from the verified fresh target"):
+            source_files(self.root)
+
     def test_manifest_digest_covers_public_files(self):
         (self.root / "guest.uuid").write_text("public UUID fixture\n")
         seed_manifest(self.root)

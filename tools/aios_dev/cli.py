@@ -60,7 +60,7 @@ def parser() -> Parser:
     test.add_argument("--suite", choices=("unit", "integration", "desktop"), required=True)
     test.add_argument("--detach", action="store_true")
     test.add_argument("--bootstrap-case", choices=("all", *acceptance.CASES), help="run only the named disposable installer guard qualification")
-    test.add_argument("--provider", choices=("system-info", "service-inspection", "public-session", "model-compatibility", "model-inference", "model-service", "development-boundary", "guard-state", "managed-state", "broker-preparation"), help="run the named real product provider smoke in the verified guest")
+    test.add_argument("--provider", choices=("system-info", "service-inspection", "public-session", "model-compatibility", "model-inference", "model-service", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime"), help="run the named real product provider smoke in the verified guest")
     controls = commands.add_parser("jobs").add_subparsers(dest="operation", required=True)
     for action in ("status", "cancel"):
         controls.add_parser(action).add_argument("--job", required=True)
