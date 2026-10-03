@@ -31,6 +31,7 @@ fn binding() -> Binding {
             management_channel: "ssh-development".into(),
         },
         closure: format!("/nix/store/{}-system", "a".repeat(32)),
+        impact_sha256: "e".repeat(64),
         policy_revision: "d".repeat(64),
         action: policy::ACTION.into(),
         frozen_at: 100,
@@ -99,7 +100,7 @@ fn expiry_boundaries_clock_rewind_and_suspend_elapsed_time_invalidate_receipts()
 #[test]
 fn plan_policy_target_closure_action_and_expiry_drift_cannot_reuse_a_receipt() {
     let original = binding();
-    for field in 0..10 {
+    for field in 0..11 {
         let mut current = original.clone();
         match field {
             0 => current.plan_hash = "e".repeat(64),
@@ -115,6 +116,7 @@ fn plan_policy_target_closure_action_and_expiry_drift_cannot_reuse_a_receipt() {
                 current.expires_at += 1;
             }
             9 => current.target.management_channel = "local-product".into(),
+            10 => current.impact_sha256 = "f".repeat(64),
             _ => unreachable!(),
         }
         let mut volatile = issued(&original);

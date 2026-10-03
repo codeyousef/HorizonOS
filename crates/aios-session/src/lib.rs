@@ -101,7 +101,7 @@ pub struct TaskStatus {
 
 struct Task {
     owner: Peer, expires: Instant, nonce: String, digest: [u8; 32], status: TaskStatus,
-    deadline: Instant, control: Arc<AtomicU8>, text: Option<String>, events: Vec<Value>,
+    deadline: Instant, control: Arc<AtomicU8>, text: Option<String>, events: Vec<Value>, grant: Option<aios_policy::ReadGrant>,
 }
 impl Task {
     fn terminal(&self) -> bool { matches!(self.status.state.as_str(), "completed" | "failed" | "cancelled") }
@@ -110,6 +110,7 @@ impl Task {
     }
     fn finish(&mut self, result: Result<Value, ErrorCode>) {
         if self.terminal() { return; }
+        if let Some(grant) = &self.grant { grant.revoke(); }
         let cause = self.control.load(Ordering::Acquire);
         let result = match result { Ok(_) if cause == 1 => Err(ErrorCode::Cancelled), Ok(_) if cause == 2 => Err(ErrorCode::DeadlineExceeded), other => other };
         match result {
@@ -129,7 +130,16 @@ impl Drop for Task {
 struct UiCandidate { owner: Peer, expires: Instant, session: identity::GraphicalSession }
 struct Handle { owner: Peer, expires: Instant, unit: String }
 #[derive(Default)]
-pub struct State { tasks: HashMap<String, Task>, handles: HashMap<String, Handle>, ui_candidates: HashMap<String, UiCandidate>, queue: VecDeque<String>, inference_configured: bool, inference_available: bool }
+struct ReadResources(Vec<aios_policy::Resource>);
+impl aios_policy::CurrentResources for ReadResources {
+    fn resolve(&self, field: &str, kind: &str, handle: &str) -> Result<String, ErrorCode> {
+        self.0.iter().find(|r| r.field == field && r.kind == kind && r.handle == handle)
+            .map(|r| r.identity_sha256.clone()).ok_or(ErrorCode::PermissionDenied)
+    }
+    fn dynamic_arguments(&self, _: &str, _: &Value, _: &aios_policy::Scope) -> Result<(), ErrorCode> { Err(ErrorCode::UnsupportedCapability) }
+}
+#[derive(Default)]
+pub struct State { tasks: HashMap<String, Task>, handles: HashMap<String, Handle>, ui_candidates: HashMap<String, UiCandidate>, queue: VecDeque<String>, inference_configured: bool, inference_available: bool, policy: Option<aios_policy::Policy> }
 pub type SharedState = Arc<Mutex<State>>;
 
 fn now() -> String { OffsetDateTime::now_utc().format(&Rfc3339).expect("valid timestamp") }
@@ -138,10 +148,34 @@ fn provider<T: Serialize>(value: T) -> Result<Value, ErrorCode> { serde_json::to
 
 impl State {
     pub fn with_inference() -> Self { Self { inference_configured: true, ..Self::default() } }
+    fn policy(&mut self, peer: &Peer) -> Result<&aios_policy::Policy, ErrorCode> {
+        if self.policy.is_none() { self.policy = Some(aios_policy::Policy::new(peer.boot_id.clone(), aios_policy::registry_revision())?); }
+        self.policy.as_ref().ok_or(ErrorCode::PolicyChanged)
+    }
+    fn read_grant(&mut self, peer: &Peer, id: String, text: &str, mode: Mode, scope: aios_policy::Scope, expiry_ms: u64) -> Result<aios_policy::ReadGrant, ErrorCode> {
+        let policy = self.policy(peer)?;
+        let mode = match mode { Mode::Ask => aios_policy::Mode::Ask, Mode::Diagnose => aios_policy::Mode::Diagnose,
+            Mode::Act => aios_policy::Mode::Act, Mode::Automate => aios_policy::Mode::Automate };
+        let intent = policy.authenticated_user_intent(peer.policy_subject()?, id, text, mode)?;
+        policy.grant_reads(intent, scope, aios_policy::boottime_ms()?, expiry_ms)
+    }
+    fn check_task_read(&self, id: &str, peer: &Peer) -> Result<(), ErrorCode> {
+        let task = self.task(id, peer)?;
+        self.policy.as_ref().ok_or(ErrorCode::PolicyChanged)?.check_read(task.grant.as_ref().ok_or(ErrorCode::AuthRequired)?,
+            &peer.policy_subject()?, id, &Action::SystemInfo, &ReadResources::default(), aios_policy::boottime_ms()?)
+    }
+    fn check_direct_read(&mut self, peer: &Peer, action: &Action, resources: ReadResources) -> Result<(), ErrorCode> {
+        let id = Uuid::new_v4().to_string();
+        let scope = aios_policy::Scope { actions: [action.action_id().into()].into(),
+            resources: resources.0.iter().cloned().collect(), ..Default::default() };
+        let grant = self.read_grant(peer, id.clone(), &serde_json::to_string(&action.arguments_value()).map_err(|_| ErrorCode::InvalidArgument)?, Mode::Ask, scope, 10_000)?;
+        self.policy.as_ref().ok_or(ErrorCode::PolicyChanged)?.check_read(&grant, &peer.policy_subject()?, &id, action, &resources, aios_policy::boottime_ms()?)
+    }
     fn prune(&mut self) {
         let time = Instant::now();
         for task in self.tasks.values_mut() {
             if !task.terminal() && task.deadline <= time {
+                if let Some(grant) = &task.grant { grant.revoke(); }
                 let _=task.control.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire);
                 if task.status.state == "queued" { task.finish(Err(if task.control.load(Ordering::Acquire)==1 {ErrorCode::Cancelled}else{ErrorCode::DeadlineExceeded})); }
                 else if task.status.state != "cancelling" { task.status.state="cancelling".into(); task.event("deadline_requested"); }
@@ -154,6 +188,7 @@ impl State {
     }
     fn disconnect(&mut self, peer: &Peer) {
         for task in self.tasks.values_mut().filter(|task| task.owner == *peer && !task.terminal()) {
+            if let Some(grant) = &task.grant { grant.revoke(); }
             let _=task.control.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
             if task.status.state == "queued" { task.finish(Err(ErrorCode::Cancelled)); }
             else if task.status.state != "cancelling" { task.status.state="cancelling".into(); task.event("requester_disconnected"); }
@@ -179,12 +214,19 @@ impl State {
                 Ok(json!({"schema_version":1,"operation":"ui_session_candidate","candidate_handle":id,"session":view,
                     "expires_after_ms":30000,"confirmation_required":true,"ui_authorized":false}))
             },
-            Operation::GetSystemInfo => provider(aios_system::observe_system_info()),
+            Operation::GetSystemInfo => {
+                self.check_direct_read(peer, &Action::SystemInfo, ReadResources::default())?;
+                provider(aios_system::observe_system_info())
+            },
             Operation::ResolveService { unit_name } => {
                 validate_service_name(&unit_name)?;
                 if self.handles.len() >= 256 || self.handles.values().filter(|h| h.owner == *peer).count() >= 32 { return Err(ErrorCode::ResourceExhausted); }
                 // Resolve a known loaded unit before issuing a scope-bound handle.
                 let id = Uuid::new_v4().to_string();
+                let action = parse_tool_call(json!({"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":id}}).to_string().as_bytes())?;
+                let resource = aios_policy::Resource { field: "service_id".into(), kind: "scope-owner-expiry".into(),
+                    handle: id.clone(), identity_sha256: aios_policy::digest(&unit_name)? };
+                self.check_direct_read(peer, &action, ReadResources(vec![resource]))?;
                 aios_system::services::read_service_status(&unit_name, &id)?;
                 self.handles.insert(id.clone(), Handle { owner: peer.clone(), expires: Instant::now() + Duration::from_secs(30), unit: unit_name });
                 Ok(json!({"service_id":id,"expires_after_ms":30000}))
@@ -198,11 +240,18 @@ impl State {
                     return Err(ErrorCode::AuthRequired);
                 }
                 match action {
-                Action::SystemInfo => provider(aios_system::observe_system_info()),
-                Action::SystemServiceStatus(args) => {
+                Action::SystemInfo => {
+                    self.check_direct_read(peer, &action, ReadResources::default())?;
+                    provider(aios_system::observe_system_info())
+                },
+                Action::SystemServiceStatus(ref args) => {
                     let handle = self.handles.get(&args.service_id).ok_or(ErrorCode::TargetNotFound)?;
                     if handle.owner != *peer { return Err(ErrorCode::PermissionDenied); }
-                    provider(service_result(&handle.unit, &args.service_id))
+                    let unit = handle.unit.clone();
+                    let resource = aios_policy::Resource { field: "service_id".into(), kind: "scope-owner-expiry".into(),
+                        handle: args.service_id.clone(), identity_sha256: aios_policy::digest(&unit)? };
+                    self.check_direct_read(peer, &action, ReadResources(vec![resource]))?;
+                    provider(service_result(&unit, &args.service_id))
                 },
                 _ => Err(ErrorCode::UnsupportedCapability),
                 }
@@ -230,12 +279,16 @@ impl State {
                 }
                 if self.tasks.len() >= 64 || self.tasks.values().filter(|t| t.owner == *peer).count() >= 8 { return Err(ErrorCode::ResourceExhausted); }
                 let id = Uuid::new_v4().to_string();
+                let grant = if self.inference_configured && matches!(request.mode, Mode::Ask | Mode::Diagnose) {
+                    let scope = aios_policy::Scope { actions: ["system.info".into()].into(), ..Default::default() };
+                    Some(self.read_grant(peer, id.clone(), &request.text, request.mode, scope, 90_000)?)
+                } else { None };
                 let submitted_at = now();
                 let deadline = Instant::now() + Duration::from_secs(90);
                 let status = TaskStatus { schema_version: 1, operation: "task_status".into(), request_id: id.clone(), mode: request.mode,
                     state: "queued".into(), submitted_at, mutation_performed: false, error: None, output: None };
                 let mut task = Task { owner: peer.clone(), expires: deadline + Duration::from_secs(300),
-                    nonce: request.client_nonce, digest, status, deadline, control: Arc::new(AtomicU8::new(0)), text: Some(request.text), events: vec![] };
+                    nonce: request.client_nonce, digest, status, deadline, control: Arc::new(AtomicU8::new(0)), text: Some(request.text), events: vec![], grant };
                 task.event("accepted");
                 if !self.inference_configured { task.finish(Err(ErrorCode::ModelUnavailable)); }
                 else if matches!(request.mode, Mode::Act | Mode::Automate) { task.finish(Err(ErrorCode::UnsupportedCapability)); }
@@ -257,6 +310,7 @@ impl State {
                 let task = self.tasks.get_mut(&task_id).expect("authenticated task");
                 let terminal = task.terminal();
                 if !terminal && task.control.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                    if let Some(grant) = &task.grant { grant.revoke(); }
                     if task.status.state == "queued" { task.finish(Err(ErrorCode::Cancelled)); }
                     else { task.status.state = "cancelling".into(); task.event("cancellation_requested"); }
                 }
@@ -338,8 +392,8 @@ impl Client {
 mod tests {
     use super::*;
     fn peer_fixture() -> Peer {
-        Peer { uid: 1000, pid: 200, start_ticks: 3, boot_id: "fixture-boot".into(),
-            logind_session: None, remote: true, session_type: None, ui_enabled: false, bus_sender: None, bus_id: None, connection_id: None }
+        Peer { uid: 1000, pid: 200, start_ticks: 3, boot_id: "ab31ff68-0c2d-4db1-8d6b-9a63189c6844".into(),
+            logind_session: None, remote: true, session_type: None, ui_enabled: false, bus_sender: None, bus_id: None, connection_id: Some(Uuid::new_v4().to_string()) }
     }
     fn submit_fixture(mode: Mode, nonce: &str, text: &str) -> Operation {
         Operation::Submit { request: Submit { mode, text: text.into(), client_nonce: nonce.into(),

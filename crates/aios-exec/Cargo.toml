@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 aios-protocol = { path = "../aios-protocol" }
+aios-policy = { path = "../aios-policy" }
 aios-state = { path = "../aios-state" }
 aios-system = { path = "../aios-system" }
 blocking = "1.6"

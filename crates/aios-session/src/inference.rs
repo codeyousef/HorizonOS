@@ -113,6 +113,7 @@ fn cancelled(work:&Work) -> Result<(),ErrorCode> {
 }
 fn transition(state:&SharedState, work:&Work, stage:&str) -> Result<(),ErrorCode> {
     let mut state = state.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+    cancelled(work)?; state.check_task_read(&work.id, &work.owner)?;
     let task = state.tasks.get_mut(&work.id).ok_or(ErrorCode::Cancelled)?;
     if task.terminal() { return Err(task.status.error.unwrap_or(ErrorCode::Cancelled)); }
     cancelled(work)?; task.status.state=stage.into();task.event(stage); Ok(())
@@ -153,7 +154,9 @@ fn execute(endpoint:&Endpoint, state:&SharedState, work:&Work) -> Result<Value,E
     let id=accepted.generation_id;
     if let Err(error)=transition(state,work,"generating") {return stop_generation(&mut client,&id,error);}
     loop {
-        if let Err(error)=cancelled(work).and_then(|_|identity::verify_peer(&work.owner)) {
+        if let Err(error)=cancelled(work).and_then(|_|identity::verify_peer(&work.owner)).and_then(|_| {
+            state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.check_task_read(&work.id, &work.owner)
+        }) {
             // Only this worker's connection-bound generation can be cancelled.
             // A failed reply is followed by connection teardown, which cancels
             // that same native context; never retry another generation.
@@ -165,6 +168,7 @@ fn execute(endpoint:&Endpoint, state:&SharedState, work:&Work) -> Result<Value,E
             "queued"|"running" if result.error.is_none() && result.output.is_none() => {},
             "completed" if result.error.is_none() => {
                 cancelled(work)?;identity::verify_peer(&work.owner)?;
+                state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.check_task_read(&work.id, &work.owner)?;
                 // Never dispatch model output. This independent parser accepts
                 // only bounded answers/clarification/abstention and enrolled IDs.
                 let output=generation.parse_output(result.output.ok_or(ErrorCode::ModelOutputInvalid)?.get())?;
@@ -228,7 +232,8 @@ mod tests {
             assert!(reply.contains(r#""text":"fixture","text":"forged duplicate""#));
             write_frame(&mut socket,&reply).unwrap();
         });
-        let peer=identity::authenticate_process(nix::unistd::geteuid().as_raw(),std::process::id()).unwrap();
+        let mut peer=identity::authenticate_process(nix::unistd::geteuid().as_raw(),std::process::id()).unwrap();
+        peer.connection_id=Some(Uuid::new_v4().to_string());
         let state=Arc::new(Mutex::new(State::with_inference()));let id=submit(&state,&peer,"What OS is running?");
         assert!(run_one(&state,&Endpoint {path:path.clone(),qualification_pid:Some(std::process::id())}));
         let status=state.lock().unwrap().dispatch(&peer,Operation::GetStatus{task_id:id}).unwrap();
@@ -237,20 +242,25 @@ mod tests {
     }
     #[test]
     fn queued_cancel_forget_deadline_and_modes_never_start_a_model() {
-        let peer=identity::authenticate_process(nix::unistd::geteuid().as_raw(),std::process::id()).unwrap();
+        let mut peer=identity::authenticate_process(nix::unistd::geteuid().as_raw(),std::process::id()).unwrap();
+        peer.connection_id=Some(Uuid::new_v4().to_string());
         let state=Arc::new(Mutex::new(State::with_inference()));let id=submit(&state,&peer,"question");
         let mut foreign=peer.clone();foreign.connection_id=Some(Uuid::new_v4().to_string());
         assert_eq!(state.lock().unwrap().dispatch(&foreign,Operation::Cancel{task_id:id.clone()}).unwrap_err(),ErrorCode::PermissionDenied);
         assert_eq!(state.lock().unwrap().dispatch(&peer,Operation::Cancel{task_id:id.clone()}).unwrap()["cancelled"],true);
+        assert_eq!(state.lock().unwrap().check_task_read(&id,&peer),Err(ErrorCode::ApprovalExpired));
         assert_eq!(state.lock().unwrap().dispatch(&peer,Operation::Cancel{task_id:id.clone()}).unwrap()["already_terminal"],true);
         assert!(!run_one(&state,&Endpoint::installed()));
         let expired=submit(&state,&peer,"deadline question");state.lock().unwrap().tasks.get_mut(&expired).unwrap().deadline=Instant::now();
         assert!(!run_one(&state,&Endpoint::installed()));
-        assert_eq!(state.lock().unwrap().dispatch(&peer,Operation::GetStatus{task_id:expired}).unwrap()["error"],"DEADLINE_EXCEEDED");
-        let forgotten=submit(&state,&peer,"forget question");state.lock().unwrap().dispatch(&peer,Operation::Forget{task_id:forgotten}).unwrap();
+        assert_eq!(state.lock().unwrap().dispatch(&peer,Operation::GetStatus{task_id:expired.clone()}).unwrap()["error"],"DEADLINE_EXCEEDED");
+        assert_eq!(state.lock().unwrap().check_task_read(&expired,&peer),Err(ErrorCode::ApprovalExpired));
+        let forgotten=submit(&state,&peer,"forget question");state.lock().unwrap().dispatch(&peer,Operation::Forget{task_id:forgotten.clone()}).unwrap();
+        assert_eq!(state.lock().unwrap().check_task_read(&forgotten,&peer),Err(ErrorCode::TargetNotFound));
         assert!(!run_one(&state,&Endpoint::installed()));
         let disconnected=submit(&state,&peer,"disconnected question");state.lock().unwrap().disconnect(&peer);
-        assert_eq!(state.lock().unwrap().dispatch(&peer,Operation::GetStatus{task_id:disconnected}).unwrap()["error"],"CANCELLED");
+        assert_eq!(state.lock().unwrap().dispatch(&peer,Operation::GetStatus{task_id:disconnected.clone()}).unwrap()["error"],"CANCELLED");
+        assert_eq!(state.lock().unwrap().check_task_read(&disconnected,&peer),Err(ErrorCode::ApprovalExpired));
         for mode in [Mode::Act,Mode::Automate] {
             let result=state.lock().unwrap().dispatch(&peer,Operation::Submit{request:Submit{mode,text:"change the system".into(),client_nonce:Uuid::new_v4().to_string(),context_handles:vec![],selected_app_handle:None,selected_session_handle:None}}).unwrap();
             assert_eq!(state.lock().unwrap().dispatch(&peer,Operation::GetStatus{task_id:result["request_id"].as_str().unwrap().into()}).unwrap()["error"],"UNSUPPORTED_CAPABILITY");

@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 aios-protocol = { path = "../aios-protocol" }
+aios-policy = { path = "../aios-policy" }
 aios-system = { path = "../aios-system" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

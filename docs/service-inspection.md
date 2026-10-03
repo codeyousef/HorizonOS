@@ -72,9 +72,17 @@ The method fixes the permitted action ID: Search accepts only `files.search`,
 for example. Callers cannot choose another dispatch namespace through its JSON.
 GetCapabilities reports registered contracts separately from available actions.
 These file, application and settings providers currently report unavailable.
-Direct invocation carries no task grant or approved plan; every write action
-returns `AUTH_REQUIRED`, even if a future provider is registered. Successful
-reads still require the provider's concrete scope and resource checks.
+Direct invocation carries no approved write plan; every write action returns
+`AUTH_REQUIRED`, even if a future provider is registered. The shared
+`aios-policy` evaluator binds each available read to the authenticated caller,
+original connection, request, fixed action and concrete broker-issued resources.
+Successful reads still require the provider's current scope and resource checks.
+Question tasks retain a volatile read grant for their original goal and the
+`system.info` action. Grants expire using suspend-inclusive boot time and are
+revoked immediately by Stop, Forget, disconnect, deadline or task completion.
+They cannot survive a broker restart or authorize another UID/session/client.
+No grant, nonce or write approval enters model context. Native graphical consent
+is required before UI access; observing a graphical candidate creates no grant.
 
 The user unit hides home directories with `ProtectHome=tmpfs` and exposes only
 its own user runtime directory, including the standard session bus and private

@@ -27,6 +27,20 @@ pub struct Peer {
     /// Server-created private connection identity; never read from client JSON.
     pub connection_id: Option<String>,
 }
+impl Peer {
+    /// Only the native adapter's snapshot enters shared policy. Identity fields
+    /// never come from request JSON; the transport rechecks them independently.
+    pub(crate) fn policy_subject(&self) -> Result<aios_policy::Subject, ErrorCode> {
+        let client = match (&self.bus_sender, &self.bus_id, &self.connection_id) {
+            (Some(sender), Some(bus_id), None) => aios_policy::Client::Bus { sender: sender.clone(), bus_id: bus_id.clone() },
+            (None, None, Some(connection_id)) => aios_policy::Client::Unix { connection_id: connection_id.clone() },
+            _ => return Err(ErrorCode::PermissionDenied),
+        };
+        Ok(aios_policy::Subject { uid: self.uid, pid: self.pid, start_ticks: self.start_ticks,
+            boot_id: self.boot_id.clone(), session: self.logind_session.as_ref().map(|id| aios_policy::Session {
+                id: id.clone(), remote: self.remote, kind: self.session_type.clone().unwrap_or_default() }), client })
+    }
+}
 
 fn process(pid: u32, uid: u32) -> Result<(u64, String), ErrorCode> {
     let path = format!("/proc/{pid}");

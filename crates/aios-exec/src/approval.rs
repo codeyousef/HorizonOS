@@ -45,16 +45,29 @@ struct Binding {
     caller: CallerIdentity,
     target: Target,
     closure: String,
+    impact_sha256: String,
     policy_revision: String,
     action: String,
     frozen_at: u64,
     expires_at: u64,
 }
 impl Binding {
+    fn shared(&self) -> Result<aios_policy::ApprovalBinding> {
+        let subject = aios_policy::Subject {
+            uid: self.caller.uid, pid: self.caller.pid, start_ticks: self.caller.start_ticks,
+            boot_id: self.caller.boot_id.clone(), session: self.caller.session.as_ref().map(|s| aios_policy::Session {
+                id: s.id.clone(), remote: s.remote, kind: s.kind.clone() }),
+            client: aios_policy::Client::Bus { sender: self.caller.sender.clone(), bus_id: self.caller.bus_id.clone() },
+        };
+        aios_policy::ApprovalBinding::new(subject, self.plan_id.clone(), self.plan_hash.clone(),
+            sha256(&canonical(&self.target)?), self.closure.clone(), self.impact_sha256.clone(), self.policy_revision.clone(),
+            self.action.clone(), self.frozen_at, self.expires_at).map_err(|_| Error::Integrity)
+    }
     fn confirmation_digest(&self) -> Result<String> {
         // Final plan's canonical hash transitively binds prepared intent/actions,
         // target, arguments, baseline, exact result, impact, recovery and expiry.
         Ok(sha256(&canonical(&(
+            self.shared()?.confirmation_digest().map_err(|_| Error::Integrity)?,
             self.plan_id.as_str(),
             self.plan_hash.as_str(),
             &self.target,
@@ -82,6 +95,7 @@ impl Binding {
         if now < self.frozen_at || now >= self.expires_at {
             return Err(Error::Expired);
         }
+        self.shared()?.validate_time(now).map_err(|_| Error::Expired)?;
         Ok(())
     }
 }
@@ -220,6 +234,7 @@ impl Authorizer {
             caller: identity.clone(),
             target: prepared.target,
             closure: plan.build.closure,
+            impact_sha256: sha256(&canonical(&plan.semantic_preview)?),
             policy_revision: policy.revision.clone(),
             action: if plan.reboot_required {
                 policy::ELEVATED_ACTION
