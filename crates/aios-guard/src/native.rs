@@ -28,6 +28,7 @@ pub struct IntakeEvidence {
     pub nix_env: StoreArtifact,
     pub systemctl: StoreArtifact,
     pub boot_time_ms: u64,
+    pub health: aios_exec::health::HealthEvidence,
 }
 /// This cannot be deserialized or constructed from client observations.
 pub struct NativeIntake {
@@ -38,6 +39,7 @@ fn native<T>(value: aios_exec::Result<T>) -> Result<T> {
     value.map_err(|error| match error {
         aios_exec::Error::Authority => Error::Authority,
         aios_exec::Error::TargetChanged => Error::TargetMismatch,
+        aios_exec::Error::Health => Error::Health,
         _ => Error::Integrity,
     })
 }
@@ -310,6 +312,10 @@ impl NativeIntake {
             64 * 1024 * 1024,
             true,
         ))?;
+        let health = native(aios_exec::health::NativeHealth::capture())?;
+        if &health.evidence().target != target.target() {
+            return Err(Error::TargetMismatch);
+        }
         native(target.recheck())?;
         let evidence = IntakeEvidence {
             identity,
@@ -329,6 +335,7 @@ impl NativeIntake {
             nix_env,
             systemctl,
             boot_time_ms: boot_time_ms()?,
+            health: health.evidence().clone(),
         };
         Ok(Self { target, evidence })
     }

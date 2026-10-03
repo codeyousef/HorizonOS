@@ -429,6 +429,40 @@ impl VerifiedTarget {
     pub fn target(&self) -> &Target {
         &self.target
     }
+    pub(crate) fn system_mounts(&self) -> Result<Vec<crate::health::Mount>> {
+        self.recheck()?;
+        let bytes = read(
+            Path::new("/proc/1/mountinfo"),
+            Path::new("/proc"),
+            false,
+            1024 * 1024,
+        )?;
+        let mounts =
+            crate::health::mounts(&bytes, &format!("/dev/{}", self.enrollment.root_partition))?;
+        if let Some(boot) = mounts.iter().find(|m| m.path == "/boot") {
+            let selected = resolved(Path::new(&boot.source), Path::new("/dev"))?;
+            if !fs::symlink_metadata(&selected)?
+                .file_type()
+                .is_block_device()
+            {
+                return Err(Error::Integrity);
+            }
+            let part = selected.file_name().ok_or(Error::Integrity)?;
+            let part = resolved(
+                &Path::new("/sys/class/block").join(part),
+                Path::new("/sys/devices"),
+            )?;
+            let disk = resolved(
+                &Path::new("/sys/class/block").join(&self.enrollment.disk_device),
+                Path::new("/sys/devices"),
+            )?;
+            if part.parent() != Some(disk.as_path()) {
+                return Err(Error::TargetChanged);
+            }
+        }
+        self.recheck()?;
+        Ok(mounts)
+    }
     pub fn recheck(&self) -> Result<()> {
         root()?;
         let current: Enrollment = installed("target-authority.json")?;

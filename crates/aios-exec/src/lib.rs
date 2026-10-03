@@ -2,6 +2,7 @@
 pub mod approval;
 pub mod caller;
 pub mod candidate;
+pub mod health;
 pub mod ledger;
 pub mod native;
 use aios_protocol::contracts::canonical_json;
@@ -24,6 +25,7 @@ pub enum Error {
     ResourcePermissionRequired,
     ActivationUnavailable,
     AuthRequired,
+    Health,
 }
 impl From<std::io::Error> for Error {
     fn from(_: std::io::Error) -> Self {

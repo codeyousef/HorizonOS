@@ -202,16 +202,7 @@ pub struct UserUnit {
     pub expected_executable_sha256: String,
 }
 fn known_unit(value: &str) -> bool {
-    matches!(
-        value,
-        "sshd.service"
-            | "dbus.service"
-            | "aios-state.service"
-            | "aios-exec.service"
-            | "aios-model.service"
-            | "aios-observer.service"
-            | "aios-build.service"
-    )
+    aios_exec::health::PROTECTED_UNITS.contains(&value)
 }
 impl HealthPolicy {
     fn validate(&self) -> Result<()> {

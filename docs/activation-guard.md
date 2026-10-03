@@ -2,8 +2,8 @@
 
 `aios-guard` defines the deterministic transaction protocol for Horizon OS test
 activation, exact-pointer commit and recovery. The library uses SQLite for the
-immutable plan and effect journal. Its current executable exposes only the pure
-`--check-plan` stdin interface. Other invocations return exit 9 with
+immutable plan and effect journal. Its executable exposes the pure
+`--check-plan` stdin interface and fixed root-only preflight below. Other invocations return exit 9 with
 `GUARD_RUNTIME_ADAPTER_UNAVAILABLE`.
 
 The fixed root-only `--native-preflight` mode captures installed target identity,
@@ -33,6 +33,25 @@ Fresh development image instrumentation records the actual installed root guard
 preflight in a protected RAM file. The registered `installed-guard` observer
 checks root ownership, executable hash, boot/installation identity and EFI
 payload agreement before accepting that proof. Nonroot invocation is denied.
+
+Native health intake authenticates the fixed system bus owner as root PID 1,
+matches its executable and inode to the running closure's immutable systemd,
+and reads only the seven fixed protected units with `GetUnit` and fresh property
+queries. It never loads, starts or changes a unit. Two captures must agree on
+load/active/substate, invocation and queued job. Missing units are explicit;
+transitions and queued jobs do not count as active. The fixed kernel mount
+inventory comes from PID 1's namespace, including exact Btrfs subvolumes and
+EFI device ancestry, so the observer's readonly service sandbox is not mistaken
+for the guest's mount state. Target, manager and mount identities are rechecked.
+
+The opaque native health capability compares previously active and failed units
+separately: a pre-existing failure can remain, but a new failure or disappearance
+of a previously active protected unit fails. Fresh comparisons expire after one
+second. Core bus/mount/SSH availability does not prove product API, user-service,
+action postcondition or authenticated host heartbeat health; those remain
+explicitly unverified and cannot authorize activation. The reader is based on
+the pinned [systemd D-Bus interface](https://github.com/systemd/systemd/blob/v260/man/org.freedesktop.systemd1.xml)
+and NixOS [system closure layout](https://github.com/NixOS/nixpkgs/blob/774debe7a0d1b496e35677ad955a1011c6ff74f3/nixos/modules/system/activation/top-level.nix).
 
 ## Plan and ledger contract
 

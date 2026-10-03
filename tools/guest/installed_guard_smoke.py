@@ -28,6 +28,17 @@ def main():
             raise ValueError("boot-selected closure and EFI payloads disagree")
         if result["authorization_verified"] is not False or result["activation_performed"] is not False or result["runtime_adapter_available"] is not False:
             raise ValueError("native guard intake bypassed runtime gate")
+        health=evidence["health"]
+        if health["target"]!=wanted or health["manager"]["uid"]!=0 or health["manager"]["pid"]!=1:
+            raise ValueError("native health belongs to another target/manager")
+        mounts=health["mounts"]
+        if len(mounts)!=5 or {m["path"] for m in mounts}!={"/","/nix","/var","/home","/boot"} or not all(m["writable"] for m in mounts):
+            raise ValueError("installed guest mounts are missing or readonly")
+        units=health["units"]
+        if len(units)!=7 or {u["name"] for u in units}!={"sshd.service","dbus.service","aios-state.service","aios-exec.service","aios-model.service","aios-observer.service","aios-build.service"}:
+            raise ValueError("protected unit inventory differs")
+        if health["core_baseline_healthy"] is not True or any(health[k] is not False for k in ("product_apis_verified","user_service_activation_verified","action_postconditions_verified","authenticated_host_heartbeat_verified")):
+            raise ValueError("health baseline unavailable or claimed unsupported product checks")
     if snapshot.identity()!=identity:
         raise ValueError("guard target changed after observation")
     print("AIOS_INSTALLED_GUARD "+json.dumps({"schema_version":1,"evidence_kind":"actual-installed-root-guard-intake-observation",

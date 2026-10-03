@@ -75,7 +75,7 @@ cat >/mnt/etc/systemd/system.control/aios-initial-preflight.service <<'UNIT'
 [Unit]
 Description=Horizon OS initial installed native preflight
 Requires=aios-bootstrap-identity.service
-After=aios-bootstrap-identity.service dbus.service
+After=aios-bootstrap-identity.service dbus.service sshd.service
 [Service]
 Type=oneshot
 ExecStart=/run/current-system/sw/bin/python3 -I /root/aios-initial-preflight.py

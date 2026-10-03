@@ -167,7 +167,7 @@ fn connect_native() -> Result<Connection> {
 pub(crate) fn read_only_test_connection() -> Result<Connection> {
     connect_native()
 }
-fn connect_native_timeout(timeout: Duration) -> Result<Connection> {
+pub(crate) fn connect_native_timeout(timeout: Duration) -> Result<Connection> {
     // Do not honor DBUS_SYSTEM_BUS_ADDRESS or connect to a caller-supplied bus.
     for path in ["/", "/run", "/run/dbus"] {
         let m = fs::symlink_metadata(path).map_err(|_| Error::Authority)?;
@@ -451,7 +451,7 @@ fn process(pid: u32, uid: u32) -> Result<(u64, String)> {
     }
     Ok((ticks, boot))
 }
-fn check_uids(status: &str, uid: u32) -> Result<()> {
+pub(crate) fn check_uids(status: &str, uid: u32) -> Result<()> {
     let mut lines = status.lines().filter_map(|s| s.strip_prefix("Uid:"));
     let fields: Vec<_> = lines
         .next()
@@ -466,7 +466,7 @@ fn check_uids(status: &str, uid: u32) -> Result<()> {
     }
     Ok(())
 }
-fn start_ticks(stat: &str, pid: u32) -> Result<u64> {
+pub(crate) fn start_ticks(stat: &str, pid: u32) -> Result<u64> {
     let (prefix, rest) = stat.rsplit_once(')').ok_or(Error::Authority)?;
     let (actual, name) = prefix.split_once(" (").ok_or(Error::Authority)?;
     if actual.parse::<u32>() != Ok(pid) || name.len() > 4096 {

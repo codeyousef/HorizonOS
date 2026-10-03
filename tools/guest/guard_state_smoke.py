@@ -45,7 +45,8 @@ def main():
     formatted = []
     for relative in ("crates/aios-guard/src/lib.rs", "crates/aios-guard/src/main.rs",
                      "crates/aios-guard/src/activation.rs", "crates/aios-guard/src/native.rs",
-                     "crates/aios-exec/src/native.rs", "crates/aios-guard/tests/guard.rs"):
+                     "crates/aios-exec/src/native.rs", "crates/aios-exec/src/health.rs",
+                     "crates/aios-exec/src/health/tests.rs", "crates/aios-guard/tests/guard.rs"):
         original = (release / relative).read_bytes()
         result = subprocess.check_output(["nix", "develop", *locked, reference,
             "--command", "rustfmt", "--edition", "2024", "--emit", "stdout",
@@ -54,6 +55,9 @@ def main():
                           "formatted_sha256": hashlib.sha256(result).hexdigest(),
                           "formatted_source": result.decode("utf-8")})
     print("AIOS_GUARD_FORMAT " + json.dumps(formatted, sort_keys=True), flush=True)
+    subprocess.run(["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked",
+        "-p", "aios-exec", "health::tests::actual_pid1_bus_and_fixed_units_are_readonly", "--", "--nocapture"],
+        check=True, timeout=180)
     outputs = json.loads(subprocess.check_output(["nix", "build", "--json", "--no-link",
         *locked, reference + "#aios-guard"], timeout=600))
     if len(outputs) != 1:
