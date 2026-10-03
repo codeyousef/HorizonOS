@@ -145,7 +145,15 @@ impl State {
                 self.handles.insert(id.clone(), Handle { owner: peer.clone(), expires: Instant::now() + Duration::from_secs(30), unit: unit_name });
                 Ok(json!({"service_id":id,"expires_after_ms":30000}))
             },
-            Operation::Invoke { tool_call } => match parse_tool_call(tool_call.get().as_bytes())? {
+            Operation::Invoke { tool_call } => {
+                let action = parse_tool_call(tool_call.get().as_bytes())?;
+                // Direct control requests carry no task grant or immutable
+                // approved plan. Never turn future provider registration into
+                // write authority on this low-level observation route.
+                if !aios_protocol::registry::capability(action.action_id())?.read_only {
+                    return Err(ErrorCode::AuthRequired);
+                }
+                match action {
                 Action::SystemInfo => provider(aios_system::observe_system_info()),
                 Action::SystemServiceStatus(args) => {
                     let handle = self.handles.get(&args.service_id).ok_or(ErrorCode::TargetNotFound)?;
@@ -153,6 +161,7 @@ impl State {
                     provider(service_result(&handle.unit, &args.service_id))
                 },
                 _ => Err(ErrorCode::UnsupportedCapability),
+                }
             },
             Operation::Submit { request } => {
                 if request.text.trim().is_empty() || request.text.len() > 60000 || request.client_nonce.is_empty() || request.client_nonce.len() > 128 {

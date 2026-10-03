@@ -33,6 +33,7 @@ type Result<T> = std::result::Result<T, BusError>;
 struct Admission(Arc<AtomicUsize>);
 impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); } }
 
+#[derive(Clone)]
 pub struct Agent { state: SharedState, active: Arc<AtomicUsize> }
 impl Agent {
     pub fn new(state: SharedState) -> Self { Self { state, active: Arc::new(AtomicUsize::new(0)) } }
@@ -67,6 +68,36 @@ impl Agent {
     async fn json(&self, connection: &Connection, header: Header<'_>, operation: Operation) -> Result<String> {
         let result = self.dispatch(connection, header, operation).await?;
         let json = serde_json::to_string(&result).map_err(|_| ErrorCode::InvalidArgument)?;
+        if json.len() > aios_protocol::MAX_FRAME_BYTES { return Err(ErrorCode::ResourceExhausted.into()); }
+        Ok(json)
+    }
+    async fn capabilities_for(&self, connection: &Connection, header: Header<'_>, interface: &str, actions: &[&str]) -> Result<String> {
+        // Authenticate through the same control path even when the capability
+        // set is empty. A registered contract never implies provider readiness.
+        self.dispatch(connection, header, Operation::GetCapabilities).await?;
+        let contracts = actions.iter().map(|id| aios_protocol::registry::capability(id)
+            .map(|contract| serde_json::json!({"action_id":id,"input_schema":contract.input_schema,
+                "output_schema":contract.output_schema,"availability":"unavailable"})))
+            .collect::<std::result::Result<Vec<_>,_>>()?;
+        Ok(serde_json::json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),
+            "operation":"capabilities","interface":interface,"available_actions":[],"contracts":contracts}).to_string())
+    }
+    async fn action(&self, connection: &Connection, header: Header<'_>, request_json: &str, expected: &str) -> Result<String> {
+        let _admission = self.admit()?;
+        let peer = Self::peer(connection, &header).await?;
+        let outcome = (|| -> std::result::Result<Value, ErrorCode> {
+            if request_json.len() > MAX_TASK_BYTES { return Err(ErrorCode::ResourceExhausted); }
+            let request: Request = serde_json::from_str(request_json).map_err(|_| ErrorCode::InvalidArgument)?;
+            if request.schema_version != 1 { return Err(ErrorCode::UnsupportedSchema); }
+            if !crate::uuid(&request.request_id) { return Err(ErrorCode::InvalidArgument); }
+            let Operation::Invoke { tool_call } = parse_operation(request.operation.get())? else { return Err(ErrorCode::InvalidArgument); };
+            let action = aios_protocol::contracts::parse_tool_call(tool_call.get().as_bytes())?;
+            if action.action_id() != expected { return Err(ErrorCode::InvalidArgument); }
+            self.state.lock().map_err(|_| ErrorCode::ResourceExhausted)?.dispatch(&peer, Operation::Invoke { tool_call })
+        })();
+        if Self::peer(connection, &header).await? != peer { return Err(ErrorCode::TargetChanged.into()); }
+        let value = outcome?;
+        let json = serde_json::to_string(&value).map_err(|_| ErrorCode::InvalidArgument)?;
         if json.len() > aios_protocol::MAX_FRAME_BYTES { return Err(ErrorCode::ResourceExhausted.into()); }
         Ok(json)
     }
@@ -111,16 +142,44 @@ impl Agent {
 pub struct Ui { agent: Agent }
 #[zbus::interface(name = "org.aios.UI1")]
 impl Ui {
+    async fn get_capabilities(&self, #[zbus(connection)] connection:&Connection, #[zbus(header)] header:Header<'_>) -> Result<String> {
+        self.agent.capabilities_for(connection,header,"org.aios.UI1",&["ui.snapshot","ui.find","ui.activate","ui.set_value","ui.select_text","ui.visual_step"]).await
+    }
     async fn select_session(&self, session_id:&str, #[zbus(connection)] connection:&Connection, #[zbus(header)] header:Header<'_>) -> Result<String> {
         self.agent.json(connection,header,Operation::SelectUiSession {session_id:session_id.into()}).await
     }
 }
 
+// Each method fixes its action in server code. No method accepts a bus name,
+// object path, privileged command or caller-selected dispatch namespace.
+macro_rules! surface {
+    ($name:ident, $interface:literal, [$(($method:ident,$action:literal)),+ $(,)?]) => {
+        pub struct $name { agent: Agent }
+        #[zbus::interface(name = $interface)]
+        impl $name {
+            async fn get_capabilities(&self, #[zbus(connection)] connection:&Connection, #[zbus(header)] header:Header<'_>) -> Result<String> {
+                self.agent.capabilities_for(connection,header,$interface,&[$($action),+]).await
+            }
+            $(async fn $method(&self, request_json:&str, #[zbus(connection)] connection:&Connection, #[zbus(header)] header:Header<'_>) -> Result<String> {
+                self.agent.action(connection,header,request_json,$action).await
+            })+
+        }
+    }
+}
+surface!(Files,"org.aios.Files1",[(search,"files.search"),(metadata,"files.metadata"),(read,"files.read"),
+    (summarize,"files.summarize"),(copy,"files.copy"),(move_file,"files.move"),(trash,"files.trash"),(restore,"files.restore")]);
+surface!(Applications,"org.aios.Applications1",[(list,"apps.list"),(launch,"apps.launch"),(actions,"apps.actions"),(invoke,"apps.invoke")]);
+surface!(Settings,"org.aios.Settings1",[(get,"settings.get"),(set,"settings.set")]);
+
 pub fn export(address: &str, state: SharedState) -> zbus::Result<zbus::blocking::Connection> {
+    let agent = Agent::new(state);
     zbus::blocking::connection::Builder::address(address)?.method_timeout(Duration::from_secs(2))
         .max_queued(64).allow_name_replacements(false).replace_existing_names(false)
-        .serve_at("/org/aios/UI1",Ui{agent:Agent::new(state.clone())})?
-        .serve_at(PATH, Agent::new(state))?.name(NAME)?.build()
+        .serve_at("/org/aios/Files1",Files{agent:agent.clone()})?
+        .serve_at("/org/aios/Applications1",Applications{agent:agent.clone()})?
+        .serve_at("/org/aios/Settings1",Settings{agent:agent.clone()})?
+        .serve_at("/org/aios/UI1",Ui{agent:agent.clone()})?
+        .serve_at(PATH, agent)?.name(NAME)?.build()
 }
 
 pub fn export_user_bus(state: SharedState) -> zbus::Result<zbus::blocking::Connection> {

@@ -71,6 +71,43 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let own_ui=ui_xml.split("<interface name=\"org.aios.UI1\">").nth(1).unwrap().split("</interface>").next().unwrap();
     assert!(own_ui.contains("name=\"SelectSession\""));assert!(!own_ui.contains("<signal"));
     code(ui.call::<_,_,String>("SelectSession",&("aios-no-such-session",)).unwrap_err(),"TARGET_NOT_FOUND");
+    for (path, interface, methods) in [
+        ("/org/aios/Files1","org.aios.Files1",vec!["GetCapabilities","Search","Metadata","Read","Summarize","Copy","MoveFile","Trash","Restore"]),
+        ("/org/aios/Applications1","org.aios.Applications1",vec!["GetCapabilities","List","Launch","Actions","Invoke"]),
+        ("/org/aios/Settings1","org.aios.Settings1",vec!["GetCapabilities","Get","Set"]),
+    ] {
+        let introspection=Proxy::new(&conn,NAME,path,"org.freedesktop.DBus.Introspectable").unwrap();
+        let xml:String=introspection.call("Introspect",&()).unwrap();
+        let own=xml.split(&format!("<interface name=\"{interface}\">" )).nth(1).unwrap().split("</interface>").next().unwrap();
+        for method in methods { assert!(own.contains(&format!("name=\"{method}\""))); }
+        assert!(!own.contains("<signal"));
+        let surface=Proxy::new(&conn,NAME,path,interface).unwrap();
+        let capabilities:String=surface.call("GetCapabilities",&()).unwrap();
+        let capabilities:Value=serde_json::from_str(&capabilities).unwrap();
+        assert_eq!(capabilities["interface"],interface);assert!(capabilities["available_actions"].as_array().unwrap().is_empty());
+        assert!(capabilities["contracts"].as_array().unwrap().iter().all(|c|c["availability"]=="unavailable"));
+    }
+    let files=Proxy::new(&conn,NAME,"/org/aios/Files1","org.aios.Files1").unwrap();
+    let apps=Proxy::new(&conn,NAME,"/org/aios/Applications1","org.aios.Applications1").unwrap();
+    let settings=Proxy::new(&conn,NAME,"/org/aios/Settings1","org.aios.Settings1").unwrap();
+    let action_request=|id:&str,args:Value|json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),
+        "operation":{"kind":"invoke","tool_call":{"kind":"tool_call","action_id":id,"arguments":args}}}).to_string();
+    let search=action_request("files.search",json!({"query":"synthetic fixture","root_handles":["not-enrolled"]}));
+    code(files.call::<_,_,String>("Search",&(search.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
+    let listing=action_request("apps.list",json!({}));
+    code(apps.call::<_,_,String>("List",&(listing.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
+    code(files.call::<_,_,String>("Search",&(listing.as_str(),)).unwrap_err(),"INVALID_ARGUMENT");
+    let get=action_request("settings.get",json!({"key":"desktop.theme_mode"}));
+    code(settings.call::<_,_,String>("Get",&(get.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
+    let copy=action_request("files.copy",json!({"source_handle":"not-enrolled","destination_handle":"not-enrolled","basename":"fixture","collision_policy":"fail"}));
+    code(files.call::<_,_,String>("Copy",&(copy.as_str(),)).unwrap_err(),"AUTH_REQUIRED");
+    for forged in [search.replace("\"schema_version\":1","\"schema_version\":2"),
+                   search.replace("\"schema_version\":1","\"schema_version\":1,\"uid\":0")] {
+        let expected=if forged.contains("\"uid\""){"INVALID_ARGUMENT"}else{"UNSUPPORTED_SCHEMA"};
+        code(files.call::<_,_,String>("Search",&(forged.as_str(),)).unwrap_err(),expected);
+    }
+    let duplicated=search.replace("\"query\":","\"query\":\"duplicate\",\"query\":");
+    code(files.call::<_,_,String>("Search",&(duplicated.as_str(),)).unwrap_err(),"INVALID_ARGUMENT");
     let caps: String = api.call("GetCapabilities", &()).unwrap();
     let caps: Value = serde_json::from_str(&caps).unwrap();
     assert_eq!(caps["transport"], "session-dbus"); assert_eq!(caps["ui_enabled"],false);

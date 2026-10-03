@@ -50,6 +50,21 @@ boot identity and originating logind association. Task ownership includes
 the bus instance and unique sender; another connection cannot inherit it.
 `--socket` fixtures export only the private endpoint.
 
+The same bus owner exports `org.aios.Files1`, `org.aios.Applications1`,
+`org.aios.Settings1` and `org.aios.UI1` at their corresponding `/org/aios/...`
+paths. All five interfaces share the same 16-call admission budget and caller
+authentication. Files exposes Search, Metadata, Read, Summarize, Copy,
+MoveFile, Trash and Restore; Applications exposes List, Launch, Actions and
+Invoke; Settings exposes Get and Set. Each action method takes one versioned
+control request with `operation.kind=invoke` and a strict registry `tool_call`.
+The method fixes the permitted action ID: Search accepts only `files.search`,
+for example. Callers cannot choose another dispatch namespace through its JSON.
+GetCapabilities reports registered contracts separately from available actions.
+These file, application and settings providers currently report unavailable.
+Direct invocation carries no task grant or approved plan; every write action
+returns `AUTH_REQUIRED`, even if a future provider is registered. Successful
+reads still require the provider's concrete scope and resource checks.
+
 The user unit hides home directories with `ProtectHome=tmpfs` and exposes only
 its own user runtime directory, including the standard session bus and private
 socket. It runs without network access or added capabilities, with a read-only
@@ -71,11 +86,12 @@ cancellation and deletion JSON include version, task ID and operation.
 Stable D-Bus errors are named `org.aios.Error.CODE`, using the PRD's codes.
 The AIOS interface declares no task/evidence broadcast signals.
 
-Full module/image activation, other public project interfaces, persistent evidence storage,
+Full module/image activation, system-bus project interfaces, persistent evidence storage,
 interactive grants, journal/process providers and inference are separate
-contracts still to be implemented. Full public interface acceptance also
-requires two-real-user qualification, enrolled reconnect scopes and live
-model cancellation boundaries.
+contracts still to be implemented. Private streams and public lifecycle calls
+have been qualified in two actual guest users. Reconnecting creates a new
+authenticated connection and cannot inherit a previous connection's authority.
+Active-work cancellation and trusted graphical grants remain separate contracts.
 
 `python3 tools/devctl.py test --suite integration --provider service-inspection
 --json` runs the registered real guest CLI and daemon tests against the guest's

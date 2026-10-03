@@ -92,8 +92,8 @@ fn fail03_unreviewed_and_malformed_tools_never_change_the_service() {
     for(id,args,code)in [
         ("shell.run",json!({"command":"reboot"}),ErrorCode::UnknownCapability),
         ("system.service_restart",json!({"service_id":id,"approved":true}),ErrorCode::InvalidArgument),
-        ("system.service_restart",json!({"service_id":id}),ErrorCode::UnsupportedCapability),
-        ("files.copy",json!({"source_handle":"invented","destination_handle":"invented","basename":"a","collision_policy":"fail"}),ErrorCode::UnsupportedCapability),
+        ("system.service_restart",json!({"service_id":id}),ErrorCode::AuthRequired),
+        ("files.copy",json!({"source_handle":"invented","destination_handle":"invented","basename":"a","collision_policy":"fail"}),ErrorCode::AuthRequired),
         ("system.logs",json!({"source":"system","max_entries":201}),ErrorCode::InvalidArgument),
         ("packages.install",json!({"package_ids":["invented"]}),ErrorCode::UnsupportedCapability),
     ]{
