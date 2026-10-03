@@ -20,6 +20,10 @@
       message = "Production excludes developer helper rules and unrestricted passwordless sudo."; }
     { assertion = config.security.sudo.wheelNeedsPassword;
       message = "Production excludes unrestricted passwordless wheel sudo."; }
+    { assertion = !config.services.displayManager.autoLogin.enable && config.services.getty.autologinUser == null;
+      message = "Production excludes graphical and console acceptance autologin."; }
+    { assertion = !(config.users.users ? dev) && !(config.users.users ? tester);
+      message = "Production excludes reserved development and tester accounts."; }
   ];
   nix.settings.trusted-users = lib.mkDefault [ "root" ];
 }

@@ -10,9 +10,9 @@ let
     boot.loader.efi.canTouchEfiVariables = false;
     fileSystems."/" = { device = "/dev/vda2"; fsType = "ext4"; };
     fileSystems."/boot" = { device = "/dev/vda1"; fsType = "vfat"; };
-    users.users.dev.isNormalUser = true;
   };
   enabled = {
+    users.users.dev.isNormalUser = true;
     environment.etc."aios/guest-role".text = "development\n";
     services.aios.development = { enable = true; expectedVmUuid = uuid; expectedInstallationUuid = uuid; };
   };
@@ -40,4 +40,8 @@ in {
   productionSudoHelper = evaluate [ production { security.sudo.extraRules = [ { users = [ "dev" ]; commands = [ { command = "/run/current-system/sw/bin/aios-dev-deploy --request-stdin"; options = [ "NOPASSWD" ]; } ]; } ]; } ];
   productionPasswordlessAll = evaluate [ production { security.sudo.extraRules = [ { users = [ "dev" ]; commands = [ { command = "ALL"; options = [ "NOPASSWD" ]; } ]; } ]; } ];
   productionPasswordlessWheel = evaluate [ production { security.sudo.wheelNeedsPassword = false; } ];
+  productionDesktopAutologin = evaluate [ production { services.displayManager.autoLogin = { enable = true; user = "alice"; }; } ];
+  productionConsoleAutologin = evaluate [ production { services.getty.autologinUser = "alice"; } ];
+  productionDevAccount = evaluate [ production { users.users.dev.isNormalUser = true; } ];
+  productionTesterAccount = evaluate [ production { users.users.tester.isNormalUser = true; } ];
 }

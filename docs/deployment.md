@@ -189,6 +189,19 @@ Keep this checkout, VM disks, installer media, logs, caches, model data and buil
 artifacts under `/mnt/Storage`. Guest `/nix`, `/home`, `/var` and root data reside
 on the virtual disk stored there; installer `/run` is guest runtime memory.
 
+On the first `vm create`, an unconfigured fresh workspace measures host resources
+and freezes its selection in `.local/vm.json` before issuing a provisioning UUID.
+It caps the baseline at 8 vCPUs, 16 GiB RAM and a 96 GiB sparse disk; CPU allocation
+uses at most half the logical CPUs where possible. RAM leaves at least 2 GiB or
+one quarter of currently available memory for the host, whichever is larger;
+storage leaves 8 GiB. Reduced development allocations require at least 4 GiB
+guest RAM and a 48 GiB disk. These are provisioning limits, not measured inference
+minimums. Discovery and the choice are recorded in `.local/provisioning-resources.json`.
+Explicit local configuration and existing VM plans are preserved. Missing or
+insufficient measured resources fail before creating a disk or key. Production
+module assertions exclude graphical/console acceptance autologin and the reserved
+`dev`/`tester` accounts.
+
 When using the packaged `devctl`, specify `--workspace /path/to/checkout` before
 the command; the package's own Nix store path is not a writable VM workspace.
 

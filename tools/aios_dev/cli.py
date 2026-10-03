@@ -125,7 +125,7 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         if args.operation == "create":
             if args.refresh_seed:
                 return provision.refresh_seed(config)
-            return provision.create(config, args.authorize_provision)
+            return provision.create(config, args.authorize_provision, size_defaults=True)
         if args.operation == "start":
             return vm.lifecycle(config, "start", display=args.display, bootstrap=args.bootstrap)
         if args.operation == "stop" and args.graceful:

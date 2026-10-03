@@ -102,6 +102,31 @@ def prepare_plan(config: VMConfig) -> dict:
     return plan
 
 
+def select_fresh_defaults(config: VMConfig) -> VMConfig:
+    """Freeze measured defaults once; explicit or existing VM plans stay exact."""
+    if config.configured or config.values["provider"] != "qemu" or any(
+        path.exists() for path in (config.root / ".local/provisioning-plan.json",
+                                  config.root / ".local/provisioning.json",
+                                  config.paths["disk_image"], config.paths["nvram_file"])
+    ):
+        return config
+    from .resources import recommend
+    observations = host_report(config)
+    selection = recommend(observations)
+    values = {**config.values, **{key: selection[key] for key in ("vcpus", "memory_mib", "disk_gib")}}
+    selected = VMConfig.from_data(config.root, values, configured=True)
+    private_directory(config.root, ".local")
+    # Freeze configuration before issuing a provisioning UUID. Subsequent calls
+    # use exactly this configuration rather than recomputing from changing load.
+    write_json_new(config.root / ".local/vm.json", values)
+    write_json_new(config.root / ".local/provisioning-resources.json", {
+        "schema_version": 1, "configuration": values, "selection": selection,
+        "observations": {key: observations[key] for key in ("logical_cpus", "memory", "disk")},
+        "purpose": "fresh-development-defaults-not-inference-minimums",
+    })
+    return selected
+
+
 def validate_plan(config: VMConfig, plan):
     if not isinstance(plan, dict) or plan.get("schema_version") != 1 or plan.get("configuration") != config.values or plan.get("disk_image") != str(config.paths["disk_image"]) or plan.get("disk_serial") != DISK_SERIAL or plan.get("guest_role") != "development" or plan.get("checksum_url") != CHECKSUM_URL or plan.get("operation") != "provision-fresh-virtual-disk":
         raise failure(ExitCode.TARGET_MISMATCH, "TARGET_MISMATCH", "Provisioning plan no longer matches the exact VM configuration")
@@ -259,10 +284,12 @@ def operation_lock(root: Path):
         yield
 
 
-def create(config: VMConfig, authorization: str | None) -> tuple[ExitCode, dict]:
+def create(config: VMConfig, authorization: str | None, *, size_defaults=False) -> tuple[ExitCode, dict]:
     if config.values["provider"] != "qemu":
         raise failure(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "External targets cannot be provisioned by QEMU")
     with operation_lock(config.root):
+        if size_defaults:
+            config = select_fresh_defaults(config)
         return create_locked(config, authorization)
 
 

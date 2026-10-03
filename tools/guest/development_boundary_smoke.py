@@ -41,6 +41,10 @@ def main():
         "productionPasswordlessWheel":"Production excludes unrestricted passwordless wheel sudo.",
         "productionSudoHelper":"Production excludes developer helper rules and unrestricted passwordless sudo.",
         "productionPasswordlessAll":"Production excludes developer helper rules and unrestricted passwordless sudo.",
+        "productionDesktopAutologin":"Production excludes graphical and console acceptance autologin.",
+        "productionConsoleAutologin":"Production excludes graphical and console acceptance autologin.",
+        "productionDevAccount":"Production excludes reserved development and tester accounts.",
+        "productionTesterAccount":"Production excludes reserved development and tester accounts.",
     }
     for name, reason in required_denials.items():
         if reason not in cases[name]["failedAssertions"]:
