@@ -84,6 +84,13 @@ Every generation has a fresh context; private KV/prefix state is cleared on
 teardown. Prompt and response buffers are wiped where owned by the wrapper.
 Results expire after 30 seconds and ordinary logs contain no prompt text.
 The daemon installs an execution-denial seccomp filter before creating threads.
+Production startup then performs thirteen fixed kernel denial checks: `execve`
+and `execveat`, IPv4/IPv6 socket creation, opening home/root/user-runtime/log/
+system-bus/Nix-daemon directories, and write-opening the immutable model manifest
+and runtime configuration. No directory entries, protected contents, or model
+bytes are read or modified by these checks. Unexpected success, a missing path,
+or an unrelated error prevents startup. Status includes only the fixed boundary
+names and denial errno values, without caller-selected paths or prompts.
 Status reports coarse lifecycle/budget metadata and the caller's queued count.
 Unload refuses to interrupt active or queued work; idle unload is scheduled
 after the configured interval (600 seconds by default) without inference. The low/high profiles report unavailable
@@ -149,13 +156,30 @@ after a successful generation, polling coarse status without resetting the idle
 clock. It checks that the same service process unloads its weights and records
 cgroup memory samples. Run it exclusively: other generation/unload operations
 or a VM restart invalidate the measurement. Cgroup memory is not process PSS.
-These providers do not establish full release, active filesystem/syscall denial,
-restart/load-pressure, quality or performance acceptance.
+These providers do not establish full release, restart/load-pressure, quality or
+performance acceptance.
+
+The model acceptance image also runs one fixed initial root fixture, with no RPC,
+arguments or sudo route. It verifies the immutable target authority before each
+operation, records process PSS samples, kills only `aios-model.service` during a
+real request, measures four increasing restart delays, checks that private
+request state was discarded, and asks the recovered service for a cited answer.
+Its test-only capability exceptions are `CAP_KILL` and `CAP_SYS_PTRACE`, for the
+fixed kill and process observation. The module asserts a development image and
+is absent from production composition. The production model gains no privilege.
+
+The root-owned report binds the current installation and boot. The normal-user
+`installed-model-lifecycle` provider reads it without mutations. Desktop acceptance
+waits for the same initial fixture; failure retains the VM and evidence. PSS
+observations are samples rather than a true peak; transport loss alone does not
+qualify the broker's user-facing `MODEL_CRASHED` response. Full global queue/load
+pressure, model corruption and desktop/SSH continuity remain separate checks.
 
 ```fish
 python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model --detach --json
 python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model-users --peer-workspace /mnt/Storage/PATH_TO_ENROLLED_TESTER_WORKSPACE --json
 python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model-idle --detach --json
+python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model-lifecycle --detach --json
 ```
 
 Replace workspace placeholders with independently verified configurations.

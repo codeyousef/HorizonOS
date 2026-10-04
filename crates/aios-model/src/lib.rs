@@ -1,6 +1,7 @@
 //! CPU inference only. No tool, subprocess, download or authorization API.
 pub mod protocol;
 pub mod service;
+mod isolation;
 use aios_protocol::contracts::ErrorCode;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};

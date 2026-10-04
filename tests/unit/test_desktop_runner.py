@@ -106,6 +106,22 @@ class DesktopTests(unittest.TestCase):
                 desktop.observe(self.config)
         exchange.assert_not_called()
 
+    def test_model_lifecycle_pending_failed_and_foreign_proof_never_finish(self):
+        config = VMConfig.from_data(self.config.root, {**EXAMPLE, "guest_build_target": "aios-model-test"})
+        for code, proof, expected in (
+            (3, {}, ExitCode.UNMET_PREREQUISITE),
+            (8, {}, ExitCode.VERIFICATION_FAILURE),
+            (0, {"state": "verified", "proof": {"identity": {"boot_id": "other"}, "verified": True}}, ExitCode.INVALID_INPUT),
+        ):
+            with patch("aios_dev.guest.enrolled_identity", return_value=({"host_key_fingerprint": "fixture"}, self.identity)), patch("aios_dev.guest.ssh_arguments", return_value=["ssh", "identity"]), \
+                 patch("aios_dev.sync.exchange", side_effect=[(0, json.dumps(self.response).encode(), b""), (code, json.dumps(proof).encode(), b"")]) as exchange, \
+                 patch("aios_dev.vm.stop") as stop:
+                with self.assertRaises(DevctlError) as caught:
+                    desktop.observe(config)
+            self.assertEqual(caught.exception.exit_code, expected)
+            self.assertEqual(exchange.call_args.args[0][-1], "/run/current-system/sw/bin/installed_model_lifecycle_smoke")
+            stop.assert_not_called()
+
 
 
 if __name__ == "__main__":

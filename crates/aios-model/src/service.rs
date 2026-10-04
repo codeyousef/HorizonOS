@@ -206,7 +206,7 @@ impl RuntimeSettings {
 }
 pub struct Config {pub model_directory:PathBuf,pub qualification:bool,pub runtime:RuntimeSettings}
 
-fn restrict_execution()->io::Result<()> {
+pub(crate) fn restrict_execution()->io::Result<()> {
     // Install before creating threads: they inherit the filter. Inference has
     // no reason to execute a program, including through the x32 syscall ABI.
     let statement=|code,k|nix::libc::sock_filter {code,jt:0,jf:0,k};
@@ -285,7 +285,7 @@ fn worker(shared:Shared,config:Config) {
 }
 struct Connection {shared:Shared,owner:Owner}
 impl Drop for Connection {fn drop(&mut self) {let (lock,wake)=&*self.shared;if let Ok(mut state)=lock.lock() {state.disconnect(self.owner);wake.notify_all();}}}
-fn connection(mut stream:UnixStream,peer:Peer,shared:Shared,runtime:RuntimeSettings)->io::Result<()> {
+fn connection(mut stream:UnixStream,peer:Peer,shared:Shared,runtime:RuntimeSettings,isolation:Option<crate::isolation::Proof>)->io::Result<()> {
     let _guard=Connection {shared:shared.clone(),owner:peer.owner};
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     for _ in 0..4096 {
@@ -300,7 +300,7 @@ fn connection(mut stream:UnixStream,peer:Peer,shared:Shared,runtime:RuntimeSetti
             match operation {
                 Ok(Operation::Generate(generation))=>state.submit(peer.owner,generation).map(|id|json!({"generation_id":id,"state":"queued"})),
                 Ok(Operation::GetStatus)=>Ok(json!({"loaded":state.loaded,"busy":state.active.is_some(),
-                    "own_queued":state.queue.iter().filter(|p|p.owner.uid==peer.owner.uid).count(),"queue_limit":QUEUE_LIMIT,
+                    "isolation":isolation,"own_queued":state.queue.iter().filter(|p|p.owner.uid==peer.owner.uid).count(),"queue_limit":QUEUE_LIMIT,
                     "idle_unload_seconds":runtime.idle_unload_seconds,"context_tokens":runtime.context_tokens,"maximum_input_tokens":6144,"threads":runtime.thread_count()?,
                     "profiles":{"normal":{"configured":true,"loaded":state.loaded,"quality_qualified":false,"performance_qualified":false},"low":{"configured":false,"available":false},"high":{"configured":false,"available":false}}})),
                 Ok(Operation::GetResult(id))=>state.result(peer.owner,&id),
@@ -317,6 +317,7 @@ fn connection(mut stream:UnixStream,peer:Peer,shared:Shared,runtime:RuntimeSetti
 pub fn run(listener:UnixListener,config:Config)->io::Result<()> {
     config.runtime.validate()?;let runtime=config.runtime;
     restrict_execution()?;
+    let isolation=if config.qualification {None} else {Some(crate::isolation::installed(&config.model_directory)?)};
     pass_credentials(listener.as_raw_fd())?;
     let shared=Arc::new((Mutex::new(State::new()),Condvar::new()));let work=shared.clone();
     let deadlines=shared.clone();
@@ -341,7 +342,7 @@ pub fn run(listener:UnixListener,config:Config)->io::Result<()> {
         let count=state.connections.get(&peer.owner.uid).copied().unwrap_or(0);
         if count>=4 || state.connections.values().sum::<usize>()>=32 {continue;}
         state.connections.insert(peer.owner.uid,count+1);drop(state);
-        let shared=shared.clone();thread::spawn(move||{let _=connection(stream,peer,shared,runtime);});
+        let shared=shared.clone();let isolation=isolation.clone();thread::spawn(move||{let _=connection(stream,peer,shared,runtime,isolation);});
     }Ok(())
 }
 

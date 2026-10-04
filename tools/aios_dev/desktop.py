@@ -132,7 +132,22 @@ def observe(config):
         valid = False
     if not valid:
         raise provision.failure(ExitCode.VERIFICATION_FAILURE, "DESKTOP_PROBE_MISMATCH", "Desktop probe does not match this live synthetic session")
-    return {"identity": identity, "host_key_fingerprint": trust["host_key_fingerprint"], "desktop": value}
+    observation = {"identity": identity, "host_key_fingerprint": trust["host_key_fingerprint"], "desktop": value}
+    if config.values["guest_build_target"] == model_seed.TARGET:
+        guest.enrolled_identity(config)
+        code, output, _ = sync.exchange([*guest.ssh_arguments(config)[:-1], "/run/current-system/sw/bin/installed_model_lifecycle_smoke"],
+                                       [b""], response_limit=131072, timeout=20)
+        if guest.enrolled_identity(config)[1] != identity:
+            raise invalid("Model lifecycle target changed during observation")
+        if code == 3:
+            raise DevctlError(ExitCode.UNMET_PREREQUISITE, "MODEL_LIFECYCLE_PENDING", "The same fixed initial model lifecycle test is still running")
+        if code != 0:
+            raise DevctlError(ExitCode.VERIFICATION_FAILURE, "MODEL_LIFECYCLE_FAILED", "Fixed model lifecycle test failed; disposable VM retained", details={"upstream_exit": code})
+        proof = sync.contract.decode(output)
+        if proof.get("state") != "verified" or proof.get("proof", {}).get("identity") != identity or proof["proof"].get("verified") is not True:
+            raise invalid("Installed model lifecycle report does not match this live guest")
+        observation["model_lifecycle"] = proof
+    return observation
 
 
 def run(owner, run_id=None, *, with_model=False):

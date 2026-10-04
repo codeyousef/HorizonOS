@@ -60,6 +60,8 @@ def main():
         if (status['context_tokens']!=8192 or status['maximum_input_tokens']!=6144 or status['threads']!=threads
                 or status['idle_unload_seconds']!=600 or status['queue_limit']!=8):
             raise RuntimeError('actual daemon budgets differ from installed configuration')
+        if status['isolation']['evidence_kind']!='actual-installed-kernel-denials' or len(status['isolation']['checks'])!=13:
+            raise RuntimeError('installed model lacks actual fixed kernel denial proof')
         results['initial_status']=status
         names=['ActiveState','User','Group','MainPID','ExecStart','FragmentPath','DropInPaths','NoNewPrivileges','CapabilityBoundingSet','AmbientCapabilities',
                'PrivateNetwork','PrivateTmp','PrivateDevices','ProtectSystem','ProtectHome','ProtectProc','InaccessiblePaths','RestrictAddressFamilies',
@@ -144,7 +146,7 @@ def main():
             'executable':str(executable),'executable_sha256':hashlib.sha256(executable.read_bytes()).hexdigest(),'model_artifact':str(artifact),
             'model_lock_sha256':hashlib.sha256(lock).hexdigest(),'model_sha256':json.loads(lock)['artifact']['sha256'],'results':results,
             'other_connection_access_denied':True,'mutation_performed':False,'cross_uid_verified':False,'idle_600_seconds_verified':False,
-            'limitations':['Effective systemd declarations and running process privileges checked; active syscall/filesystem denial probes remain separate.',
+            'limitations':['Effective systemd/process privilege checks and actual fixed startup syscall/filesystem denials verified; full adversarial failure/load coverage remains separate.',
                            'Two connections here share one UID; no cross-UID or restart/load-pressure qualification claimed.']}),flush=True)
     finally:
         for client in clients:client.socket.close()
