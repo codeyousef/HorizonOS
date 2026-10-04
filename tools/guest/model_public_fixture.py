@@ -180,7 +180,11 @@ class PublicProbe:
             raise RuntimeError('fixed public tester identity mismatch')
         group = grp.getgrnam('aios-inference').gr_gid
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
-        parent.settimeout(20); child.settimeout(20)
+        parent.settimeout(20)
+        # The child waits between fixed commands while root measures restart
+        # backoff, recovery and immutable artifact hashes. The unit's 180-second
+        # RuntimeMaxSec bounds its entire lifetime; individual calls stay at 20.
+        child.settimeout(180)
         pid = os.fork()
         if pid == 0:
             parent.close()
