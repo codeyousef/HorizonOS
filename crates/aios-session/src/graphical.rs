@@ -9,13 +9,14 @@ type Result<T> = std::result::Result<T,ErrorCode>;
 
 #[derive(Clone,Deserialize)]#[serde(deny_unknown_fields)]
 struct Window { window_handle:String,name:String,title:String,identity_sha256:String }
-pub(crate) struct Connection { pub(crate) client:ui_bridge::Client,peer:Peer,session:Option<GraphicalSession>,windows:HashMap<String,Window>,expires:Instant }
+pub(crate) struct Connection { pub(crate) client:Mutex<ui_bridge::Client>,peer:Peer,discovery:Mutex<Discovery> }
+struct Discovery {session:Option<GraphicalSession>,windows:HashMap<String,Window>,expires:Instant}
 impl Connection {
     pub(crate) fn new(client:ui_bridge::Client,peer:Peer)->Self{
-        Self{client,peer,session:None,windows:HashMap::new(),expires:Instant::now()}
+        Self{client:Mutex::new(client),peer,discovery:Mutex::new(Discovery{session:None,windows:HashMap::new(),expires:Instant::now()})}
     }
-    pub(crate) fn discover(&mut self,session:&GraphicalSession)->Result<Value>{
-        let value=self.client.call(json!({"kind":"discover","session_id":session.id}))?;
+    pub(crate) fn discover(&self,session:&GraphicalSession)->Result<Value>{
+        let value=self.client.try_lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(json!({"kind":"discover","session_id":session.id}))?;
         #[derive(Deserialize)]#[serde(deny_unknown_fields)]
         struct Discovery {schema_version:u32,operation:String,session_id:String,windows:Vec<Window>,expires_after_ms:u64,confirmation_required:bool,ui_authorized:bool}
         let view:Discovery=serde_json::from_value(value.clone()).map_err(|_|ErrorCode::InvalidArgument)?;
@@ -26,18 +27,19 @@ impl Connection {
             if !crate::uuid(&window.window_handle) || window.name.len()>256 || window.title.len()>512 || window.identity_sha256.len()!=64
                 || !window.identity_sha256.bytes().all(|b|b.is_ascii_hexdigit()) || windows.insert(window.window_handle.clone(),window).is_some(){return Err(ErrorCode::InvalidArgument);}
         }
-        self.windows=windows;self.session=Some(session.clone());self.expires=Instant::now()+Duration::from_secs(30);Ok(value)
+        let mut discovery=self.discovery.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+        discovery.windows=windows;discovery.session=Some(session.clone());discovery.expires=Instant::now()+Duration::from_secs(30);Ok(value)
     }
-    pub(crate) fn select(connection:Arc<Mutex<Self>>,peer:&Peer,session:&GraphicalSession,window_handle:&str)->Result<Selection>{
-        let value=connection.try_lock().map_err(|_|ErrorCode::ResourceExhausted)?;
-        if value.peer!=*peer{return Err(ErrorCode::PermissionDenied);}
+    pub(crate) fn select(connection:Arc<Self>,peer:&Peer,session:&GraphicalSession,window_handle:&str)->Result<Selection>{
+        if connection.peer!=*peer{return Err(ErrorCode::PermissionDenied);}
+        let value=connection.discovery.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
         if value.expires<=Instant::now() || value.session.as_ref()!=Some(session){return Err(ErrorCode::TargetChanged);}
         let window=value.windows.get(window_handle).ok_or(ErrorCode::TargetNotFound)?.clone();drop(value);
         Ok(Selection{connection,peer:peer.clone(),session:session.clone(),window})
     }
 }
 #[derive(Clone)]
-pub(crate) struct Selection { connection:Arc<Mutex<Connection>>,peer:Peer,session:GraphicalSession,window:Window }
+pub(crate) struct Selection { connection:Arc<Connection>,peer:Peer,session:GraphicalSession,window:Window }
 // This receipt permits inference over the already consumed observation only.
 // It is not a capability for another native query or any input operation.
 pub(crate) struct Receipt {task_id:String,peer:Peer,request_digest:[u8;32],window_handle:String,window_sha256:String,revision:String,expires:u64}
@@ -63,13 +65,13 @@ impl Selection {
         };
         let mode=match mode{Mode::Ask=>"ask",Mode::Diagnose=>"diagnose",_=>return Err(ErrorCode::PermissionDenied)};
         let result=(||{
-            let started=self.connection.lock().map_err(|_|ErrorCode::ResourceExhausted)?.client.start_task(
+            let started=self.connection.client.lock().map_err(|_|ErrorCode::ResourceExhausted)?.start_task(
                 json!({"kind":"start_task_read","task_id":id,"window_handle":self.window.window_handle,"goal":goal,"mode":mode}),&receiver)?;
             status(&started,id)?;
             loop {
                 check(control,deadline)?;identity::verify_peer(&self.peer)?;
                 if aios_policy::boottime_ms()?>=expires{return Err(ErrorCode::DeadlineExceeded);}
-                let value=self.connection.lock().map_err(|_|ErrorCode::ResourceExhausted)?.client.call(json!({"kind":"get_read_status","task_id":id}))?;
+                let value=self.connection.client.lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(json!({"kind":"get_read_status","task_id":id}))?;
                 let current=status(&value,id)?;
                 match current.state.as_str(){
                     "queued"|"needs_permission"|"inspecting" if current.error.is_none()=>{
@@ -84,7 +86,7 @@ impl Selection {
                 std::thread::sleep(Duration::from_millis(25));
             }
             check(control,deadline)?;
-            let snapshot=self.connection.lock().map_err(|_|ErrorCode::ResourceExhausted)?.client.call(json!({"kind":"take_snapshot","task_id":id}))?;
+            let snapshot=self.connection.client.lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(json!({"kind":"take_snapshot","task_id":id}))?;
             aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.snapshot","data").ok_or(ErrorCode::UnknownCapability)?,&snapshot).map_err(|_|ErrorCode::InvalidArgument)?;
             if snapshot["window_handle"]!=self.window.window_handle || !snapshot["snapshot_id"].as_str().is_some_and(crate::uuid){return Err(ErrorCode::TargetChanged);}
             check(control,deadline)?;identity::verify_peer(&self.peer)?;
@@ -97,7 +99,9 @@ impl Selection {
             let observation=serde_json::to_value(aios_protocol::contracts::ProviderResult {
                 schema_version:1,status:if complete{aios_protocol::contracts::ResultStatus::Ok}else{aios_protocol::contracts::ResultStatus::Partial},observed_at,
                 source:aios_protocol::contracts::Source{provider:"at-spi".into(),provider_version:env!("CARGO_PKG_VERSION").into()},
-                evidence_ids:vec![evidence_id],complete,next_cursor:None,data:Some(snapshot),error:None,
+                evidence_ids:vec![evidence_id],complete,next_cursor:None,data:Some(snapshot),
+                error:if complete{None}else{Some(aios_protocol::contracts::ProviderError{code:ErrorCode::PartialResult,
+                    message:"Native snapshot reached a bounded traversal limit; unseen content is unknown".into(),retryable:false})},
             }).map_err(|_|ErrorCode::InvalidArgument)?;
             let mut state=state.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
             let task=state.tasks.get_mut(id).ok_or(ErrorCode::Cancelled)?;check(control,deadline)?;
@@ -107,7 +111,7 @@ impl Selection {
         cancellation.cancel();
         // Forget is cleanup of the same exact private task, never a retry or
         // alternative read. Cancellation already invalidated its cached data.
-        if let Ok(mut connection)=self.connection.try_lock(){let _=connection.client.call(json!({"kind":"forget","task_id":id}));}
+        if let Ok(mut client)=self.connection.client.try_lock(){let _=client.call(json!({"kind":"forget","task_id":id}));}
         result
     }
 }

@@ -2,6 +2,7 @@
 use crate::{ArtifactTrust, Cancellation, Model, protocol::{Generation, Operation, Request, parse_operation}};
 use aios_protocol::{MAX_TASK_BYTES, contracts::ErrorCode, write_frame};
 use serde_json::{Value, json};
+use serde::Deserialize;
 use std::{collections::{HashMap,VecDeque},fs::File,io,
     os::{fd::{AsRawFd,FromRawFd},unix::net::{UnixListener,UnixStream}},path::PathBuf,
     sync::{Arc,Condvar,Mutex,atomic::{AtomicU8,Ordering}},thread,time::{Duration,Instant}};
@@ -171,7 +172,39 @@ impl State {
     }
 }
 type Shared=Arc<(Mutex<State>,Condvar)>;
-pub struct Config {pub model_directory:PathBuf,pub qualification:bool}
+#[derive(Clone,Copy,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeSettings {schema_version:u32,profile:crate::protocol::Profile,context_tokens:u32,threads:Option<u32>,idle_unload_seconds:u64}
+impl Default for RuntimeSettings {
+    fn default()->Self{Self{schema_version:1,profile:crate::protocol::Profile::Normal,context_tokens:8192,threads:None,idle_unload_seconds:IDLE.as_secs()}}
+}
+impl RuntimeSettings {
+    fn validate(&self)->io::Result<()> {
+        if self.schema_version!=1 || self.profile!=crate::protocol::Profile::Normal || self.context_tokens!=8192{return Err(io::Error::new(io::ErrorKind::InvalidInput,"unsupported model runtime profile"));}
+        self.thread_count()?;Ok(())
+    }
+    fn thread_count(&self)->io::Result<u32>{
+        crate::normal_threads(self.threads,thread::available_parallelism().map(|v|v.get()).unwrap_or(1))
+            .map_err(|_|io::Error::new(io::ErrorKind::InvalidInput,"model thread budget rejected"))
+    }
+    /// Only the fixed administrator-owned immutable configuration is accepted.
+    /// Model requests have no runtime settings, path or download operation.
+    pub fn installed()->io::Result<Self>{
+        use std::{io::Read,os::unix::fs::MetadataExt};
+        let path=std::path::Path::new("/etc/aios/model-runtime.json").canonicalize()?;
+        if !path.starts_with("/nix/store"){return Err(io::Error::new(io::ErrorKind::PermissionDenied,"runtime settings must be immutable"));}
+        let file=File::open(&path)?;let before=file.metadata()?;
+        if !before.is_file() || before.uid()!=0 || before.mode()&0o222!=0 || before.len()>4096{return Err(io::Error::new(io::ErrorKind::PermissionDenied,"runtime settings rejected"));}
+        let mut raw=String::new();file.take(4097).read_to_string(&mut raw)?;
+        let settings:Self=serde_json::from_str(&raw).map_err(|_|io::Error::new(io::ErrorKind::InvalidInput,"runtime settings schema rejected"))?;
+        let after=std::fs::metadata(&path)?;
+        if (before.dev(),before.ino(),before.len(),before.mode(),before.uid())!=(after.dev(),after.ino(),after.len(),after.mode(),after.uid()){
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied,"runtime settings changed"));}
+        settings.validate()?;Ok(settings)
+    }
+    fn idle_timeout(&self)->Option<Duration>{(self.idle_unload_seconds!=0).then(||Duration::from_secs(self.idle_unload_seconds))}
+}
+pub struct Config {pub model_directory:PathBuf,pub qualification:bool,pub runtime:RuntimeSettings}
 
 fn restrict_execution()->io::Result<()> {
     // Install before creating threads: they inherit the filter. Inference has
@@ -214,7 +247,7 @@ fn worker(shared:Shared,config:Config) {
             let (lock,wake)=&*shared;let mut state=lock.lock().unwrap();
             loop {
                 state.prune();state.expire_queued();
-                if state.unload || (model.is_some() && last.elapsed()>=IDLE && state.queue.is_empty()) {
+                if state.unload || (model.is_some() && config.runtime.idle_timeout().is_some_and(|idle|last.elapsed()>=idle) && state.queue.is_empty()) {
                     drop(model.take());state.loaded=false;state.unload=false;
                 }
                 if let Some(pending)=state.queue.pop_front() {
@@ -222,7 +255,7 @@ fn worker(shared:Shared,config:Config) {
                     if let Some(record)=state.records.get_mut(&pending.id) {record.state="running";}
                     break pending;
                 }
-                let remaining=if model.is_some() {IDLE.saturating_sub(last.elapsed()).min(RETENTION)} else {RETENTION};
+                let remaining=if model.is_some() {config.runtime.idle_timeout().map_or(RETENTION,|idle|idle.saturating_sub(last.elapsed()).min(RETENTION))} else {RETENTION};
                 state=wake.wait_timeout(state,remaining).unwrap().0;
             }
         };
@@ -236,7 +269,7 @@ fn worker(shared:Shared,config:Config) {
                     if config.qualification {ArtifactTrust::Qualification} else {ArtifactTrust::Production},Some(&pending.control.token))?);
                 shared.0.lock().unwrap().loaded=true;
             }
-            let model=model.as_ref().unwrap();let mut context=model.context(pending.control.token.clone())?;
+            let model=model.as_ref().unwrap();let mut context=model.context_with_threads(pending.control.token.clone(),config.runtime.threads)?;
             let grammar=pending.generation.grammar()?;
             let prompt=model.prompt(&pending.generation.system_prompt,&pending.generation.user_prompt)?;
             input_tokens=context.evaluate(prompt,&grammar)?;
@@ -252,7 +285,7 @@ fn worker(shared:Shared,config:Config) {
 }
 struct Connection {shared:Shared,owner:Owner}
 impl Drop for Connection {fn drop(&mut self) {let (lock,wake)=&*self.shared;if let Ok(mut state)=lock.lock() {state.disconnect(self.owner);wake.notify_all();}}}
-fn connection(mut stream:UnixStream,peer:Peer,shared:Shared)->io::Result<()> {
+fn connection(mut stream:UnixStream,peer:Peer,shared:Shared,runtime:RuntimeSettings)->io::Result<()> {
     let _guard=Connection {shared:shared.clone(),owner:peer.owner};
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     for _ in 0..4096 {
@@ -268,7 +301,7 @@ fn connection(mut stream:UnixStream,peer:Peer,shared:Shared)->io::Result<()> {
                 Ok(Operation::Generate(generation))=>state.submit(peer.owner,generation).map(|id|json!({"generation_id":id,"state":"queued"})),
                 Ok(Operation::GetStatus)=>Ok(json!({"loaded":state.loaded,"busy":state.active.is_some(),
                     "own_queued":state.queue.iter().filter(|p|p.owner.uid==peer.owner.uid).count(),"queue_limit":QUEUE_LIMIT,
-                    "idle_unload_seconds":600,"context_tokens":8192,"maximum_input_tokens":6144,
+                    "idle_unload_seconds":runtime.idle_unload_seconds,"context_tokens":runtime.context_tokens,"maximum_input_tokens":6144,"threads":runtime.thread_count()?,
                     "profiles":{"normal":{"configured":true,"loaded":state.loaded,"quality_qualified":false,"performance_qualified":false},"low":{"configured":false,"available":false},"high":{"configured":false,"available":false}}})),
                 Ok(Operation::GetResult(id))=>state.result(peer.owner,&id),
                 Ok(Operation::Cancel(id))=>state.cancel(peer.owner,&id),
@@ -282,6 +315,7 @@ fn connection(mut stream:UnixStream,peer:Peer,shared:Shared)->io::Result<()> {
     }Ok(())
 }
 pub fn run(listener:UnixListener,config:Config)->io::Result<()> {
+    config.runtime.validate()?;let runtime=config.runtime;
     restrict_execution()?;
     pass_credentials(listener.as_raw_fd())?;
     let shared=Arc::new((Mutex::new(State::new()),Condvar::new()));let work=shared.clone();
@@ -307,7 +341,7 @@ pub fn run(listener:UnixListener,config:Config)->io::Result<()> {
         let count=state.connections.get(&peer.owner.uid).copied().unwrap_or(0);
         if count>=4 || state.connections.values().sum::<usize>()>=32 {continue;}
         state.connections.insert(peer.owner.uid,count+1);drop(state);
-        let shared=shared.clone();thread::spawn(move||{let _=connection(stream,peer,shared);});
+        let shared=shared.clone();thread::spawn(move||{let _=connection(stream,peer,shared,runtime);});
     }Ok(())
 }
 
@@ -318,6 +352,21 @@ mod tests {
     fn owner(uid:u32)->Owner {Owner {uid,gid:uid,pid:100+uid as i32,connection:Uuid::new_v4()}}
     fn generation()->Generation {Generation {profile:Profile::Normal,system_prompt:"system".into(),user_prompt:"private fixture".into(),
         response_mode:ResponseMode::FinalAnswer,allowed_tools:vec![],evidence_ids:vec![],deadline_ms:90000}}
+    #[test] fn runtime_configuration_is_strict_and_zero_idle_disables_only_automatic_unload(){
+        let valid=r#"{"schema_version":1,"profile":"normal","context_tokens":8192,"threads":1,"idle_unload_seconds":0}"#;
+        let settings:RuntimeSettings=serde_json::from_str(valid).unwrap();settings.validate().unwrap();assert_eq!(settings.idle_timeout(),None);
+        assert_eq!(settings.thread_count().unwrap(),1);assert_eq!(RuntimeSettings::default().idle_timeout(),Some(IDLE));
+        for raw in [valid.replace("\"threads\":1","\"threads\":1,\"threads\":4"),valid.replace("\"threads\":1","\"threads\":1,\"download\":true")]{
+            assert!(serde_json::from_str::<RuntimeSettings>(&raw).is_err());
+        }
+        for raw in [valid.replace("8192","16384"),valid.replace("\"normal\"","\"high\""),valid.replace("\"threads\":1","\"threads\":0"),valid.replace("\"threads\":1","\"threads\":5")]{
+            assert!(serde_json::from_str::<RuntimeSettings>(&raw).unwrap().validate().is_err());
+        }
+        for (cpus,automatic) in [(1,1),(2,1),(4,3),(8,4),(32,4)]{
+            assert_eq!(crate::normal_threads(None,cpus),Ok(automatic));assert_eq!(crate::normal_threads(Some(1),cpus),Ok(1));
+        }
+        assert_eq!(crate::normal_threads(Some(4),2),Err(ErrorCode::InvalidArgument));
+    }
     #[test] fn inference_threads_cannot_execute_programs() {
         thread::spawn(||{
             restrict_execution().unwrap();

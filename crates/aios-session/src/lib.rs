@@ -384,7 +384,7 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
     let mut peer = identity::authenticate(&stream).map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "untrusted peer"))?;
     peer.connection_id = Some(Uuid::new_v4().to_string());
     let _owner = ConnectionOwner { state: state.clone(), peer: peer.clone() };
-    let mut ui:Option<Arc<Mutex<graphical::Connection>>>=None;
+    let mut ui:Option<Arc<graphical::Connection>>=None;
     // A 90-second task must remain inspectable/cancellable on its original
     // authenticated connection; short polling cannot force a reconnect.
     for _ in 0..4096 {
@@ -413,12 +413,12 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
     Ok(())
 }
 
-fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut Option<Arc<Mutex<graphical::Connection>>>,operation:Operation)->Result<Value,ErrorCode>{
+fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut Option<Arc<graphical::Connection>>,operation:Operation)->Result<Value,ErrorCode>{
     let native=match operation {
         Operation::ListUiWindows{session_handle}=>{
             let candidate=selected_ui_session(state,peer,&session_handle)?;
-            if ui.is_none(){*ui=Some(Arc::new(Mutex::new(graphical::Connection::new(ui_bridge::Client::connect(stream)?,peer.clone()))));}
-            let result=ui.as_ref().ok_or(ErrorCode::AuthRequired)?.lock().map_err(|_|ErrorCode::ResourceExhausted)?.discover(&candidate);
+            if ui.is_none(){*ui=Some(Arc::new(graphical::Connection::new(ui_bridge::Client::connect(stream)?,peer.clone())));}
+            let result=ui.as_ref().ok_or(ErrorCode::AuthRequired)?.discover(&candidate);
             identity::verify(stream,peer)?;return result;
         },
         Operation::StartUiRead{window_handle,goal,mode}=>json!({"kind":"start_read","window_handle":window_handle,"goal":goal,"mode":mode}),
@@ -438,7 +438,7 @@ fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut O
         operation=>return state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.dispatch(peer,operation),
     };
     identity::verify(stream,peer)?;
-    let result=ui.as_ref().ok_or(ErrorCode::AuthRequired)?.lock().map_err(|_|ErrorCode::ResourceExhausted)?.client.call(native);
+    let result=ui.as_ref().ok_or(ErrorCode::AuthRequired)?.client.lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(native);
     identity::verify(stream,peer)?;
     if matches!(result,Err(ErrorCode::TargetChanged|ErrorCode::PermissionDenied)){ui.take();}
     result

@@ -271,6 +271,35 @@ fn qualify_public_task(bus:&aios_session::bus::Client,reconnect:&aios_session::b
     let stopped=bus.events(&task,0,100).unwrap();assert_eq!(stopped["complete"],true);
     assert_eq!(bus.cancel(&task).unwrap()["already_terminal"],true);assert_eq!(bus.forget(&task).unwrap()["deleted"],true);
     assert_eq!(bus.status(&task),Err(ErrorCode::TargetNotFound));
+    // Mode selection never silently expands read authority or enables rules.
+    let mut mode_results=Vec::new();
+    for mode in [aios_session::Mode::Act,aios_session::Mode::Automate]{
+        request.mode=mode;request.client_nonce=uuid::Uuid::new_v4().to_string();
+        let denied=bus.submit(&request).unwrap();let status=bus.status(&denied).unwrap();
+        assert_eq!(status["state"],"failed");assert_eq!(status["error"],"UNSUPPORTED_CAPABILITY");assert_eq!(status["mutation_performed"],false);
+        let events=bus.events(&denied,0,100).unwrap();assert!(!events["events"].as_array().unwrap().iter().any(|e|e["kind"]=="needs_permission"));
+        mode_results.push(status);bus.forget(&denied).unwrap();
+    }
+    request.mode=aios_session::Mode::Diagnose;request.client_nonce=uuid::Uuid::new_v4().to_string();
+    let diagnosis=bus.submit(&request).unwrap();wait_public(bus,&diagnosis,"needs_permission");
+    request.mode=aios_session::Mode::Ask;request.client_nonce=uuid::Uuid::new_v4().to_string();
+    let queued=bus.submit(&request).unwrap();assert_eq!(bus.status(&queued).unwrap()["state"],"queued");
+    assert_eq!(bus.cancel(&queued).unwrap()["cancelled"],true);assert_eq!(bus.status(&queued).unwrap()["error"],"CANCELLED");
+    bus.forget(&queued).unwrap();assert_eq!(bus.forget(&diagnosis).unwrap()["deleted"],true);
+    assert_eq!(bus.status(&diagnosis),Err(ErrorCode::TargetNotFound));
+
+    // One native Allow attempt starts actual AT-SPI traversal. Public Stop
+    // must stay responsive while that independent native worker is inspecting.
+    request.client_nonce=uuid::Uuid::new_v4().to_string();request.text=format!("Native permission fixture {}",uuid::Uuid::new_v4());
+    let inspecting=bus.submit(&request).unwrap();wait_public(bus,&inspecting,"needs_permission");
+    let busy_input=native_confirmation::allow_owned_task_read(display,&request.text,window["window_handle"].as_str().unwrap(),
+        window["title"].as_str().unwrap(),window["identity_sha256"].as_str().unwrap());
+    wait_public(bus,&inspecting,"inspecting");
+    let start=Instant::now();let busy_cancel=bus.cancel(&inspecting).unwrap();let busy_stop_ms=start.elapsed().as_millis();
+    assert_eq!(busy_cancel["cancelled"],true);assert!(busy_stop_ms<1000);wait_public(bus,&inspecting,"cancelled");
+    let busy_events=bus.events(&inspecting,0,100).unwrap();assert_eq!(busy_events["complete"],true);
+    assert!(!busy_events["events"].as_array().unwrap().iter().any(|e|e["kind"]=="scoped_observation_ready"),"cancelled capture reached inference");
+    assert_eq!(bus.status(&inspecting).unwrap()["mutation_performed"],false);bus.forget(&inspecting).unwrap();
     // This exact installed package has no installed model socket. Native
     // consent and capture still must finish before the honest model error.
     assert!(!std::path::Path::new("/run/aios/model.sock").exists(),"use the installed-model scenario instead");
@@ -293,5 +322,14 @@ fn qualify_public_task(bus:&aios_session::bus::Client,reconnect:&aios_session::b
     println!("NATIVE_PUBLIC_GRAPHICAL_TASK={}",json!({"evidence_kind":"actual-hardened-public-agent1-original-sender-native-consent-read-and-cancellation-no-installed-model",
         "uid":display.session.uid,"session_id":display.session.id,"cancelled_task":task,"cancellation_ms":cancellation_ms,"pending_events":pending,"terminal_events":stopped,
         "native_input_fixture":input,"positive_task":positive,"final_status":final_status,"positive_events":events,
-        "reconnect_all_four_operations_denied":true,"nonce_reuse_and_conflict_verified":true,"forget_verified":true,"model_answer_verified":false}));
+        "reconnect_all_four_operations_denied":true,"nonce_reuse_and_conflict_verified":true,"forget_verified":true,"model_answer_verified":false,
+        "mode_results":mode_results,"diagnose_native_permission_and_pending_forget":true,"queued_native_task_cancelled":true,
+        "busy_native_input_fixture":busy_input,"busy_native_stop_ms":busy_stop_ms,"busy_native_events":busy_events,"cancelled_capture_excluded_from_inference":true}));
+}
+
+fn wait_public(bus:&aios_session::bus::Client,id:&str,expected:&str){
+    let until=Instant::now()+Duration::from_secs(8);
+    loop {let status=bus.status(id).unwrap();if status["state"]==expected{return;}
+        assert!(!matches!(status["state"].as_str(),Some("failed"|"completed"|"cancelled")),"public task did not reach {expected}: {status}");
+        assert!(Instant::now()<until,"public task did not reach {expected}: {status}");std::thread::sleep(Duration::from_millis(10));}
 }

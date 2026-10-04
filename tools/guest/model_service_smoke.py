@@ -81,7 +81,54 @@ def main():
     store = home/'.aios-models'
     artifact = store/('qwen3.5-2b-'+source['revision'])
     observed = {line.split('=',1)[0]:line.split('=',1)[1].strip('"') for line in Path('/etc/os-release').read_text().splitlines() if '=' in line}
-    results = {}
+    locked = ['--no-update-lock-file','--no-write-lock-file']
+    cases = json.loads(subprocess.check_output(['nix','eval','--json',*locked,'path:'+str(release)+'#lib.modelModule'],timeout=120))
+    for name in ('disabled','headless','desktop','zeroIdle'):
+        if cases[name]['failedAssertions']:
+            raise RuntimeError('valid model module rejected: '+name+' '+json.dumps(cases[name]['failedAssertions']))
+    required = {
+        'network':'Horizon OS V1 model.allowNetwork must be false.',
+        'unknownUser':'Horizon OS inference users must be existing normal users.',
+        'systemUser':'Horizon OS inference users must be existing normal users.',
+        'duplicateUser':'Horizon OS inference users must be unique.',
+        'missingManifest':"Enabled inference requires the reviewed artifact's exact manifest.",
+        'wrongManifest':"Enabled inference requires the reviewed artifact's exact manifest.",
+        'missingPackages':'Enabled inference requires the reviewed code and immutable artifact packages.',
+        'extraTrust':'Inference deployment requires root-only Nix trust.',
+        'context':'Only the verified normal 8192-token model profile can be enabled.',
+        'threads':'Horizon OS model threads are bounded to four.',
+        'low':'Only the verified normal 8192-token model profile can be enabled.',
+        'high':'Only the verified normal 8192-token model profile can be enabled.',
+    }
+    for name,reason in required.items():
+        if reason not in cases[name]['failedAssertions']:
+            raise RuntimeError('model module omitted denial: '+name)
+    if cases['disabled']['modelEnabled'] or cases['disabled']['inferenceMembers'] or cases['headless']['desktopEnabled'] or not cases['desktop']['desktopEnabled']:
+        raise RuntimeError('headless/disabled composition changed')
+    for name in ('headless','desktop','zeroIdle'):
+        case=cases[name]
+        if case['trustedUsers'] != ['root'] or case['inferenceMembers'] != ['alice','bob'] or case['modelUser'] != {'isSystemUser':True,'group':'aios-model','extraGroups':[]}:
+            raise RuntimeError('model access identities changed: '+name)
+        expected={'schema_version':1,'profile':'normal','context_tokens':8192,'threads':1 if name=='zeroIdle' else None,'idle_unload_seconds':0 if name=='zeroIdle' else 600}
+        if case['runtime'] != expected or case['runtimeMode'] != 'symlink' or case['socketWantedBy'] != ['sockets.target'] or case['serviceWantedBy']:
+            raise RuntimeError('model socket/runtime composition changed: '+name)
+        if str(package) not in case['unitPackages'] or len(case['execStart']) != 2 or case['execStart'][0] != '' or '--runtime-config /etc/aios/model-runtime.json' not in case['execStart'][1]:
+            raise RuntimeError('model package or exact runtime entry missing')
+        dependencies=[*case['bootRequires'].values(),case['targetsRequire']['requires'],case['targetsRequire']['graphical']]
+        if any('aios-model.service' in group or 'aios-model.socket' in group for group in dependencies):
+            raise RuntimeError('boot/login/connectivity requires inference')
+    for name in ('aios-model.service','aios-model.socket'):
+        packaged=package/'lib/systemd/system'/name
+        if packaged.resolve() != package/'share/systemd/system'/name:
+            raise RuntimeError('NixOS cannot discover exact packaged model unit')
+    docs = json.loads(subprocess.check_output(['nix','build','--json','--no-link',*locked,'path:'+str(release)+'#lib.modelOptionsDocumentation'],timeout=120))
+    docs_path=Path(docs[0]['outputs']['out'])
+    docs_text=docs_path.read_text()
+    doc_headings={line.removeprefix("## ").replace(r"\.",".") for line in docs_text.splitlines() if line.startswith("## ")}
+    for option in ('users','model.profile','model.manifest','model.contextTokens','model.threads','model.idleUnloadSeconds','model.allowNetwork'):
+        if 'services.aios.'+option not in doc_headings:
+            raise RuntimeError('generated option documentation missing: '+option)
+    results = {'module_evaluation':cases,'generated_options_documentation':str(docs_path)}
     with tempfile.TemporaryDirectory(prefix='daemon-qualification-',dir=store) as temporary:
         directory = Path(temporary)
         path = directory/'model.sock'
@@ -96,7 +143,7 @@ def main():
                     time.sleep(0.01)
                 first = Client(path);second = Client(path);clients.extend([first,second])
                 status = first.call({'kind':'get_status'})['data']
-                if status['loaded'] or status['idle_unload_seconds'] != 600 or status['queue_limit'] != 8:
+                if status['loaded'] or status['idle_unload_seconds'] != 600 or status['queue_limit'] != 8 or status['context_tokens'] != 8192 or status['maximum_input_tokens'] != 6144 or not 1 <= status['threads'] <= 4:
                     raise RuntimeError('initial lifecycle state mismatch')
                 def generation(text=None, budget=90000, profile='normal'):
                     return {'profile':profile,'system_prompt':'You are the Horizon OS assistant. Return an answer JSON object. Use only the observation, cite ev_guest, and perform no actions.',

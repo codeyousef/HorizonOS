@@ -87,18 +87,21 @@
           install -Dm644 ${./nix/packages/aios-model.socket} "$out/share/systemd/system/aios-model.socket"
           install -Dm644 ${./nix/packages/aios-model.service} "$out/share/systemd/system/aios-model.service"
           substituteInPlace "$out/share/systemd/system/aios-model.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-modeld"
+          mkdir -p "$out/lib/systemd/system"
+          ln -s ../../../share/systemd/system/aios-model.service "$out/lib/systemd/system/aios-model.service"
+          ln -s ../../../share/systemd/system/aios-model.socket "$out/lib/systemd/system/aios-model.socket"
         '';
       });
       modelArtifact = pkgs.callPackage ./nix/packages/model-artifact.nix { };
     in {
       nixosConfigurations.aios-dev = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
+        specialArgs = { aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ];
       };
       nixosConfigurations.aios-desktop-test = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
+        specialArgs = { aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ./nix/machines/aios-desktop-test.nix ];
       };
       nixosModules.default = import ./nix/modules/aios;
@@ -113,6 +116,11 @@
       }) stateContract.catalog.content.packages);
       lib.managedState = import ./tests/nix/managed.nix { inherit nixpkgs stateContract; };
       lib.developmentBoundary = import ./tests/nix/development.nix { inherit nixpkgs; };
+      lib.modelModule = import ./tests/nix/model.nix { inherit nixpkgs; aiosModel = model; aiosModelArtifact = modelArtifact; };
+      lib.modelOptionsDocumentation = (pkgs.nixosOptionsDoc {
+        options.services.aios = (nixpkgs.lib.nixosSystem { inherit system; modules = [ ./nix/modules/aios ]; }).options.services.aios;
+        warningsAreErrors = true;
+      }).optionsCommonMark;
       lib.upstreamCompatibility = import ./tests/nix/upstreams.nix {
         inherit pkgs nixpkgs;
         imageAttributes = builtins.attrNames self.nixosConfigurations;

@@ -1,4 +1,4 @@
-use aios_model::service::{self,Config};
+use aios_model::service::{self,Config,RuntimeSettings};
 use std::{fs,io,os::{fd::{AsRawFd,FromRawFd},unix::{fs::{MetadataExt,PermissionsExt},net::UnixListener}},path::{Path,PathBuf}};
 
 fn invalid()->io::Error {io::Error::new(io::ErrorKind::PermissionDenied,"model service identity or configuration rejected")}
@@ -13,9 +13,9 @@ fn main_result()->io::Result<()> {
             let parent=socket.parent().ok_or_else(invalid)?;let info=fs::symlink_metadata(parent)?;
             if parent.canonicalize()?!=parent || !info.is_dir() || info.uid()!=nix::unistd::geteuid().as_raw() || info.mode()&0o077!=0 {return Err(invalid());}
             let listener=UnixListener::bind(&socket)?;fs::set_permissions(&socket,fs::Permissions::from_mode(0o600))?;
-            (listener,Config {model_directory:directory,qualification:true})
+            (listener,Config {model_directory:directory,qualification:true,runtime:RuntimeSettings::default()})
         },
-        [mode,directory] if mode=="--model-directory"=>{
+        [mode,directory,..] if mode=="--model-directory" && (args.len()==2 || (args.len()==4 && args[2]=="--runtime-config" && args[3]=="/etc/aios/model-runtime.json"))=>{
             let user=nix::unistd::User::from_name("aios-model").map_err(io::Error::other)?.ok_or_else(invalid)?;
             let group=nix::unistd::Group::from_name("aios-inference").map_err(io::Error::other)?.ok_or_else(invalid)?;
             if user.uid!=nix::unistd::geteuid() || std::env::var("LISTEN_PID").ok()!=Some(std::process::id().to_string()) ||
@@ -29,7 +29,8 @@ fn main_result()->io::Result<()> {
             if info.mode()&0o777!=0o660 || info.gid()!=group.gid.as_raw() || (info.uid()!=0 && info.uid()!=user.uid.as_raw()) {return Err(invalid());}
             let directory=PathBuf::from(directory).canonicalize()?;
             if !directory.starts_with("/nix/store") {return Err(invalid());}
-            (listener,Config {model_directory:directory,qualification:false})
+            let runtime=if args.len()==4{RuntimeSettings::installed()?}else{RuntimeSettings::default()};
+            (listener,Config {model_directory:directory,qualification:false,runtime})
         },
         _=>return Err(io::Error::new(io::ErrorKind::InvalidInput,"usage: aios-modeld --model-directory STORE_DIRECTORY")),
     };

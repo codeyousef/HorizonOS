@@ -246,10 +246,20 @@ impl Model {
         let mut system=system.into_bytes_with_nul();let mut user=user.into_bytes_with_nul();service::wipe(&mut system);service::wipe(&mut user);value
     }
     pub fn context(&self,cancel:Cancellation)->Result<Context<'_>,ErrorCode> {
+        self.context_with_threads(cancel,None)
+    }
+    pub fn context_with_threads(&self,cancel:Cancellation,requested:Option<u32>)->Result<Context<'_>,ErrorCode> {
         let cpus=std::thread::available_parallelism().map(|n|n.get()).unwrap_or(1);
-        let threads=cpus.saturating_sub(1).clamp(1,4) as u32;let mut context=std::ptr::null_mut();
+        let threads=normal_threads(requested,cpus)?;let mut context=std::ptr::null_mut();
         result(unsafe { ffi::aios_context_new(self.value.as_ptr(),8192,threads,cancel.0.0.as_ptr(),&mut context) })?;
         Ok(Context {value:NonNull::new(context).ok_or(ErrorCode::ModelUnavailable)?,_model:self,_cancel:cancel})
+    }
+}
+pub(crate) fn normal_threads(requested:Option<u32>,cpus:usize)->Result<u32,ErrorCode>{
+    match requested {
+        None=>Ok(cpus.saturating_sub(1).clamp(1,4) as u32),
+        Some(value) if value>0 && value<=cpus.clamp(1,4) as u32=>Ok(value),
+        _=>Err(ErrorCode::InvalidArgument),
     }
 }
 pub struct Context<'a> { value:NonNull<c_void>,_model:&'a Model,_cancel:Cancellation }

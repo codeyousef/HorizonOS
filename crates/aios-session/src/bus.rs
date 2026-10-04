@@ -35,7 +35,7 @@ impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::Acq
 
 #[derive(Clone)]
 pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>> }
-struct UiConnection { peer:Peer,expires:Instant,client:Arc<Mutex<crate::graphical::Connection>> }
+struct UiConnection { peer:Peer,expires:Instant,client:Arc<crate::graphical::Connection> }
 impl Agent {
     pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())) } }
     fn admit(&self) -> Result<Admission> {
@@ -89,11 +89,11 @@ impl Agent {
             value.expires=Instant::now()+Duration::from_secs(30);value.client.clone()
         } else {
             if contexts.len()>=8{return Err(ErrorCode::ResourceExhausted);}
-            let client=Arc::new(Mutex::new(crate::graphical::Connection::new(crate::ui_bridge::Client::connect_bus(peer)?,peer.clone())));
+            let client=Arc::new(crate::graphical::Connection::new(crate::ui_bridge::Client::connect_bus(peer)?,peer.clone()));
             contexts.insert(key.clone(),UiConnection{peer:peer.clone(),expires:Instant::now()+Duration::from_secs(30),client:client.clone()});client
         };
         drop(contexts);
-        let result=client.try_lock().map_err(|_|ErrorCode::ResourceExhausted)?.discover(&session);
+        let result=client.discover(&session);
         identity::verify_peer(peer)?;
         if matches!(result,Err(ErrorCode::TargetChanged|ErrorCode::PermissionDenied)){
             self.ui.lock().map_err(|_|ErrorCode::ResourceExhausted)?.remove(&key);

@@ -10,8 +10,30 @@ socket-activation descriptor for `/run/aios/model.sock`. The socket is root/mode
 owned, group `aios-inference`, mode 0660. The configured model directory resolves
 to a root-owned immutable Nix store artifact. Packaged unit templates declare
 network/home/log/Nix-socket isolation, resource bounds and restart backoff.
-Image/module activation and effective production sandbox verification are
-separate deployment acceptance checks.
+The reusable NixOS module enables this service with
+`services.aios.model.enable = true` and an exact
+`services.aios.model.manifest` from the supplied `aiosModelArtifact` package.
+Composition supplies the reviewed `aiosModel` and `aiosModelArtifact` packages
+through module arguments. `services.aios.users` lists existing normal users
+allowed into `aios-inference`; unknown, duplicate or system users are rejected.
+The unit is discovered through the package's `lib/systemd/system` directory,
+and only its socket is wanted during boot. Full control-plane enablement is
+still guarded until its services are implemented.
+
+The module creates `/etc/aios/model-runtime.json` as a root-owned immutable
+store link. The daemon accepts only this fixed configuration path, validates
+its strict schema and file identity before startup, and exposes no configuration
+operation to clients. Network access must remain false; low/high profiles and
+other context sizes fail closed until their artifacts/runtime are qualified.
+`model.threads` is null by default, reserving a CPU where possible and choosing
+at most four; explicit values must fit both the four-thread limit and the
+available CPUs. `model.idleUnloadSeconds` defaults to 600. Zero disables only
+automatic unload; explicit unload, deadlines, authentication and quotas remain.
+
+Generate the implemented options' documentation with
+`nix build --no-update-lock-file --no-write-lock-file .#lib.modelOptionsDocumentation`
+in a verified guest. Module evaluation and effective installed-unit isolation
+are separate checks; an evaluation does not prove a running sandbox.
 
 `aios-model-artifact` is the independent normal-profile data package shared by
 desktop, headless and recovery image composition. It uses fixed hashes and
@@ -64,7 +86,7 @@ Results expire after 30 seconds and ordinary logs contain no prompt text.
 The daemon installs an execution-denial seccomp filter before creating threads.
 Status reports coarse lifecycle/budget metadata and the caller's queued count.
 Unload refuses to interrupt active or queued work; idle unload is scheduled
-after 600 seconds without inference. The low/high profiles report unavailable
+after the configured interval (600 seconds by default) without inference. The low/high profiles report unavailable
 until their own artifacts and qualification exist, with no automatic fallback.
 
 The explicit development qualification entry point is available only in a
