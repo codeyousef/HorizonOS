@@ -132,3 +132,32 @@ Seed media is removed before installed startup. This route cannot activate or
 replace an existing installation; guarded deployment remains a separate
 contract. Creating/booting this image alone does not establish inference,
 sandbox, two-user privacy, or elapsed idle-unload acceptance.
+
+After enrolling the installed image, its registered `installed-model` provider
+checks the actual root-managed socket, production-mode executable, immutable
+runtime/model data, effective systemd limits and process privileges. It uses
+the installed daemon for cited answers, request ownership, quotas, deadlines,
+cancellation, overflow and explicit unload; it does not launch a replacement.
+`installed-model-users` requires two separately enrolled workspaces for different
+normal users on that same VM. It retains both original connections, verifies
+foreign result/cancel denial and serialization, and checks that an owner-only
+synthetic private marker is absent from the other user's answer. Target identity
+is checked again during coordination, and failed attempts retain evidence.
+
+The `installed-model-idle` provider measures the configured 600-second interval
+after a successful generation, polling coarse status without resetting the idle
+clock. It checks that the same service process unloads its weights and records
+cgroup memory samples. Run it exclusively: other generation/unload operations
+or a VM restart invalidate the measurement. Cgroup memory is not process PSS.
+These providers do not establish full release, active filesystem/syscall denial,
+restart/load-pressure, quality or performance acceptance.
+
+```fish
+python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model --detach --json
+python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model-users --peer-workspace /mnt/Storage/PATH_TO_ENROLLED_TESTER_WORKSPACE --json
+python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model-idle --detach --json
+```
+
+Replace workspace placeholders with independently verified configurations.
+The two-user check rejects detached operation so reconnecting cannot substitute
+for the original authenticated request owners.

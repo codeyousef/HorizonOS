@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import acceptance, deploy, desktop, guest, jobs, native_rpc, provision, reenrollment, snapshots, storage, sync, vm, model_seed
+from . import acceptance, deploy, desktop, guest, jobs, native_rpc, provision, reenrollment, snapshots, storage, sync, vm, model_seed, model_users
 
 
 class Parser(argparse.ArgumentParser):
@@ -67,10 +67,11 @@ def parser() -> Parser:
     test = commands.add_parser("test")
     test.add_argument("--suite", choices=("unit", "integration", "desktop"), required=True)
     test.add_argument("--detach", action="store_true")
+    test.add_argument("--peer-workspace", type=Path, help="independently enrolled second user for installed model privacy checks")
     test.add_argument("--with-model", action="store_true", help="create a disposable desktop with the locked installed CPU model")
     test.add_argument("--desktop-run", metavar="RUN_UUID", help="resume only the registered disposable desktop workspace")
     test.add_argument("--bootstrap-case", choices=("all", *acceptance.CASES), help="run only the named disposable installer guard qualification")
-    test.add_argument("--provider", choices=("system-info", "service-inspection", "public-session", "consent-ui", "accessibility", "ui-provider", "model-compatibility", "upstream-compatibility", "host-boundary", "protocol-conformance", "model-profile-low", "model-profile-high", "model-inference", "model-service", "session-inference", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime", "installed-policy", "installed-development", "installed-guard", "installed-executor"), help="run the named real product provider smoke in the verified guest")
+    test.add_argument("--provider", choices=("system-info", "service-inspection", "public-session", "consent-ui", "accessibility", "ui-provider", "model-compatibility", "upstream-compatibility", "host-boundary", "protocol-conformance", "model-profile-low", "model-profile-high", "model-inference", "model-service", "session-inference", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime", "installed-policy", "installed-development", "installed-guard", "installed-model", "installed-model-idle", "installed-model-users", "installed-executor"), help="run the named real product provider smoke in the verified guest")
     controls = commands.add_parser("jobs").add_subparsers(dest="operation", required=True)
     for action in ("status", "cancel"):
         controls.add_parser(action).add_argument("--job", required=True)
@@ -118,6 +119,12 @@ def dispatch(args) -> tuple[ExitCode, dict]:
             raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Package selection requires the packages build target")
         return jobs.start(load_config(args.workspace), "build-" + args.target, package=args.package, detach=args.detach)
     if args.command == "test":
+        if args.provider == "installed-model-users":
+            if args.suite != "integration" or args.detach or args.peer_workspace is None or args.desktop_run is not None or args.bootstrap_case is not None or args.with_model:
+                raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Two-user model qualification requires integration, a peer workspace and retained connections")
+            return model_users.run(load_config(args.workspace), load_config(args.peer_workspace))
+        if args.peer_workspace is not None:
+            raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Peer workspace requires the fixed two-user model provider")
         if args.with_model and (args.suite != "desktop" or args.desktop_run is not None):
             raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Model image selection requires a fresh desktop run")
         if args.desktop_run is not None and args.suite != "desktop":
