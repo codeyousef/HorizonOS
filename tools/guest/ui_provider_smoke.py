@@ -119,6 +119,12 @@ def main():
             print(output,flush=True)
             if result.returncode:raise RuntimeError('native bridge qualification failed')
             if "NATIVE_PROVIDER_BRIDGE=" not in output:raise RuntimeError("native bridge scenario did not run")
+            if "NATIVE_BUS_WINDOW_DISCOVERY=" not in output:raise RuntimeError("public native D-Bus discovery scenario did not run")
+            origin=subprocess.run(["nix","develop","--no-update-lock-file","--no-write-lock-file","path:"+str(release),"--command",
+                                   "cargo","test","--locked","-p","aios-session","--lib","user_bus::tests::","--","--ignored","--nocapture"],
+                                  env=scenario,check=False,stdout=subprocess.PIPE,timeout=900)
+            native_origin=origin.stdout.decode();print(native_origin,flush=True)
+            if origin.returncode or "NATIVE_BUS_ORIGIN=" not in native_origin:raise RuntimeError("native D-Bus origin qualification failed")
             print("NATIVE_MANAGED_UI_PROVIDER="+json.dumps({"evidence_kind":"actual-exact-managed-package-original-fd-bridge-and-owned-native-assistive-input-fixture-not-human-approval",
                 "uid":1001,"outputs":[str(p) for p in paths],"before":before,"effective":effective,
                 "unit_sha256":{name:hashlib.sha256(data).hexdigest() for name,data in units.items()},"unmanaged_client_denied":True,

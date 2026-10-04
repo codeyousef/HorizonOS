@@ -170,6 +170,20 @@ fn native_selected_kate_snapshot_and_stale_owner(){
 }
 
 fn qualify_broker_bridge(display:&DisplayBinding,window:&WindowBinding){
+    let bus=aios_session::bus::Client::connect_user_bus().unwrap();
+    let session=bus.select_ui_session(&display.session.id).unwrap();
+    let handle=session["candidate_handle"].as_str().unwrap();
+    let bus_windows=bus.list_ui_windows(handle).expect("managed native D-Bus origin handoff");
+    assert_eq!(bus_windows["session_id"],display.session.id);assert_eq!(bus_windows["ui_authorized"],false);
+    let list=bus_windows["windows"].as_array().unwrap();assert_eq!(list.len(),1);assert_eq!(list[0]["title"],window.title);
+    let reconnect=aios_session::bus::Client::connect_user_bus().unwrap();
+    assert_eq!(reconnect.list_ui_windows(handle),Err(ErrorCode::PermissionDenied));
+    let fresh=reconnect.select_ui_session(&display.session.id).unwrap();
+    let fresh_windows=reconnect.list_ui_windows(fresh["candidate_handle"].as_str().unwrap()).unwrap();
+    assert_ne!(list[0]["window_handle"],fresh_windows["windows"][0]["window_handle"]);
+    println!("NATIVE_BUS_WINDOW_DISCOVERY={}",json!({"evidence_kind":"actual-hardened-public-ui1-native-original-sender-managed-provider-metadata",
+        "session_id":display.session.id,"uid":display.session.uid,"windows":bus_windows,"reconnect_candidate_denied":true,
+        "fresh_selection_distinct_window_handles":true,"ui_authorized":false,"no_content_or_grant_returned":true}));
     let path=PathBuf::from(format!("/run/user/{}/aios/session.sock",display.session.uid));
     let mut client=aios_session::Client::connect(&path).unwrap();
     let selected=client.call(json!({"kind":"select_ui_session","session_id":display.session.id})).unwrap();

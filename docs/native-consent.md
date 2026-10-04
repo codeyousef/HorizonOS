@@ -119,10 +119,32 @@ server end of the original client connection. The provider obtains the original
 UID, PID, process start, boot, logind association and socket cookie from that
 descriptor, not from serialized fields. Received descriptors are close-on-exec;
 missing, multiple and unexpected ancillary messages are rejected. The provider
-acknowledges only after authentication. Subsequent messages use the existing
+acknowledges only after authentication, with a version 2 handoff response whose
+native originating identity digest must match the broker's independently
+authenticated caller. The digest is a comparison, not authority in place of
+the kernel connection. Subsequent messages use the existing
 big-endian framing, schema version 1 and UUID correlation IDs, a 64 KiB request
 limit and 1 MiB response limit. Unknown operations, duplicate fields and extra
 fields are denied. There is no approval operation.
+
+For a D-Bus client the marker is `0xa8` with no descriptors, followed by a
+strict bounded reference containing only schema version, unique sender and bus
+ID. Only the authenticated managed broker can send this reference. The provider
+independently resolves the caller on `/run/user/UID/bus`; serialized UID, PID,
+session and decision fields are denied. The very connection used for native
+bus queries must have kernel credentials matching the root-authenticated,
+active `user@UID.service` main PID, configured program, control group, start and
+invocation. The owned runtime/socket identity is checked before and after use.
+A replacement bus, changed manager invocation or vanished unique sender
+invalidates the proof and every retained clone. Two connections from the same
+PID remain distinct policy clients. These checks do not claim isolation from
+unsandboxed malware running as the same UID.
+
+Public `org.aios.UI1.SelectSession` and `ListWindows` return owner-bound,
+short-lived metadata candidates. A new unique sender cannot use an earlier
+sender's session or window handles. Metadata does not enable content reads,
+semantic input or a task grant. Native discovery runs outside the global task
+state lock, with bounded admission and provider connections.
 
 The private client first selects an explicit native desktop, then requests
 window candidates. These names and titles grant no content access. Candidate
@@ -139,8 +161,8 @@ four active consent/read workers globally and a 90-second task lifetime.
 connection through explicit selection, uniquely matched title, native consent
 and snapshot retrieval. It denies absent or ambiguous titles. Snapshots are
 bounded observations; this route invokes no model and grants no semantic input
-authority. Public graphical Submit and D-Bus origin proof require their own
-integration before these controls can serve the complete task lifecycle.
+authority. Public graphical Submit requires task, permission, evidence and
+cancellation integration before these controls serve the complete task lifecycle.
 
 ## Native interaction and qualification
 
@@ -189,3 +211,11 @@ ignored guest integration test, is absent from installed products, and requires
 the disposable profile, tester UID and explicit registered scenario. This is
 native assistive-input fixture evidence, never evidence of human review or
 AIOS semantic input permission.
+
+The same registered scenario checks real public D-Bus window discovery through
+the hardened broker and exact native provider. A separate guarded native test
+checks kernel bus/user-manager association, distinct unique senders with the
+same PID, forged bus IDs, well-known-name rejection and original disconnect
+revocation while another sender remains live. These tests establish caller
+proof and metadata ownership; they do not establish public graphical Submit or
+inference over desktop content.

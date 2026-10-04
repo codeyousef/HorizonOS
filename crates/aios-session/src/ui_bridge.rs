@@ -1,5 +1,7 @@
 //! Private fixed-broker/native-provider bridge. The first kernel message
-//! carries exactly the originating client FD; identity is not JSON data.
+//! carries the originating client FD or a native unique-sender reference.
+//! References are resolved on the authenticated native bus, never trusted as
+//! serialized caller credentials, and only the fixed broker can hand them off.
 use crate::{managed_service::{ManagedService,Role},ui_read::{OriginatingClient,NativeReadTask,NativeReadStop},
     display::DisplayBinding,accessibility::WindowBinding};
 use aios_protocol::{read_frame_with_limit,write_frame,MAX_TASK_BYTES,MAX_FRAME_BYTES,contracts::ErrorCode};
@@ -10,6 +12,10 @@ use std::{collections::HashMap,fs,io::{IoSlice,IoSliceMut},net::Shutdown,os::{fd
     path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicU8,AtomicUsize,Ordering}},time::Duration};
 type Result<T> = std::result::Result<T,ErrorCode>;
 const MARKER:u8=0xa7;
+const BUS_MARKER:u8=0xa8;
+enum TransferredProof { Unix(UnixStream),Bus }
+#[derive(Serialize,Deserialize)]#[serde(deny_unknown_fields)]
+struct BusReference { schema_version:u32,sender:String,bus_id:String }
 static ACTIVE_READS:AtomicUsize=AtomicUsize::new(0);
 struct ReadAdmission;
 impl Drop for ReadAdmission{fn drop(&mut self){ACTIVE_READS.fetch_sub(1,Ordering::AcqRel);}}
@@ -19,7 +25,7 @@ fn send_proof(bridge:&UnixStream,origin:&UnixStream)->Result<()>{
         .map_err(|_|ErrorCode::TargetChanged)?;
     if sent!=1{return Err(ErrorCode::TargetChanged);}Ok(())
 }
-fn receive_proof(bridge:&UnixStream)->Result<UnixStream>{
+fn receive_proof(bridge:&UnixStream)->Result<TransferredProof>{
     let mut byte=[0u8];let mut io=[IoSliceMut::new(&mut byte)];
     // Linux permits at most 253 rights per message. Receive enough ancillary
     // space to own/close *all* unexpected FDs before rejecting multiplicity.
@@ -30,9 +36,12 @@ fn receive_proof(bridge:&UnixStream)->Result<UnixStream>{
     for control in message.cmsgs().map_err(|_|ErrorCode::PermissionDenied)? {
         match control {ControlMessageOwned::ScmRights(fds)=>for fd in fds{descriptors.push(unsafe{OwnedFd::from_raw_fd(fd)});},_=>other=true}
     }
-    let valid=message.bytes==1 && !message.flags.intersects(MsgFlags::MSG_CTRUNC|MsgFlags::MSG_TRUNC) && !other && descriptors.len()==1;
-    if !valid || byte[0]!=MARKER{return Err(ErrorCode::PermissionDenied);}
-    Ok(UnixStream::from(descriptors.remove(0)))
+    let valid=message.bytes==1 && !message.flags.intersects(MsgFlags::MSG_CTRUNC|MsgFlags::MSG_TRUNC) && !other;
+    if !valid{return Err(ErrorCode::PermissionDenied);}
+    match (byte[0],descriptors.len()) {
+        (MARKER,1)=>Ok(TransferredProof::Unix(UnixStream::from(descriptors.remove(0)))),
+        (BUS_MARKER,0)=>Ok(TransferredProof::Bus),_=>Err(ErrorCode::PermissionDenied),
+    }
 }
 enum Operation {
     Discover{session_id:String},StartRead{window_handle:String,goal:String,mode:String},
@@ -55,7 +64,7 @@ fn parse(raw:&str)->Result<Operation>{
 #[derive(Deserialize)]#[serde(deny_unknown_fields)]
 struct Request{schema_version:u32,request_id:String,operation:Box<RawValue>}
 #[derive(Serialize,Deserialize)]#[serde(deny_unknown_fields)]
-struct Bound{schema_version:u32,request_id:String,operation:String}
+struct Bound{schema_version:u32,request_id:String,operation:String,origin_sha256:String}
 #[derive(Serialize,Deserialize)]#[serde(deny_unknown_fields)]
 struct Response{schema_version:u32,request_id:String,operation:String,data:Option<Value>,error:Option<ErrorCode>}
 #[derive(Clone,Serialize)]
@@ -150,10 +159,18 @@ pub fn serve(mut stream:UnixStream)->Result<()>{
     stream.set_read_timeout(Some(Duration::from_secs(2))).map_err(|_|ErrorCode::TargetChanged)?;
     stream.set_write_timeout(Some(Duration::from_secs(2))).map_err(|_|ErrorCode::TargetChanged)?;
     let broker=ManagedService::authenticate(&stream,Role::Broker)?;
-    let origin=OriginatingClient::authenticate(receive_proof(&stream)?)?;
+    let origin=match receive_proof(&stream)? {
+        TransferredProof::Unix(proof)=>OriginatingClient::authenticate(proof)?,
+        TransferredProof::Bus=>{
+            let raw=read_frame_with_limit(&mut stream,MAX_TASK_BYTES).map_err(|_|ErrorCode::InvalidArgument)?.ok_or(ErrorCode::InvalidArgument)?;
+            let reference:BusReference=serde_json::from_str(&raw).map_err(|_|ErrorCode::InvalidArgument)?;
+            if reference.schema_version!=1{return Err(ErrorCode::UnsupportedSchema);}
+            OriginatingClient::authenticate_bus(&reference.sender,&reference.bus_id)?
+        },
+    };
     broker.verify(&stream)?;
     let mut context=Context{origin,windows:HashMap::new(),tasks:HashMap::new()};
-    let bound=Bound{schema_version:1,request_id:uuid::Uuid::new_v4().to_string(),operation:"bound".into()};
+    let bound=Bound{schema_version:2,request_id:uuid::Uuid::new_v4().to_string(),operation:"bound".into(),origin_sha256:context.origin.identity_sha256()?};
     write_frame(&mut stream,&serde_json::to_string(&bound).map_err(|_|ErrorCode::InvalidArgument)?).map_err(|_|ErrorCode::TargetChanged)?;
     stream.set_read_timeout(Some(Duration::from_secs(10))).map_err(|_|ErrorCode::TargetChanged)?;
     for _ in 0..4096{
@@ -173,6 +190,13 @@ pub fn serve(mut stream:UnixStream)->Result<()>{
 pub(crate) struct Client{stream:UnixStream,provider:ManagedService}
 impl Client {
     pub(crate) fn connect(origin:&UnixStream)->Result<Self>{
+        let peer=crate::identity::authenticate(origin)?;
+        Self::connect_with(Some(origin),&peer)
+    }
+    pub(crate) fn connect_bus(peer:&crate::identity::Peer)->Result<Self>{
+        crate::identity::verify_peer(peer)?;Self::connect_with(None,peer)
+    }
+    fn connect_with(origin:Option<&UnixStream>,peer:&crate::identity::Peer)->Result<Self>{
         let uid=nix::unistd::geteuid().as_raw();let directory=PathBuf::from(format!("/run/user/{uid}/aios-ui"));
         let meta=fs::symlink_metadata(&directory).map_err(|_|ErrorCode::UnsupportedCapability)?;
         if !meta.is_dir() || meta.uid()!=uid || meta.mode()&0o077!=0 || directory.canonicalize().map_err(|_|ErrorCode::TargetChanged)?!=directory{return Err(ErrorCode::PermissionDenied);}
@@ -184,10 +208,21 @@ impl Client {
         let provider=ManagedService::authenticate(&stream,Role::UiProvider)?;
         let after=fs::symlink_metadata(&path).map_err(|_|ErrorCode::TargetChanged)?;
         if (before.dev(),before.ino(),before.uid(),before.mode())!=(after.dev(),after.ino(),after.uid(),after.mode()){return Err(ErrorCode::TargetChanged);}
-        send_proof(&stream,origin)?;
+        if let Some(origin)=origin {send_proof(&stream,origin)?;} else {
+            let sender=peer.bus_sender.as_deref().ok_or(ErrorCode::PermissionDenied)?;
+            let bus_id=peer.bus_id.as_deref().ok_or(ErrorCode::PermissionDenied)?;
+            if peer.connection_id.is_some(){return Err(ErrorCode::PermissionDenied);}
+            crate::user_bus::validate_reference(sender,bus_id)?;
+            let sent=sendmsg::<()>(stream.as_raw_fd(),&[IoSlice::new(&[BUS_MARKER])],&[],MsgFlags::MSG_NOSIGNAL,None).map_err(|_|ErrorCode::TargetChanged)?;
+            if sent!=1{return Err(ErrorCode::TargetChanged);}
+            let reference=BusReference{schema_version:1,sender:sender.into(),bus_id:bus_id.into()};
+            write_frame(&mut stream,&serde_json::to_string(&reference).map_err(|_|ErrorCode::InvalidArgument)?).map_err(|_|ErrorCode::TargetChanged)?;
+        }
         let bound=read_frame_with_limit(&mut stream,MAX_TASK_BYTES).map_err(|_|ErrorCode::TargetChanged)?.ok_or(ErrorCode::TargetChanged)?;
         let bound:Bound=serde_json::from_str(&bound).map_err(|_|ErrorCode::InvalidArgument)?;
-        if bound.schema_version!=1 || bound.operation!="bound" || !crate::uuid(&bound.request_id){return Err(ErrorCode::PermissionDenied);}
+        if bound.schema_version!=2 || bound.operation!="bound" || !crate::uuid(&bound.request_id)
+            || bound.origin_sha256!=crate::ui_read::origin_digest(peer)?{return Err(ErrorCode::PermissionDenied);}
+        if let Some(origin)=origin {crate::identity::verify(origin,peer)?;}else{crate::identity::verify_peer(peer)?;}
         provider.verify(&stream)?;Ok(Self{stream,provider})
     }
     pub(crate) fn call(&mut self,operation:Value)->Result<Value>{

@@ -85,15 +85,12 @@ pub fn verify(stream: &UnixStream, original: &Peer) -> Result<(), ErrorCode> {
 /// Reauthorize a live originating process/connection without accepting identity
 /// fields from a task or reusing a PID after process restart.
 pub(crate) fn verify_peer(original: &Peer) -> Result<(), ErrorCode> {
-    let mut current = authenticate_process(original.uid, original.pid)?;
+    let mut current;
     if let (Some(sender), Some(id)) = (&original.bus_sender, &original.bus_id) {
-        let address = format!("unix:path=/run/user/{}/bus", original.uid);
-        let connection = zbus::blocking::connection::Builder::address(address.as_str()).map_err(|_| ErrorCode::TargetChanged)?
-            .method_timeout(Duration::from_millis(500)).build().map_err(|_| ErrorCode::TargetChanged)?;
-        let bus = Proxy::new(&connection,"org.freedesktop.DBus","/org/freedesktop/DBus","org.freedesktop.DBus").map_err(|_| ErrorCode::TargetChanged)?;
-        let credentials: zbus::fdo::ConnectionCredentials = bus.call("GetConnectionCredentials", &(sender.as_str(),)).map_err(|_| ErrorCode::TargetChanged)?;
-        if credentials.unix_user_id() != Some(original.uid) || credentials.process_id() != Some(original.pid)
-            || bus.call::<_,_,String>("GetId", &()).map_err(|_| ErrorCode::TargetChanged)? != *id { return Err(ErrorCode::TargetChanged); }
+        current=crate::user_bus::NativeUserBus::connect()?.caller(sender,id)?;
+    } else {
+        if original.bus_sender.is_some() || original.bus_id.is_some(){return Err(ErrorCode::PermissionDenied);}
+        current=authenticate_process(original.uid,original.pid)?;
     }
     current.bus_sender=original.bus_sender.clone();current.bus_id=original.bus_id.clone();current.connection_id=original.connection_id.clone();
     if current != *original { return Err(ErrorCode::TargetChanged); } Ok(())

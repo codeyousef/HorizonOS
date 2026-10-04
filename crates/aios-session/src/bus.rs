@@ -2,7 +2,7 @@
 use crate::{Operation, Request, SharedState, identity::{self, Peer}, parse_operation};
 use aios_protocol::{MAX_TASK_BYTES, contracts::ErrorCode};
 use serde_json::Value;
-use std::{fmt, sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Duration};
+use std::{collections::HashMap,fmt,sync::{Arc,Mutex,atomic::{AtomicUsize,Ordering}},time::{Duration,Instant}};
 use zbus::{Connection, DBusError, Message, message::Header, names::ErrorName};
 
 pub const NAME: &str = "org.aios.Session1";
@@ -34,9 +34,10 @@ struct Admission(Arc<AtomicUsize>);
 impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); } }
 
 #[derive(Clone)]
-pub struct Agent { state: SharedState, active: Arc<AtomicUsize> }
+pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>> }
+struct UiConnection { peer:Peer,expires:Instant,client:Arc<Mutex<crate::ui_bridge::Client>> }
 impl Agent {
-    pub fn new(state: SharedState) -> Self { Self { state, active: Arc::new(AtomicUsize::new(0)) } }
+    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())) } }
     fn admit(&self) -> Result<Admission> {
         if self.active.fetch_add(1, Ordering::AcqRel) >= 16 {
             self.active.fetch_sub(1, Ordering::AcqRel);
@@ -61,9 +62,37 @@ impl Agent {
     async fn dispatch(&self, connection: &Connection, header: Header<'_>, operation: Operation) -> Result<Value> {
         let _admission = self.admit()?;
         let peer = Self::peer(connection, &header).await?;
-        let outcome = self.state.lock().map_err(|_| ErrorCode::ResourceExhausted)?.dispatch(&peer, operation);
+        let outcome=if let Operation::ListUiWindows{session_handle}=operation {
+            let agent=self.clone();let original=peer.clone();
+            blocking::unblock(move||agent.list_windows(&original,&session_handle)).await
+        } else {self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.dispatch(&peer,operation)};
         if Self::peer(connection, &header).await? != peer { return Err(ErrorCode::TargetChanged.into()); }
         outcome.map_err(Into::into)
+    }
+    fn list_windows(&self,peer:&Peer,handle:&str)->std::result::Result<Value,ErrorCode>{
+        let session=crate::selected_ui_session(&self.state,peer,handle)?;
+        identity::verify_peer(peer)?;
+        let key=(peer.bus_id.clone().ok_or(ErrorCode::PermissionDenied)?,peer.bus_sender.clone().ok_or(ErrorCode::PermissionDenied)?);
+        // Do not hold the shared task lock during provider/native bus queries.
+        // A contending metadata request receives a bounded error, not a queue
+        // behind desktop work.
+        let mut contexts=self.ui.try_lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+        contexts.retain(|_,value|value.expires>Instant::now());
+        if let Some(value)=contexts.get(&key){if value.peer!=*peer{contexts.remove(&key);return Err(ErrorCode::TargetChanged);}}
+        let client=if let Some(value)=contexts.get_mut(&key){
+            value.expires=Instant::now()+Duration::from_secs(30);value.client.clone()
+        } else {
+            if contexts.len()>=8{return Err(ErrorCode::ResourceExhausted);}
+            let client=Arc::new(Mutex::new(crate::ui_bridge::Client::connect_bus(peer)?));
+            contexts.insert(key.clone(),UiConnection{peer:peer.clone(),expires:Instant::now()+Duration::from_secs(30),client:client.clone()});client
+        };
+        drop(contexts);
+        let result=client.try_lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(serde_json::json!({"kind":"discover","session_id":session.id}));
+        identity::verify_peer(peer)?;
+        if matches!(result,Err(ErrorCode::TargetChanged|ErrorCode::PermissionDenied)){
+            self.ui.lock().map_err(|_|ErrorCode::ResourceExhausted)?.remove(&key);
+        }
+        result
     }
     async fn json(&self, connection: &Connection, header: Header<'_>, operation: Operation) -> Result<String> {
         let result = self.dispatch(connection, header, operation).await?;
@@ -147,6 +176,10 @@ impl Ui {
     }
     async fn select_session(&self, session_id:&str, #[zbus(connection)] connection:&Connection, #[zbus(header)] header:Header<'_>) -> Result<String> {
         self.agent.json(connection,header,Operation::SelectUiSession {session_id:session_id.into()}).await
+    }
+    async fn list_windows(&self, session_handle:&str, #[zbus(connection)] connection:&Connection, #[zbus(header)] header:Header<'_>) -> Result<String> {
+        if !crate::uuid(session_handle){return Err(ErrorCode::InvalidArgument.into());}
+        self.agent.json(connection,header,Operation::ListUiWindows{session_handle:session_handle.into()}).await
     }
 }
 
@@ -234,6 +267,12 @@ impl Client {
             return Err(ErrorCode::TargetChanged);
         }
         Ok(value)
+    }
+    pub fn list_ui_windows(&self,session_handle:&str)->std::result::Result<Value,ErrorCode>{
+        if !crate::uuid(session_handle){return Err(ErrorCode::InvalidArgument);}
+        let value:Value=serde_json::from_str(&self.call_at("/org/aios/UI1","org.aios.UI1","ListWindows",&(session_handle,))?).map_err(|_|ErrorCode::InvalidArgument)?;
+        if value["schema_version"]!=1 || value["operation"]!="ui_window_candidates" || value["confirmation_required"]!=true
+            || value["ui_authorized"]!=false || !value["windows"].is_array(){return Err(ErrorCode::TargetChanged);}Ok(value)
     }
     pub fn capabilities(&self) -> std::result::Result<Value, ErrorCode> {
         serde_json::from_str(&self.call("GetCapabilities", &())?).map_err(|_| ErrorCode::InvalidArgument)

@@ -23,7 +23,8 @@ impl CurrentResources for Resources<'_>{
 /// Constructed from the originating server-side connection FD. A provider
 /// bridge must authenticate the fixed broker before accepting this proof via
 /// SCM_RIGHTS; serialized PID/UID/session claims are never a substitute.
-pub struct OriginatingClient { proof:UnixStream,peer:Peer,cookie:u64 }
+enum OriginProof { Unix{stream:UnixStream,cookie:u64},Bus(crate::user_bus::NativeUserBus) }
+pub struct OriginatingClient { proof:OriginProof,peer:Peer }
 fn cookie(stream:&UnixStream)->Result<u64>{
     let mut value=0u64;let mut size=std::mem::size_of::<u64>() as nix::libc::socklen_t;
     if unsafe{nix::libc::getsockopt(stream.as_raw_fd(),nix::libc::SOL_SOCKET,nix::libc::SO_COOKIE,
@@ -34,21 +35,44 @@ impl OriginatingClient {
     pub fn authenticate(proof:UnixStream)->Result<Self>{
         let mut peer=identity::authenticate(&proof)?;
         peer.connection_id=Some(uuid::Uuid::new_v4().to_string());
-        let value=Self{cookie:cookie(&proof)?,proof,peer};value.verify()?;Ok(value)
+        let value=Self{proof:OriginProof::Unix{cookie:cookie(&proof)?,stream:proof},peer};value.verify()?;Ok(value)
+    }
+    pub(crate) fn authenticate_bus(sender:&str,bus_id:&str)->Result<Self>{
+        let bus=crate::user_bus::NativeUserBus::connect()?;let peer=bus.caller(sender,bus_id)?;
+        Ok(Self{proof:OriginProof::Bus(bus),peer})
+    }
+    pub(crate) fn identity_sha256(&self)->Result<String>{
+        self.verify()?;origin_digest(&self.peer)
     }
     pub(crate) fn verify(&self)->Result<()>{
-        let mut status=nix::libc::pollfd{fd:self.proof.as_raw_fd(),events:nix::libc::POLLRDHUP,revents:0};
+        let (stream,original_cookie)=match &self.proof {
+            OriginProof::Bus(bus)=>{
+                let current=bus.caller(self.peer.bus_sender.as_deref().ok_or(ErrorCode::PermissionDenied)?,self.peer.bus_id.as_deref().ok_or(ErrorCode::PermissionDenied)?)?;
+                return if current==self.peer{Ok(())}else{Err(ErrorCode::TargetChanged)};
+            },
+            OriginProof::Unix{stream,cookie}=>(stream,*cookie),
+        };
+        let mut status=nix::libc::pollfd{fd:stream.as_raw_fd(),events:nix::libc::POLLRDHUP,revents:0};
         if unsafe{nix::libc::poll(&mut status,1,0)}<0 || status.revents&(nix::libc::POLLRDHUP|nix::libc::POLLHUP|nix::libc::POLLERR|nix::libc::POLLNVAL)!=0 {
             return Err(ErrorCode::Cancelled);
         }
-        if cookie(&self.proof)?!=self.cookie{return Err(ErrorCode::TargetChanged);}
-        identity::verify(&self.proof,&self.peer)
+        if cookie(stream)?!=original_cookie{return Err(ErrorCode::TargetChanged);}
+        identity::verify(stream,&self.peer)
     }
     pub(crate) fn uid(&self)->u32{self.peer.uid}
     pub(crate) fn try_clone(&self)->Result<Self>{
         self.verify()?;
-        Ok(Self{proof:self.proof.try_clone().map_err(|_|ErrorCode::TargetChanged)?,peer:self.peer.clone(),cookie:self.cookie})
+        let proof=match &self.proof {
+            OriginProof::Unix{stream,cookie}=>OriginProof::Unix{stream:stream.try_clone().map_err(|_|ErrorCode::TargetChanged)?,cookie:*cookie},
+            OriginProof::Bus(bus)=>OriginProof::Bus(bus.try_clone()?),
+        };
+        Ok(Self{proof,peer:self.peer.clone()})
     }
+}
+pub(crate) fn origin_digest(peer:&Peer)->Result<String>{
+    // Each Unix adapter owns its own connection UUID. Compare native peer
+    // identity during handoff; the original FD/cookie remains the authority.
+    let mut peer=peer.clone();peer.connection_id=None;policy::digest(&peer)
 }
 /// Provider worker owns this task; the independent control loop owns `control`.
 /// A nonzero control value invalidates pending/active reads before another

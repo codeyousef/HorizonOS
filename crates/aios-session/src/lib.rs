@@ -3,6 +3,7 @@ pub mod identity;
 pub mod display;
 pub mod accessibility;
 pub mod ui_read;
+mod user_bus;
 pub mod managed_service;
 pub mod ui_bridge;
 pub mod bus;
@@ -390,10 +391,7 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
 fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut Option<ui_bridge::Client>,operation:Operation)->Result<Value,ErrorCode>{
     let native=match operation {
         Operation::ListUiWindows{session_handle}=>{
-            let candidate={let mut state=state.lock().map_err(|_|ErrorCode::ResourceExhausted)?;state.prune();
-                let candidate=state.ui_candidates.get(&session_handle).ok_or(ErrorCode::TargetNotFound)?;
-                if candidate.owner!=*peer{return Err(ErrorCode::PermissionDenied);}candidate.session.clone()};
-            if identity::observe_graphical_session(&candidate.id,peer.uid)?!=candidate{return Err(ErrorCode::TargetChanged);}
+            let candidate=selected_ui_session(state,peer,&session_handle)?;
             if ui.is_none(){*ui=Some(ui_bridge::Client::connect(stream)?);}
             json!({"kind":"discover","session_id":candidate.id})
         },
@@ -409,6 +407,13 @@ fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut O
     identity::verify(stream,peer)?;
     if matches!(result,Err(ErrorCode::TargetChanged|ErrorCode::PermissionDenied)){ui.take();}
     result
+}
+fn selected_ui_session(state:&SharedState,peer:&Peer,handle:&str)->Result<identity::GraphicalSession,ErrorCode>{
+    let candidate={let mut state=state.lock().map_err(|_|ErrorCode::ResourceExhausted)?;state.prune();
+        let candidate=state.ui_candidates.get(handle).ok_or(ErrorCode::TargetNotFound)?;
+        if candidate.owner!=*peer{return Err(ErrorCode::PermissionDenied);}candidate.session.clone()};
+    // Native lookup happens outside the task-state lock.
+    if identity::observe_graphical_session(&candidate.id,peer.uid)?!=candidate{return Err(ErrorCode::TargetChanged);}Ok(candidate)
 }
 
 pub struct Client { stream: UnixStream, peer: Peer }
