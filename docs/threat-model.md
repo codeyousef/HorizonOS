@@ -31,6 +31,17 @@ Security acceptance uses finite adversarial/failure tests from PRD 21; passing
 those tests is not a claim of perfect safety. Private test data and diagnostics
 remain ignored locally or in Linear; distributed artifacts contain sanitized data.
 
+The disposable model acceptance image contains a fixed initial root fixture
+with `CAP_KILL`/`CAP_SYS_PTRACE` for one named model unit's restart/PSS checks,
+and `CAP_SETUID`/`CAP_SETGID` to permanently drop five forked clients to fixed
+normal UIDs. These clients close inherited coordinator/model descriptors before
+connecting to inference and have zero effective/permitted/inheritable/ambient
+capabilities. Coordination is bounded JSON on private socket pairs, with actual
+kernel UID/GID/start identity rechecks. There is no public root RPC, arbitrary
+unit/process/command selector or model invocation of the fixture. Three extra
+load accounts cannot log in and have no SSH keys/home. The module asserts a
+development image; production excludes this fixture and its privilege bounds.
+
 The graphical native provider requires the desktop's original user namespace
 for kernel process/executable verification. Unprivileged user-unit mount/network
 isolation implicitly creates another user namespace and blocks those checks.

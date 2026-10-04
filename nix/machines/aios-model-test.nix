@@ -1,4 +1,4 @@
-# Actual model service in a disposable two-user desktop acceptance image.
+# Actual model service in a disposable desktop and five-user load image.
 # No mock model, alternate daemon mode, or model privilege bypass is enabled.
 { aiosModelArtifact, config, pkgs, lib, ... }:
 let
@@ -7,6 +7,7 @@ let
     install -m444 ${../../tools/guest/model_lifecycle_preflight.py} "$out/model_lifecycle_preflight.py"
     install -m444 ${../../tools/guest/installed_model_lifecycle_smoke.py} "$out/installed_model_lifecycle_smoke.py"
     install -m444 ${../../tools/guest/model_service_smoke.py} "$out/model_service_smoke.py"
+    install -m444 ${../../tools/guest/model_queue_fixture.py} "$out/model_queue_fixture.py"
     install -m444 ${../../tools/guest/snapshot.py} "$out/snapshot.py"
   '';
   runner = file: pkgs.writeScriptBin file ''
@@ -20,7 +21,19 @@ in {
     assertion = config.services.aios.development.enable && config.environment.etc."aios/guest-role".text == "development\n";
     message = "Fixed model crash/restart fixtures are exclusive to the disposable development image.";
   } ];
-  services.aios.users = [ "dev" "tester" ];
+  services.aios.users = [ "dev" "tester" "model-load-a" "model-load-b" "model-load-c" ];
+  users.users = builtins.listToAttrs (lib.imap0 (index: name: {
+    inherit name;
+    value = {
+      isNormalUser = true;
+      uid = 1100 + index;
+      createHome = false;
+      home = "/var/empty";
+      hashedPassword = "!";
+      shell = "${pkgs.shadow}/bin/nologin";
+      openssh.authorizedKeys.keys = [];
+    };
+  }) [ "model-load-a" "model-load-b" "model-load-c" ]);
   services.aios.model = {
     enable = true;
     manifest = "${aiosModelArtifact}/lock.json";
@@ -43,9 +56,11 @@ in {
       RuntimeDirectoryPreserve = "yes";
       UMask = "0077";
       TimeoutStartSec = 180;
+      RuntimeMaxSec = 180;
       NoNewPrivileges = true;
+      # SETUID/GID only permanently drop forked clients to fixed normal users.
       # Fixed process PSS observation and fixed-unit SIGKILL are test-only.
-      CapabilityBoundingSet = [ "CAP_KILL" "CAP_SYS_PTRACE" ];
+      CapabilityBoundingSet = [ "CAP_KILL" "CAP_SYS_PTRACE" "CAP_SETUID" "CAP_SETGID" ];
       PrivateNetwork = true;
       RestrictAddressFamilies = "AF_UNIX";
       PrivateTmp = true;

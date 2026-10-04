@@ -167,20 +167,33 @@ arguments or sudo route. It verifies the immutable target authority before each
 operation, records process PSS samples, kills only `aios-model.service` during a
 real request, measures four increasing restart delays, checks that private
 request state was discarded, and asks the recovered service for a cited answer.
-Its test-only capability exceptions are `CAP_KILL` and `CAP_SYS_PTRACE`, for the
-fixed kill and process observation. The module asserts a development image and
+Its test-only capability exceptions are `CAP_KILL` and `CAP_SYS_PTRACE` for the
+fixed kill and process observation, and `CAP_SETUID`/`CAP_SETGID` to permanently
+drop forked clients to five fixed normal UIDs before they connect. The extra
+three accounts have locked passwords, no login shell, no home and no SSH keys.
+The module asserts a development image and
 is absent from production composition. The production model gains no privilege.
 The fixture compares the root-owned read-only installed authority file with the
 immutable compiled authority in the current system closure, then checks the
 actual installation, DMI, disk and management identities. Its execution does not
 hold the multi-user or graphical boot targets while measurements run.
 
+The fixed load coordinator uses bounded JSON over private socket pairs. It
+closes inherited privileged descriptors, checks actual process credentials and
+zero effective/permitted/inheritable/ambient capabilities, and fills the real
+CPU daemon with one running and eight waiting requests. A long public synthetic
+prefill retains the worker without a test hook or paused daemon. It rejects the
+next request while that UID is below its own quota, verifies foreign UID denial,
+then broadcasts cancellation and requires all nine contexts to finish within
+two seconds. It records a process PSS sample at full queue; this is not a peak
+measurement. Only its own unreaped children can be signalled during cleanup.
+
 The root-owned report binds the current installation and boot. The normal-user
 `installed-model-lifecycle` provider reads it without mutations. Desktop acceptance
 waits for the same initial fixture; failure retains the VM and evidence. PSS
 observations are samples rather than a true peak; transport loss alone does not
-qualify the broker's user-facing `MODEL_CRASHED` response. Full global queue/load
-pressure, model corruption and desktop/SSH continuity remain separate checks.
+qualify the broker's user-facing `MODEL_CRASHED` response. Model corruption and
+desktop/SSH continuity remain separate checks.
 
 ```fish
 python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model --detach --json

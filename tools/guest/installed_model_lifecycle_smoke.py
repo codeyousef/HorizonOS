@@ -35,7 +35,13 @@ def observe():
             raise RuntimeError('model lifecycle evidence changed')
     if report['identity'] != identity or snapshot.identity() != identity:
         raise RuntimeError('model lifecycle evidence belongs to another boot or target')
+    queue = report.get('queue_load', {})
     success = (report['verified'] is True and len(report['restarts']) == 4 and report['active_request_transport_lost'] is True
+               and queue.get('verified') is True and queue.get('evidence_kind') == 'actual-installed-five-normal-uid-queue-load'
+               and {p['uid'] for p in queue.get('participants', [])} == {1000, 1001, 1100, 1101, 1102}
+               and len(queue.get('accepted_generation_ids', [])) == 9 and queue.get('running') == 1 and queue.get('queued') == 8
+               and queue.get('global_queue_denial', {}).get('error') == 'RESOURCE_EXHAUSTED'
+               and type(queue.get('cancel_elapsed_ms')) is int and 0 <= queue['cancel_elapsed_ms'] < 2000
                and unit == {'ActiveState': 'inactive', 'SubState': 'dead', 'Result': 'success', 'ExecMainStatus': '0'})
     return (0 if success else 8), {'schema_version': 1, 'state': 'verified' if success else 'failed', 'unit': unit, 'proof': report}
 

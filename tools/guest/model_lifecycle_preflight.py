@@ -15,6 +15,7 @@ import sys
 import time
 
 from model_service_smoke import Client
+import model_queue_fixture
 import snapshot
 
 REPORT = Path('/run/aios-model-acceptance/result.json')
@@ -139,6 +140,9 @@ def main():
             raise RuntimeError('actual initial answer failed')
         report['initial_answer'] = answer
         report['memory_samples'].append({'phase': 'loaded_after_context_teardown', **process(expected)})
+        client.socket.close(); client = None
+        report['queue_load'] = model_queue_fixture.run(expected, recheck, process)
+        client = Client('/run/aios/model.sock')
         response = client.call({'kind': 'unload'})
         if response['error']:
             raise RuntimeError('model explicit unload failed')
