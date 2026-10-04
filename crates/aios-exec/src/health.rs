@@ -146,14 +146,19 @@ impl UnitState {
                 .sub_state
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
-            || self.invocation_id.len() != 16
+            // systemd exports an empty byte array for a null InvocationID.
+            // A loaded socket-activated service can be inactive before its
+            // first invocation. Observe that baseline without making it active.
+            || !(self.invocation_id.len() == 16
+                || self.active_state == "inactive" && self.invocation_id.is_empty())
         {
             return Err(Error::Integrity);
         }
         Ok(())
     }
     pub fn active(&self) -> bool {
-        self.load_state == "loaded" && self.active_state == "active" && self.job_id == 0
+        self.load_state == "loaded" && self.active_state == "active"
+            && self.invocation_id.len() == 16 && self.job_id == 0
     }
     pub fn failed(&self) -> bool {
         self.active_state == "failed" || matches!(self.load_state.as_str(), "error" | "bad-setting")

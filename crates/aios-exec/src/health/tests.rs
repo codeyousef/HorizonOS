@@ -192,6 +192,59 @@ fn missing_transitioning_or_queued_units_are_not_active() {
     assert_eq!(malformed.validate(), Err(Error::Integrity));
 }
 #[test]
+fn never_started_unit_is_observable_without_becoming_healthy() {
+    let mut model = unit("aios-model.service", "inactive");
+    let state = model.state.as_mut().unwrap();
+    state.sub_state = "dead".into();
+    state.invocation_id.clear();
+    assert_eq!(state.validate(), Ok(()));
+    assert!(!model.active());
+    let mut baseline = fixture();
+    baseline.units[4] = model.clone();
+    assert!(core_healthy(&baseline.target, &baseline.mounts, &baseline.units));
+    assert_eq!(compare(&baseline, &baseline), Ok(()));
+    for active in ["active", "activating", "reloading", "deactivating", "failed"] {
+        let state = model.state.as_mut().unwrap();
+        state.active_state = active.into();
+        assert_eq!(state.validate(), Err(Error::Integrity));
+        assert!(!model.active());
+    }
+    let state = model.state.as_mut().unwrap();
+    state.active_state = "inactive".into();
+    for size in [1, 15, 17] {
+        state.invocation_id = vec![1; size];
+        assert_eq!(state.validate(), Err(Error::Integrity));
+    }
+}
+#[test]
+fn actual_never_started_unit_has_empty_invocation_id() {
+    let connection = crate::caller::connect_native_timeout(Duration::from_millis(250)).unwrap();
+    let bus = Proxy::new(&connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").unwrap();
+    let owner: String = bus.call("GetNameOwner", &(MANAGER,)).unwrap();
+    let credentials: zbus::fdo::ConnectionCredentials = bus.call("GetConnectionCredentials", &(owner.as_str(),)).unwrap();
+    assert_eq!(credentials.unix_user_id(), Some(0));
+    assert_eq!(credentials.process_id(), Some(1));
+    // This fixed NixOS fixture is condition-skipped on these disposable VMs.
+    // GetUnit is observation only: no LoadUnit/start/stop or root capability.
+    let manager = Proxy::new(&connection, owner.as_str(), "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager").unwrap();
+    let path: OwnedObjectPath = manager.call("GetUnit", &("systemd-pstore.service",)).unwrap();
+    let properties = Proxy::new(&connection, owner.as_str(), path.as_str(), "org.freedesktop.DBus.Properties").unwrap();
+    let get = |name: &str| -> OwnedValue { properties.call("Get", &(UNIT, name)).unwrap() };
+    let observed = UnitState {
+        id: get("Id").try_into().unwrap(), load_state: get("LoadState").try_into().unwrap(),
+        active_state: get("ActiveState").try_into().unwrap(), sub_state: get("SubState").try_into().unwrap(),
+        invocation_id: get("InvocationID").try_into().unwrap(), job_id: 0,
+    };
+    let job: (u32, OwnedObjectPath) = get("Job").try_into().unwrap();
+    assert_eq!(job.0, 0); assert_eq!(job.1.as_str(), "/");
+    assert_eq!(observed.id, "systemd-pstore.service");
+    assert_eq!(observed.active_state, "inactive");
+    assert!(observed.invocation_id.is_empty());
+    assert_eq!(observed.validate(), Ok(())); assert!(!observed.active());
+    let after: String = bus.call("GetNameOwner", &(MANAGER,)).unwrap(); assert_eq!(owner, after);
+    println!("AIOS_NATIVE_INACTIVE_UNIT {}", serde_json::json!({"evidence_kind":"actual-nonroot-pid1-inactive-unit-observation", "manager_owner":owner, "unit":observed, "activation_performed":false}));
+}
+#[test]
 fn baseline_degraded_is_distinct_from_new_failure_or_lost_active_unit() {
     let mut old = fixture();
     old.units[2] = unit("aios-state.service", "failed");

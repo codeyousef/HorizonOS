@@ -43,6 +43,10 @@ transitions and queued jobs do not count as active. The fixed kernel mount
 inventory comes from PID 1's namespace, including exact Btrfs subvolumes and
 EFI device ancestry, so the observer's readonly service sandbox is not mistaken
 for the guest's mount state. Target, manager and mount identities are rechecked.
+An inactive unit may have no invocation ID before its first start. The reader
+preserves that empty observation as an inactive baseline; active or transitioning
+units still require a full invocation ID. It never invents an invocation or
+starts the model to make a health observation pass.
 
 The opaque native health capability compares previously active and failed units
 separately: a pre-existing failure can remain, but a new failure or disappearance
