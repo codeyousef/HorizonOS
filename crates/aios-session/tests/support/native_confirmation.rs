@@ -54,6 +54,12 @@ fn provider(bus:&Connection)->u32{
 /// Invoke one native action, only after observing this exact synthetic request
 /// in the renderer owned by the canonical managed provider. No retry of input.
 pub fn allow_owned_read(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_identity:&str)->serde_json::Value{
+    allow_owned(display,goal,window,title,window_identity,"Local CPU (observation only; no model requested)")
+}
+pub fn allow_owned_task_read(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_identity:&str)->serde_json::Value{
+    allow_owned(display,goal,window,title,window_identity,"Local CPU (normal; read-only task inference)")
+}
+fn allow_owned(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_identity:&str,profile:&str)->serde_json::Value{
     assert_eq!(std::env::var("AIOS_NATIVE_BRIDGE_SCENARIO").unwrap(),"disposable-provider-v1");
     assert_eq!(nix::unistd::geteuid().as_raw(),1001);
     assert_eq!(fs::read_to_string("/etc/aios/desktop-test-profile").unwrap().trim(),"synthetic-disposable-plasma-wayland-v1");
@@ -104,7 +110,7 @@ pub fn allow_owned_read(display:&DisplayBinding,goal:&str,window:&str,title:&str
     assert!(labels.iter().any(|v|v.contains(title) && v.contains(&format!("Resource: {window}")) && v.contains(&format!("Identity: {window_identity}"))),"selected native window mismatch");
     let hostname=fs::read_to_string("/proc/sys/kernel/hostname").unwrap();
     assert!(labels.contains(&format!("Target: {}\nDesktop: {} · User: 1001",hostname.trim(),display.session.id)));
-    assert!(labels.contains(&"Local / CPU: Local CPU (observation only; no model requested)\nMode: ask".into()));
+    assert!(labels.contains(&format!("Local / CPU: {profile}\nMode: ask")));
     assert!(labels.contains(&"Read access: ui.snapshot\nNo input or external effects are authorized by this read scope.".into()));
     let proposal=labels.iter().find_map(|v|v.strip_prefix("Proposal: ")).unwrap();
     assert_eq!(proposal.len(),64);assert!(proposal.bytes().all(|v|v.is_ascii_digit() || (b'a'..=b'f').contains(&v)));
@@ -129,5 +135,5 @@ pub fn allow_owned_read(display:&DisplayBinding,goal:&str,window:&str,title:&str
     assert_eq!(action.call::<_,_,String>("GetName",&(index,)).unwrap(),"Press");
     let accepted:bool=action.call("DoAction",&(index,)).expect("one native input attempt; timeout or failure is never retried");assert!(accepted);
     serde_json::json!({"evidence_kind":"owned-production-dialog-native-assistive-input-fixture-not-human-approval","renderer_pid":pid,
-        "provider_pid":provider_pid,"proposal_digest":proposal,"native_action":"Press","input_attempts":1,"reviewed_nodes":visited.len()})
+        "provider_pid":provider_pid,"proposal_digest":proposal,"profile":profile,"native_action":"Press","input_attempts":1,"reviewed_nodes":visited.len()})
 }

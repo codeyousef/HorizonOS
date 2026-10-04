@@ -49,3 +49,19 @@ fn private_bridge_rejects_claimed_approval_identity_and_duplicate_fields(){
         r#"{"kind":"cancel","task_id":"x","decision":"allow"}"#,
         r#"{"kind":"approve","task_id":"x"}"#]{assert!(matches!(parse(raw),Err(ErrorCode::InvalidArgument)));}
 }
+#[test]
+fn public_task_channel_has_no_approval_fields_and_transfers_only_one_native_socket(){
+    for raw in [r#"{"kind":"start_task_read","task_id":"x","window_handle":"w","goal":"read","mode":"ask","approved":true}"#,
+        r#"{"kind":"start_task_read","task_id":"a","task_id":"b","window_handle":"w","goal":"read","mode":"ask"}"#,
+        r#"{"kind":"start_task_read","task_id":"x","window_handle":"w","goal":"read","mode":"ask","uid":0}"#]{
+        assert!(matches!(parse(raw),Err(ErrorCode::InvalidArgument)));
+    }
+    let (bridge,receiver)=UnixStream::pair().unwrap();let (cancel,endpoint)=Cancellation::pair().unwrap();
+    send_proof(&bridge,&endpoint).unwrap();
+    let TransferredProof::Unix(mut transferred)=receive_proof(&receiver).unwrap() else{panic!("not a socket");};
+    assert_eq!(crate::identity::authenticate(&endpoint).unwrap(),crate::identity::authenticate(&transferred).unwrap());
+    drop(endpoint);transferred.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+    cancel.cancel();assert_eq!(transferred.read(&mut [0]).unwrap(),0);
+    // Dropping a pending task has the same revocation behavior.
+    let (cancel,mut receiver)=Cancellation::pair().unwrap();drop(cancel);assert_eq!(receiver.read(&mut [0]).unwrap(),0);
+}

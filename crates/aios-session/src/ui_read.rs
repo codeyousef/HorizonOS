@@ -90,11 +90,15 @@ impl NativeReadTask {
     /// selection. WindowBinding has no request/model deserializer.
     pub fn begin(origin:OriginatingClient,window:WindowBinding,goal:&str,mode:policy::Mode,
         target:String,profile:String,control:Arc<AtomicU8>)->Result<Self>{
+        Self::begin_owned(origin,window,goal,mode,target,profile,control,uuid::Uuid::new_v4().to_string())
+    }
+    pub(crate) fn begin_owned(origin:OriginatingClient,window:WindowBinding,goal:&str,mode:policy::Mode,
+        target:String,profile:String,control:Arc<AtomicU8>,request_id:String)->Result<Self>{
+        if !crate::uuid(&request_id){return Err(ErrorCode::InvalidArgument);}
         if control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
         origin.verify()?;window.verify()?;
         let subject=origin.peer.policy_subject()?;
         let policy=policy::Policy::new(subject.boot_id.clone(),policy::registry_revision())?;
-        let request_id=uuid::Uuid::new_v4().to_string();
         let intent=policy.authenticated_user_intent(subject.clone(),request_id.clone(),goal,mode)?;
         let display=window.selected_display();
         let proposal=policy.propose_graphical_read(intent,NativeDesktop{uid:display.session.uid,boot_id:display.boot_id.clone(),

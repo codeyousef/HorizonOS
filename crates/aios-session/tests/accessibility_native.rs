@@ -181,6 +181,7 @@ fn qualify_broker_bridge(display:&DisplayBinding,window:&WindowBinding){
     let fresh=reconnect.select_ui_session(&display.session.id).unwrap();
     let fresh_windows=reconnect.list_ui_windows(fresh["candidate_handle"].as_str().unwrap()).unwrap();
     assert_ne!(list[0]["window_handle"],fresh_windows["windows"][0]["window_handle"]);
+    qualify_public_task(&bus,&reconnect,handle,&list[0],display);
     println!("NATIVE_BUS_WINDOW_DISCOVERY={}",json!({"evidence_kind":"actual-hardened-public-ui1-native-original-sender-managed-provider-metadata",
         "session_id":display.session.id,"uid":display.session.uid,"windows":bus_windows,"reconnect_candidate_denied":true,
         "fresh_selection_distinct_window_handles":true,"ui_authorized":false,"no_content_or_grant_returned":true}));
@@ -246,4 +247,51 @@ fn qualify_broker_bridge(display:&DisplayBinding,window:&WindowBinding){
         "permission_ui_excluded_from_production_discovery":true,"native_input_fixture":input,"completed_status":completed,
         "scoped_snapshot_id":scoped["snapshot_id"],"scoped_node_count":nodes.len(),"one_shot_snapshot_verified":true,
         "reconnected_snapshot_denied":true,"post_completion_stop_revokes_snapshot":true}));
+}
+
+fn qualify_public_task(bus:&aios_session::bus::Client,reconnect:&aios_session::bus::Client,session_handle:&str,window:&Value,display:&DisplayBinding){
+    let mut request=aios_session::Submit{mode:aios_session::Mode::Ask,text:format!("Native permission fixture {}",uuid::Uuid::new_v4()),
+        client_nonce:uuid::Uuid::new_v4().to_string(),context_handles:vec![],selected_session_handle:Some(session_handle.into()),
+        selected_app_handle:Some(window["window_handle"].as_str().unwrap().into())};
+    let task=bus.submit(&request).expect("selected public task admission");assert_eq!(bus.submit(&request).unwrap(),task);
+    request.text.push_str(" changed");assert_eq!(bus.submit(&request),Err(ErrorCode::Conflict));request.text.truncate(request.text.len()-8);
+    for result in [reconnect.status(&task),reconnect.events(&task,0,100),reconnect.cancel(&task),reconnect.forget(&task)]{
+        assert_eq!(result,Err(ErrorCode::PermissionDenied));
+    }
+    let until=Instant::now()+Duration::from_secs(8);
+    loop {let status=bus.status(&task).unwrap();if status["state"]=="needs_permission"{break;}
+        assert!(matches!(status["state"].as_str(),Some("queued"|"inspecting")),"public permission failed {status}");
+        assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(20));}
+    let pending=bus.events(&task,0,100).unwrap();assert!(pending["events"].as_array().unwrap().iter().any(|e|e["kind"]=="needs_permission"));
+    let start=Instant::now();let cancellation=bus.cancel(&task).unwrap();let cancellation_ms=start.elapsed().as_millis();assert!(cancellation_ms<1000);
+    assert_eq!(cancellation["mutation_performed"],false);assert_eq!(cancellation["boundary"],"no_side_effects");
+    let until=Instant::now()+Duration::from_secs(5);
+    loop {let status=bus.status(&task).unwrap();if status["state"]=="cancelled"{assert_eq!(status["error"],"CANCELLED");break;}
+        assert_eq!(status["state"],"cancelling");assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(20));}
+    let stopped=bus.events(&task,0,100).unwrap();assert_eq!(stopped["complete"],true);
+    assert_eq!(bus.cancel(&task).unwrap()["already_terminal"],true);assert_eq!(bus.forget(&task).unwrap()["deleted"],true);
+    assert_eq!(bus.status(&task),Err(ErrorCode::TargetNotFound));
+    // This exact installed package has no installed model socket. Native
+    // consent and capture still must finish before the honest model error.
+    assert!(!std::path::Path::new("/run/aios/model.sock").exists(),"use the installed-model scenario instead");
+    request.client_nonce=uuid::Uuid::new_v4().to_string();request.text=format!("Native permission fixture {}",uuid::Uuid::new_v4());
+    let positive=bus.submit(&request).unwrap();
+    let until=Instant::now()+Duration::from_secs(8);
+    loop {let status=bus.status(&positive).unwrap();if status["state"]=="needs_permission"{break;}
+        assert!(matches!(status["state"].as_str(),Some("queued"|"inspecting")),"positive public permission failed {status}");
+        assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(20));}
+    let input=native_confirmation::allow_owned_task_read(display,&request.text,window["window_handle"].as_str().unwrap(),
+        window["title"].as_str().unwrap(),window["identity_sha256"].as_str().unwrap());
+    let until=Instant::now()+Duration::from_secs(15);
+    let final_status=loop {let status=bus.status(&positive).unwrap();if status["state"]=="failed"{break status;}
+        assert!(matches!(status["state"].as_str(),Some("needs_permission"|"inspecting")),"unexpected public state {status}");
+        assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(20));};
+    assert_eq!(final_status["error"],"MODEL_UNAVAILABLE");assert!(final_status["output"].is_null());assert_eq!(final_status["mutation_performed"],false);
+    let events=bus.events(&positive,0,100).unwrap();assert_eq!(events["complete"],true);
+    assert!(events["events"].as_array().unwrap().iter().any(|e|e["kind"]=="scoped_observation_ready"),"no verified observation {events}");
+    assert_eq!(bus.forget(&positive).unwrap()["deleted"],true);assert_eq!(bus.events(&positive,0,100),Err(ErrorCode::TargetNotFound));
+    println!("NATIVE_PUBLIC_GRAPHICAL_TASK={}",json!({"evidence_kind":"actual-hardened-public-agent1-original-sender-native-consent-read-and-cancellation-no-installed-model",
+        "uid":display.session.uid,"session_id":display.session.id,"cancelled_task":task,"cancellation_ms":cancellation_ms,"pending_events":pending,"terminal_events":stopped,
+        "native_input_fixture":input,"positive_task":positive,"final_status":final_status,"positive_events":events,
+        "reconnect_all_four_operations_denied":true,"nonce_reuse_and_conflict_verified":true,"forget_verified":true,"model_answer_verified":false}));
 }

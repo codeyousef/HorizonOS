@@ -216,6 +216,32 @@ The same registered scenario checks real public D-Bus window discovery through
 the hardened broker and exact native provider. A separate guarded native test
 checks kernel bus/user-manager association, distinct unique senders with the
 same PID, forged bus IDs, well-known-name rejection and original disconnect
-revocation while another sender remains live. These tests establish caller
-proof and metadata ownership; they do not establish public graphical Submit or
-inference over desktop content.
+revocation while another sender remains live.
+
+Public `Agent1.Submit` can bind both selected session and window handles to
+the original connection's native metadata. Ask and Diagnose request the same
+production read permission, with the fixed normal local CPU inference profile
+displayed before consent. The public request ID is also the native read's ID.
+Only a successful, one-shot, contract-valid native snapshot creates the broker's
+private inference receipt. It binds the original peer, submitted request digest,
+window handle/identity, registry revision and suspend-inclusive task expiry.
+The receipt allows inference over that captured observation; it cannot authorize
+another native query, input or external effect. Truncated observations retain
+partial status and incomplete context. No serialized receipt or decision is
+accepted from a client, document or model.
+
+Public Stop, Forget, deadline and disconnect revoke a task-specific kernel
+channel installed before starting the native read. The exact managed broker
+passes one native socket endpoint; the provider authenticates its kernel peer.
+Any byte, EOF or failure only cancels that read. This channel is independent
+of the provider query mutex, so a busy desktop query cannot block public Stop.
+Owner-bound status and events report permission, inspection and terminal states.
+Act and Automate still report unavailable orchestration without granting reads,
+input, writes or rule enablement.
+
+The registered disposable scenario additionally checks public graphical
+Submit/status/events/Stop/Forget, nonce conflict and reconnect ownership through
+the exact managed services. Its positive native Allow/capture case deliberately
+has no installed model socket and must report `MODEL_UNAVAILABLE` after the
+scoped observation event. This checks honest failure and cancellation; it does
+not verify a model answer over desktop content or completion of the full OS.

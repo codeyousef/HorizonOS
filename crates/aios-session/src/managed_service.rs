@@ -87,4 +87,7 @@ impl ManagedService {
     pub fn verify(&self,stream:&UnixStream)->Result<()>{
         if Self::authenticate(stream,self.role)?!=*self{return Err(ErrorCode::TargetChanged);}Ok(())
     }
+    pub(crate) fn verify_cancellation_peer(&self,stream:&UnixStream)->Result<()>{
+        if self.role!=Role::Broker || identity::authenticate(stream)?!=self.peer{return Err(ErrorCode::PermissionDenied);}Ok(())
+    }
 }

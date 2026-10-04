@@ -8,7 +8,7 @@ use aios_protocol::{read_frame_with_limit,write_frame,MAX_TASK_BYTES,MAX_FRAME_B
 use nix::sys::socket::{sendmsg,recvmsg,ControlMessage,ControlMessageOwned,MsgFlags};
 use serde::{Deserialize,Serialize};
 use serde_json::{Value,json,value::RawValue};
-use std::{collections::HashMap,fs,io::{IoSlice,IoSliceMut},net::Shutdown,os::{fd::{AsRawFd,OwnedFd,FromRawFd,RawFd},unix::{fs::{MetadataExt,FileTypeExt},net::UnixStream}},
+use std::{collections::HashMap,fs,io::{IoSlice,IoSliceMut,Read},net::Shutdown,os::{fd::{AsRawFd,OwnedFd,FromRawFd,RawFd},unix::{fs::{MetadataExt,FileTypeExt},net::UnixStream}},
     path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicU8,AtomicUsize,Ordering}},time::Duration};
 type Result<T> = std::result::Result<T,ErrorCode>;
 const MARKER:u8=0xa7;
@@ -45,6 +45,7 @@ fn receive_proof(bridge:&UnixStream)->Result<TransferredProof>{
 }
 enum Operation {
     Discover{session_id:String},StartRead{window_handle:String,goal:String,mode:String},
+    StartTaskRead{window_handle:String,goal:String,mode:String,task_id:String},
     GetReadStatus{task_id:String},TakeSnapshot{task_id:String},Cancel{task_id:String},Forget{task_id:String},
 }
 fn parse(raw:&str)->Result<Operation>{
@@ -57,6 +58,7 @@ fn parse(raw:&str)->Result<Operation>{
     }};}
     match kind.kind.as_str(){
         "discover"=>fields!(Discover{session_id:String}),"start_read"=>fields!(StartRead{window_handle:String,goal:String,mode:String}),
+        "start_task_read"=>fields!(StartTaskRead{window_handle:String,goal:String,mode:String,task_id:String}),
         "get_read_status"=>fields!(GetReadStatus{task_id:String}),"take_snapshot"=>fields!(TakeSnapshot{task_id:String}),
         "cancel"=>fields!(Cancel{task_id:String}),"forget"=>fields!(Forget{task_id:String}),_=>Err(ErrorCode::InvalidArgument),
     }
@@ -77,7 +79,7 @@ impl ReadWork {
 struct Context{origin:OriginatingClient,windows:HashMap<String,(WindowBinding,u64)>,tasks:HashMap<String,Arc<Mutex<ReadWork>>>}
 impl Drop for Context{fn drop(&mut self){for task in self.tasks.values(){if let Ok(mut task)=task.lock(){task.cancel();}}}}
 impl Context{
-    fn execute(&mut self,operation:Operation)->Result<Value>{
+    fn execute(&mut self,operation:Operation,cancellation:Option<UnixStream>)->Result<Value>{
         self.origin.verify()?;
         let now=aios_policy::boottime_ms()?;
         self.windows.retain(|_,(_,expires)|*expires>now);
@@ -94,7 +96,15 @@ impl Context{
                 Ok(json!({"schema_version":1,"operation":"ui_window_candidates","session_id":session_id,"windows":metadata,
                     "expires_after_ms":30000,"confirmation_required":true,"ui_authorized":false}))
             },
-            Operation::StartRead{window_handle,goal,mode}=>{
+            operation @ (Operation::StartRead{..}|Operation::StartTaskRead{..})=>{
+                let (window_handle,goal,mode,id,public)=match operation {
+                    Operation::StartRead{window_handle,goal,mode}=>(window_handle,goal,mode,uuid::Uuid::new_v4().to_string(),false),
+                    Operation::StartTaskRead{window_handle,goal,mode,task_id}=>{
+                        if !crate::uuid(&task_id) || cancellation.is_none(){return Err(ErrorCode::InvalidArgument);}
+                        (window_handle,goal,mode,task_id,true)
+                    },_=>unreachable!(),
+                };
+                if self.tasks.contains_key(&id){return Err(ErrorCode::Conflict);}
                 if self.tasks.len()>=8{return Err(ErrorCode::ResourceExhausted);}
                 let mode=match mode.as_str(){"ask"=>aios_policy::Mode::Ask,"diagnose"=>aios_policy::Mode::Diagnose,_=>return Err(ErrorCode::PermissionDenied)};
                 if goal.trim().is_empty() || goal.len()>4096{return Err(ErrorCode::InvalidArgument);}
@@ -102,12 +112,13 @@ impl Context{
                 let origin=self.origin.try_clone()?;
                 if ACTIVE_READS.fetch_add(1,Ordering::AcqRel)>=4{ACTIVE_READS.fetch_sub(1,Ordering::AcqRel);return Err(ErrorCode::ResourceExhausted);}
                 let admission=ReadAdmission;
-                let id=uuid::Uuid::new_v4().to_string();let control=Arc::new(AtomicU8::new(0));
+                let control=Arc::new(AtomicU8::new(0));
                 let status=ReadStatus{schema_version:1,task_id:id.clone(),state:"queued".into(),error:None,snapshot_ready:false};
                 let work=Arc::new(Mutex::new(ReadWork{status:status.clone(),control:control.clone(),stop:None,snapshot:None,
                     window:window.clone(),deadline:aios_policy::boottime_ms()?.checked_add(90_000).ok_or(ErrorCode::TargetChanged)?}));
-                self.tasks.insert(id,work.clone());
-                std::thread::spawn(move||{let _admission=admission;run_read(work,origin,window,goal,mode,control);});
+                self.tasks.insert(id.clone(),work.clone());
+                if let Some(receiver)=cancellation{let work=work.clone();std::thread::spawn(move||watch_cancellation(receiver,work));}
+                std::thread::spawn(move||{let _admission=admission;run_read(work,origin,window,goal,mode,control,id,public);});
                 serde_json::to_value(status).map_err(|_|ErrorCode::InvalidArgument)
             },
             Operation::GetReadStatus{task_id}=>{
@@ -130,11 +141,27 @@ impl Context{
     }
     fn task(&self,id:&str)->Result<&Arc<Mutex<ReadWork>>>{if !crate::uuid(id){return Err(ErrorCode::InvalidArgument);}self.tasks.get(id).ok_or(ErrorCode::TargetNotFound)}
 }
-fn run_read(work:Arc<Mutex<ReadWork>>,origin:OriginatingClient,window:WindowBinding,goal:String,mode:aios_policy::Mode,control:Arc<AtomicU8>){
+fn watch_cancellation(mut stream:UnixStream,work:Arc<Mutex<ReadWork>>){
+    if stream.set_read_timeout(Some(Duration::from_millis(100))).is_err(){if let Ok(mut work)=work.lock(){work.cancel();}return;}
+    loop {
+        if let Ok(mut work)=work.lock(){
+            if work.control.load(Ordering::Acquire)!=0 || (matches!(work.status.state.as_str(),"failed"|"completed") && work.snapshot.is_none()){return;}
+            if aios_policy::boottime_ms().map_or(true,|now|now>=work.deadline){work.cancel();return;}
+        }else{return;}
+        let mut byte=[0u8];match stream.read(&mut byte){
+            Err(error) if matches!(error.kind(),std::io::ErrorKind::WouldBlock|std::io::ErrorKind::TimedOut)=>continue,
+            // Any byte, EOF or failure only revokes this owned read. There is
+            // no approval, input or caller-selected action on this channel.
+            _=>{if let Ok(mut work)=work.lock(){work.cancel();}return;},
+        }
+    }
+}
+fn run_read(work:Arc<Mutex<ReadWork>>,origin:OriginatingClient,window:WindowBinding,goal:String,mode:aios_policy::Mode,control:Arc<AtomicU8>,id:String,public:bool){
     let result=(||->Result<Value>{
         let hostname=fs::read_to_string("/proc/sys/kernel/hostname").map_err(|_|ErrorCode::TargetChanged)?.trim().to_owned();
         if hostname.is_empty() || hostname.len()>128 || hostname.chars().any(char::is_control){return Err(ErrorCode::TargetChanged);}
-        let mut task=NativeReadTask::begin(origin,window,&goal,mode,hostname,"Local CPU (observation only; no model requested)".into(),control.clone())?;
+        let profile=if public{"Local CPU (normal; read-only task inference)"}else{"Local CPU (observation only; no model requested)"};
+        let mut task=NativeReadTask::begin_owned(origin,window,&goal,mode,hostname,profile.into(),control.clone(),id)?;
         let stop=task.stop_handle()?;
         {let mut work=work.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
             if control.load(Ordering::Acquire)!=0{stop.stop();return Err(ErrorCode::Cancelled);}
@@ -178,7 +205,12 @@ pub fn serve(mut stream:UnixStream)->Result<()>{
         broker.verify(&stream)?;context.origin.verify()?;
         let request:Request=serde_json::from_str(&raw).map_err(|_|ErrorCode::InvalidArgument)?;
         if !crate::uuid(&request.request_id){return Err(ErrorCode::InvalidArgument);}
-        let outcome=if request.schema_version!=1{Err(ErrorCode::UnsupportedSchema)}else{parse(request.operation.get()).and_then(|op|context.execute(op))};
+        let outcome=if request.schema_version!=1{Err(ErrorCode::UnsupportedSchema)}else{parse(request.operation.get()).and_then(|op|{
+            let cancellation=if matches!(op,Operation::StartTaskRead{..}){
+                let TransferredProof::Unix(receiver)=receive_proof(&stream)? else{return Err(ErrorCode::PermissionDenied);};
+                broker.verify_cancellation_peer(&receiver)?;Some(receiver)
+            }else{None};context.execute(op,cancellation)
+        })};
         broker.verify(&stream)?;context.origin.verify()?;
         let (data,error)=match outcome{Ok(value)=>(Some(value),None),Err(error)=>(None,Some(error))};
         let response=serde_json::to_string(&Response{schema_version:1,request_id:request.request_id,operation:"response".into(),data,error}).map_err(|_|ErrorCode::InvalidArgument)?;
@@ -188,6 +220,14 @@ pub fn serve(mut stream:UnixStream)->Result<()>{
     Ok(())
 }
 pub(crate) struct Client{stream:UnixStream,provider:ManagedService}
+pub(crate) struct Cancellation{stream:UnixStream}
+impl Cancellation {
+    pub(crate) fn pair()->Result<(Arc<Self>,UnixStream)>{
+        let (stream,receiver)=UnixStream::pair().map_err(|_|ErrorCode::ResourceExhausted)?;Ok((Arc::new(Self{stream}),receiver))
+    }
+    pub(crate) fn cancel(&self){let _=self.stream.shutdown(Shutdown::Both);}
+}
+impl Drop for Cancellation{fn drop(&mut self){self.cancel();}}
 impl Client {
     pub(crate) fn connect(origin:&UnixStream)->Result<Self>{
         let peer=crate::identity::authenticate(origin)?;
@@ -226,10 +266,17 @@ impl Client {
         provider.verify(&stream)?;Ok(Self{stream,provider})
     }
     pub(crate) fn call(&mut self,operation:Value)->Result<Value>{
+        self.call_with_cancellation(operation,None)
+    }
+    pub(crate) fn start_task(&mut self,operation:Value,receiver:&UnixStream)->Result<Value>{
+        self.call_with_cancellation(operation,Some(receiver))
+    }
+    fn call_with_cancellation(&mut self,operation:Value,receiver:Option<&UnixStream>)->Result<Value>{
         self.provider.verify(&self.stream)?;
         let id=uuid::Uuid::new_v4().to_string();let frame=json!({"schema_version":1,"request_id":id,"operation":operation}).to_string();
         if frame.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted);}
         write_frame(&mut self.stream,&frame).map_err(|_|ErrorCode::TargetChanged)?;
+        if let Some(receiver)=receiver{send_proof(&self.stream,receiver)?;}
         let raw=read_frame_with_limit(&mut self.stream,MAX_FRAME_BYTES).map_err(|_|ErrorCode::TargetChanged)?.ok_or(ErrorCode::TargetChanged)?;
         let response:Response=serde_json::from_str(&raw).map_err(|_|ErrorCode::InvalidArgument)?;
         self.provider.verify(&self.stream)?;

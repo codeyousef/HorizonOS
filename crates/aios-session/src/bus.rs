@@ -35,7 +35,7 @@ impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::Acq
 
 #[derive(Clone)]
 pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>> }
-struct UiConnection { peer:Peer,expires:Instant,client:Arc<Mutex<crate::ui_bridge::Client>> }
+struct UiConnection { peer:Peer,expires:Instant,client:Arc<Mutex<crate::graphical::Connection>> }
 impl Agent {
     pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())) } }
     fn admit(&self) -> Result<Admission> {
@@ -62,10 +62,16 @@ impl Agent {
     async fn dispatch(&self, connection: &Connection, header: Header<'_>, operation: Operation) -> Result<Value> {
         let _admission = self.admit()?;
         let peer = Self::peer(connection, &header).await?;
-        let outcome=if let Operation::ListUiWindows{session_handle}=operation {
+        let outcome=match operation {
+            Operation::ListUiWindows{session_handle}=>{
             let agent=self.clone();let original=peer.clone();
             blocking::unblock(move||agent.list_windows(&original,&session_handle)).await
-        } else {self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.dispatch(&peer,operation)};
+            },
+            Operation::Submit{request} if request.selected_session_handle.is_some() || request.selected_app_handle.is_some()=>{
+                let agent=self.clone();let original=peer.clone();blocking::unblock(move||agent.submit_graphical(&original,request)).await
+            },
+            operation=>self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.dispatch(&peer,operation),
+        };
         if Self::peer(connection, &header).await? != peer { return Err(ErrorCode::TargetChanged.into()); }
         outcome.map_err(Into::into)
     }
@@ -83,16 +89,26 @@ impl Agent {
             value.expires=Instant::now()+Duration::from_secs(30);value.client.clone()
         } else {
             if contexts.len()>=8{return Err(ErrorCode::ResourceExhausted);}
-            let client=Arc::new(Mutex::new(crate::ui_bridge::Client::connect_bus(peer)?));
+            let client=Arc::new(Mutex::new(crate::graphical::Connection::new(crate::ui_bridge::Client::connect_bus(peer)?,peer.clone())));
             contexts.insert(key.clone(),UiConnection{peer:peer.clone(),expires:Instant::now()+Duration::from_secs(30),client:client.clone()});client
         };
         drop(contexts);
-        let result=client.try_lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(serde_json::json!({"kind":"discover","session_id":session.id}));
+        let result=client.try_lock().map_err(|_|ErrorCode::ResourceExhausted)?.discover(&session);
         identity::verify_peer(peer)?;
         if matches!(result,Err(ErrorCode::TargetChanged|ErrorCode::PermissionDenied)){
             self.ui.lock().map_err(|_|ErrorCode::ResourceExhausted)?.remove(&key);
         }
         result
+    }
+    fn submit_graphical(&self,peer:&Peer,request:crate::Submit)->std::result::Result<Value,ErrorCode>{
+        if let Some(value)=self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.existing_submission(peer,&request)?{return Ok(value);}
+        if !request.context_handles.is_empty() || request.text.len()>4096{return Err(ErrorCode::InvalidArgument);}
+        let session=crate::selected_ui_session(&self.state,peer,request.selected_session_handle.as_deref().ok_or(ErrorCode::AuthRequired)?)?;
+        let key=(peer.bus_id.clone().ok_or(ErrorCode::PermissionDenied)?,peer.bus_sender.clone().ok_or(ErrorCode::PermissionDenied)?);
+        let connection=self.ui.try_lock().map_err(|_|ErrorCode::ResourceExhausted)?.get(&key).ok_or(ErrorCode::AuthRequired)?.client.clone();
+        let selection=crate::graphical::Connection::select(connection,peer,&session,request.selected_app_handle.as_deref().ok_or(ErrorCode::AuthRequired)?)?;
+        identity::verify_peer(peer)?;
+        self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.submit_owned(peer,request,Some(selection))
     }
     async fn json(&self, connection: &Connection, header: Header<'_>, operation: Operation) -> Result<String> {
         let result = self.dispatch(connection, header, operation).await?;
@@ -289,6 +305,22 @@ impl Client {
         let value: Value = serde_json::from_str(&self.call("GetStatus", &(task,))?).map_err(|_| ErrorCode::InvalidArgument)?;
         if value["schema_version"] != 1 || value["request_id"] != task || value["operation"] != "task_status" { return Err(ErrorCode::TargetChanged); }
         Ok(value)
+    }
+    pub fn events(&self,task:&str,after_sequence:u64,limit:u32)->std::result::Result<Value,ErrorCode>{
+        if !crate::uuid(task) || !(1..=100).contains(&limit){return Err(ErrorCode::InvalidArgument);}
+        self.task_reply(task,"task_events",self.call("GetEvents",&(task,after_sequence,limit))?)
+    }
+    pub fn cancel(&self,task:&str)->std::result::Result<Value,ErrorCode>{
+        if !crate::uuid(task){return Err(ErrorCode::InvalidArgument);}
+        self.task_reply(task,"cancellation",self.call("Cancel",&(task,))?)
+    }
+    pub fn forget(&self,task:&str)->std::result::Result<Value,ErrorCode>{
+        if !crate::uuid(task){return Err(ErrorCode::InvalidArgument);}
+        self.task_reply(task,"deletion",self.call("Forget",&(task,))?)
+    }
+    fn task_reply(&self,task:&str,operation:&str,raw:String)->std::result::Result<Value,ErrorCode>{
+        let value:Value=serde_json::from_str(&raw).map_err(|_|ErrorCode::InvalidArgument)?;
+        if value["schema_version"]!=1 || value["request_id"]!=task || value["operation"]!=operation{return Err(ErrorCode::TargetChanged);}Ok(value)
     }
 }
 

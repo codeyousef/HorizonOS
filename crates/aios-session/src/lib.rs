@@ -4,6 +4,7 @@ pub mod display;
 pub mod accessibility;
 pub mod ui_read;
 mod user_bus;
+mod graphical;
 pub mod managed_service;
 pub mod ui_bridge;
 pub mod bus;
@@ -119,7 +120,8 @@ pub struct TaskStatus {
 
 struct Task {
     owner: Peer, expires: Instant, nonce: String, digest: [u8; 32], status: TaskStatus,
-    deadline: Instant, control: Arc<AtomicU8>, text: Option<String>, events: Vec<Value>, grant: Option<aios_policy::ReadGrant>,
+    deadline: Instant, boottime_deadline: u64, control: Arc<AtomicU8>, text: Option<String>, events: Vec<Value>, grant: Option<aios_policy::ReadGrant>,
+    graphical:Option<graphical::Selection>,native_cancel:Option<Arc<ui_bridge::Cancellation>>,native_receipt:Option<graphical::Receipt>,
 }
 impl Task {
     fn terminal(&self) -> bool { matches!(self.status.state.as_str(), "completed" | "failed" | "cancelled") }
@@ -129,6 +131,7 @@ impl Task {
     fn finish(&mut self, result: Result<Value, ErrorCode>) {
         if self.terminal() { return; }
         if let Some(grant) = &self.grant { grant.revoke(); }
+        if let Some(cancel)=self.native_cancel.take(){cancel.cancel();}self.native_receipt.take();
         let cause = self.control.load(Ordering::Acquire);
         let result = match result { Ok(_) if cause == 1 => Err(ErrorCode::Cancelled), Ok(_) if cause == 2 => Err(ErrorCode::DeadlineExceeded), other => other };
         match result {
@@ -143,7 +146,8 @@ impl Task {
     }
 }
 impl Drop for Task {
-    fn drop(&mut self) { self.control.store(1, Ordering::Release); if let Some(text) = &mut self.text { inference::wipe(text); } }
+    fn drop(&mut self) { self.control.store(1,Ordering::Release);if let Some(cancel)=&self.native_cancel{cancel.cancel();}
+        if let Some(grant)=&self.grant{grant.revoke();}if let Some(text)=&mut self.text{inference::wipe(text);} }
 }
 struct UiCandidate { owner: Peer, expires: Instant, session: identity::GraphicalSession }
 struct Handle { owner: Peer, expires: Instant, unit: String }
@@ -179,6 +183,7 @@ impl State {
     }
     fn check_task_read(&self, id: &str, peer: &Peer) -> Result<(), ErrorCode> {
         let task = self.task(id, peer)?;
+        if let Some(selection)=&task.graphical{return task.native_receipt.as_ref().ok_or(ErrorCode::AuthRequired)?.check(selection,peer,id,&task.digest);}
         self.policy.as_ref().ok_or(ErrorCode::PolicyChanged)?.check_read(task.grant.as_ref().ok_or(ErrorCode::AuthRequired)?,
             &peer.policy_subject()?, id, &Action::SystemInfo, &ReadResources::default(), aios_policy::boottime_ms()?)
     }
@@ -191,9 +196,11 @@ impl State {
     }
     fn prune(&mut self) {
         let time = Instant::now();
+        let boottime=aios_policy::boottime_ms().ok();
         for task in self.tasks.values_mut() {
-            if !task.terminal() && task.deadline <= time {
+            if !task.terminal() && (task.deadline <= time || boottime.is_none_or(|now|now>=task.boottime_deadline)) {
                 if let Some(grant) = &task.grant { grant.revoke(); }
+                if let Some(cancel)=&task.native_cancel{cancel.cancel();}
                 let _=task.control.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire);
                 if task.status.state == "queued" { task.finish(Err(if task.control.load(Ordering::Acquire)==1 {ErrorCode::Cancelled}else{ErrorCode::DeadlineExceeded})); }
                 else if task.status.state != "cancelling" { task.status.state="cancelling".into(); task.event("deadline_requested"); }
@@ -207,6 +214,7 @@ impl State {
     fn disconnect(&mut self, peer: &Peer) {
         for task in self.tasks.values_mut().filter(|task| task.owner == *peer && !task.terminal()) {
             if let Some(grant) = &task.grant { grant.revoke(); }
+            if let Some(cancel)=&task.native_cancel{cancel.cancel();}
             let _=task.control.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
             if task.status.state == "queued" { task.finish(Err(ErrorCode::Cancelled)); }
             else if task.status.state != "cancelling" { task.status.state="cancelling".into(); task.event("requester_disconnected"); }
@@ -217,6 +225,61 @@ impl State {
         let task = self.tasks.get(id).ok_or(ErrorCode::TargetNotFound)?;
         if task.owner != *peer { return Err(ErrorCode::PermissionDenied); }
         Ok(task)
+    }
+    fn existing_submission(&mut self,peer:&Peer,request:&Submit)->Result<Option<Value>,ErrorCode>{
+        self.prune();
+        if request.text.trim().is_empty() || request.text.len()>60000 || request.client_nonce.is_empty() || request.client_nonce.len()>128{return Err(ErrorCode::InvalidArgument);}
+        let digest:[u8;32]=Sha256::digest(canonical_json(&provider(request)?)?).into();
+        for (id,task) in &self.tasks {
+            if task.owner==*peer && task.nonce==request.client_nonce {
+                if task.digest!=digest{return Err(ErrorCode::Conflict);}return Ok(Some(json!({"request_id":id})));
+            }
+        }
+        Ok(None)
+    }
+    fn submit_owned(&mut self,peer:&Peer,request:Submit,selection:Option<graphical::Selection>)->Result<Value,ErrorCode>{
+        self.prune();
+        if request.text.trim().is_empty() || request.text.len() > 60000 || request.client_nonce.is_empty() || request.client_nonce.len() > 128 {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        if selection.is_none() {
+        if let Some(handle)=&request.selected_session_handle {
+            let candidate=self.ui_candidates.get(handle).ok_or(ErrorCode::TargetNotFound)?;
+            if candidate.owner!=*peer {return Err(ErrorCode::PermissionDenied);}
+            if identity::observe_graphical_session(&candidate.session.id,peer.uid)?!=candidate.session {return Err(ErrorCode::TargetChanged);}
+            // Selection is an observation, never a consent receipt.
+            return Err(ErrorCode::AuthRequired);
+        }
+        if !request.context_handles.is_empty() || request.selected_app_handle.is_some() {
+            return Err(ErrorCode::AuthRequired);
+        }
+        }
+        let digest: [u8; 32] = Sha256::digest(canonical_json(&provider(&request)?)?).into();
+        for (id, task) in &self.tasks {
+            if task.owner == *peer && task.nonce == request.client_nonce {
+                if task.digest != digest { return Err(ErrorCode::Conflict); }
+                return Ok(json!({"request_id":id}));
+            }
+        }
+        if self.tasks.len() >= 64 || self.tasks.values().filter(|t| t.owner == *peer).count() >= 8 { return Err(ErrorCode::ResourceExhausted); }
+        let id = Uuid::new_v4().to_string();
+        let grant = if selection.is_none() && self.inference_configured && matches!(request.mode, Mode::Ask | Mode::Diagnose) {
+            let scope = aios_policy::Scope { actions: ["system.info".into()].into(), ..Default::default() };
+            Some(self.read_grant(peer, id.clone(), &request.text, request.mode, scope, 90_000)?)
+        } else { None };
+        let submitted_at = now();
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let boottime_deadline=aios_policy::boottime_ms()?.checked_add(90_000).ok_or(ErrorCode::DeadlineExceeded)?;
+        let status = TaskStatus { schema_version: 1, operation: "task_status".into(), request_id: id.clone(), mode: request.mode,
+            state: "queued".into(), submitted_at, mutation_performed: false, error: None, output: None };
+        let mut task = Task { owner: peer.clone(), expires: deadline + Duration::from_secs(300),
+            nonce: request.client_nonce, digest, status, deadline, boottime_deadline, control: Arc::new(AtomicU8::new(0)), text: Some(request.text), events: vec![], grant,graphical:selection,native_cancel:None,native_receipt:None };
+        task.event("accepted");
+        if !self.inference_configured { task.finish(Err(ErrorCode::ModelUnavailable)); }
+        else if matches!(request.mode, Mode::Act | Mode::Automate) { task.finish(Err(ErrorCode::UnsupportedCapability)); }
+        else { self.queue.push_back(id.clone()); }
+        self.tasks.insert(id.clone(), task);
+        Ok(json!({"request_id":id}))
     }
     pub fn dispatch(&mut self, peer: &Peer, operation: Operation) -> Result<Value, ErrorCode> {
         self.prune();
@@ -280,46 +343,7 @@ impl State {
                 _ => Err(ErrorCode::UnsupportedCapability),
                 }
             },
-            Operation::Submit { request } => {
-                if request.text.trim().is_empty() || request.text.len() > 60000 || request.client_nonce.is_empty() || request.client_nonce.len() > 128 {
-                    return Err(ErrorCode::InvalidArgument);
-                }
-                if let Some(handle)=&request.selected_session_handle {
-                    let candidate=self.ui_candidates.get(handle).ok_or(ErrorCode::TargetNotFound)?;
-                    if candidate.owner!=*peer {return Err(ErrorCode::PermissionDenied);}
-                    if identity::observe_graphical_session(&candidate.session.id,peer.uid)?!=candidate.session {return Err(ErrorCode::TargetChanged);}
-                    // Selection is an observation, never a consent receipt.
-                    return Err(ErrorCode::AuthRequired);
-                }
-                if !request.context_handles.is_empty() || request.selected_app_handle.is_some() {
-                    return Err(ErrorCode::AuthRequired);
-                }
-                let digest: [u8; 32] = Sha256::digest(canonical_json(&provider(&request)?)?).into();
-                for (id, task) in &self.tasks {
-                    if task.owner == *peer && task.nonce == request.client_nonce {
-                        if task.digest != digest { return Err(ErrorCode::Conflict); }
-                        return Ok(json!({"request_id":id}));
-                    }
-                }
-                if self.tasks.len() >= 64 || self.tasks.values().filter(|t| t.owner == *peer).count() >= 8 { return Err(ErrorCode::ResourceExhausted); }
-                let id = Uuid::new_v4().to_string();
-                let grant = if self.inference_configured && matches!(request.mode, Mode::Ask | Mode::Diagnose) {
-                    let scope = aios_policy::Scope { actions: ["system.info".into()].into(), ..Default::default() };
-                    Some(self.read_grant(peer, id.clone(), &request.text, request.mode, scope, 90_000)?)
-                } else { None };
-                let submitted_at = now();
-                let deadline = Instant::now() + Duration::from_secs(90);
-                let status = TaskStatus { schema_version: 1, operation: "task_status".into(), request_id: id.clone(), mode: request.mode,
-                    state: "queued".into(), submitted_at, mutation_performed: false, error: None, output: None };
-                let mut task = Task { owner: peer.clone(), expires: deadline + Duration::from_secs(300),
-                    nonce: request.client_nonce, digest, status, deadline, control: Arc::new(AtomicU8::new(0)), text: Some(request.text), events: vec![], grant };
-                task.event("accepted");
-                if !self.inference_configured { task.finish(Err(ErrorCode::ModelUnavailable)); }
-                else if matches!(request.mode, Mode::Act | Mode::Automate) { task.finish(Err(ErrorCode::UnsupportedCapability)); }
-                else { self.queue.push_back(id.clone()); }
-                self.tasks.insert(id.clone(), task);
-                Ok(json!({"request_id":id}))
-            },
+            Operation::Submit { request } => self.submit_owned(peer,request,None),
             Operation::GetStatus { task_id } => provider(&self.task(&task_id, peer)?.status),
             Operation::GetEvents { task_id, after_sequence, limit } => {
                 let task = self.task(&task_id, peer)?;
@@ -335,6 +359,7 @@ impl State {
                 let terminal = task.terminal();
                 if !terminal && task.control.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire).is_ok() {
                     if let Some(grant) = &task.grant { grant.revoke(); }
+                    if let Some(cancel)=&task.native_cancel{cancel.cancel();}
                     if task.status.state == "queued" { task.finish(Err(ErrorCode::Cancelled)); }
                     else { task.status.state = "cancelling".into(); task.event("cancellation_requested"); }
                 }
@@ -359,7 +384,7 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
     let mut peer = identity::authenticate(&stream).map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "untrusted peer"))?;
     peer.connection_id = Some(Uuid::new_v4().to_string());
     let _owner = ConnectionOwner { state: state.clone(), peer: peer.clone() };
-    let mut ui:Option<ui_bridge::Client>=None;
+    let mut ui:Option<Arc<Mutex<graphical::Connection>>>=None;
     // A 90-second task must remain inspectable/cancellable on its original
     // authenticated connection; short polling cannot force a reconnect.
     for _ in 0..4096 {
@@ -388,22 +413,32 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
     Ok(())
 }
 
-fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut Option<ui_bridge::Client>,operation:Operation)->Result<Value,ErrorCode>{
+fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut Option<Arc<Mutex<graphical::Connection>>>,operation:Operation)->Result<Value,ErrorCode>{
     let native=match operation {
         Operation::ListUiWindows{session_handle}=>{
             let candidate=selected_ui_session(state,peer,&session_handle)?;
-            if ui.is_none(){*ui=Some(ui_bridge::Client::connect(stream)?);}
-            json!({"kind":"discover","session_id":candidate.id})
+            if ui.is_none(){*ui=Some(Arc::new(Mutex::new(graphical::Connection::new(ui_bridge::Client::connect(stream)?,peer.clone()))));}
+            let result=ui.as_ref().ok_or(ErrorCode::AuthRequired)?.lock().map_err(|_|ErrorCode::ResourceExhausted)?.discover(&candidate);
+            identity::verify(stream,peer)?;return result;
         },
         Operation::StartUiRead{window_handle,goal,mode}=>json!({"kind":"start_read","window_handle":window_handle,"goal":goal,"mode":mode}),
         Operation::GetUiReadStatus{task_id}=>json!({"kind":"get_read_status","task_id":task_id}),
         Operation::TakeUiSnapshot{task_id}=>json!({"kind":"take_snapshot","task_id":task_id}),
         Operation::CancelUiRead{task_id}=>json!({"kind":"cancel","task_id":task_id}),
         Operation::ForgetUiRead{task_id}=>json!({"kind":"forget","task_id":task_id}),
+        Operation::Submit{request} if request.selected_session_handle.is_some() || request.selected_app_handle.is_some()=>{
+            if let Some(value)=state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.existing_submission(peer,&request)?{return Ok(value);}
+            if !request.context_handles.is_empty() || request.text.len()>4096{return Err(ErrorCode::InvalidArgument);}
+            let session=selected_ui_session(state,peer,request.selected_session_handle.as_deref().ok_or(ErrorCode::AuthRequired)?)?;
+            let selection=graphical::Connection::select(ui.as_ref().ok_or(ErrorCode::AuthRequired)?.clone(),peer,&session,
+                request.selected_app_handle.as_deref().ok_or(ErrorCode::AuthRequired)?)?;
+            identity::verify(stream,peer)?;
+            return state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.submit_owned(peer,request,Some(selection));
+        },
         operation=>return state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.dispatch(peer,operation),
     };
     identity::verify(stream,peer)?;
-    let result=ui.as_mut().ok_or(ErrorCode::AuthRequired)?.call(native);
+    let result=ui.as_ref().ok_or(ErrorCode::AuthRequired)?.lock().map_err(|_|ErrorCode::ResourceExhausted)?.client.call(native);
     identity::verify(stream,peer)?;
     if matches!(result,Err(ErrorCode::TargetChanged|ErrorCode::PermissionDenied)){ui.take();}
     result
@@ -492,5 +527,38 @@ mod tests {
         assert_eq!(state.dispatch(&peer, Operation::GetStatus { task_id: task }).unwrap_err(), ErrorCode::TargetNotFound);
         let call = RawValue::from_string(r#"{"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":"handle"}}"#.into()).unwrap();
         assert_eq!(state.dispatch(&peer, Operation::Invoke { tool_call: call }).unwrap_err(), ErrorCode::TargetNotFound);
+    }
+    /// Kernel sockets and task controls are real; desktop work/subjects are
+    /// fixtures. This proves lock independence, not native permission issuance.
+    #[test]
+    fn public_stop_forget_and_disconnect_revoke_only_owned_native_channel_fixture() {
+        use std::io::Read;
+        let peer=peer_fixture();let mut foreign=peer.clone();foreign.connection_id=Some(Uuid::new_v4().to_string());
+        for operation in ["cancel","forget","disconnect","deadline"] {
+            let mut state=State::with_inference();
+            let id=state.dispatch(&peer,submit_fixture(Mode::Ask,"native","fixture question")).unwrap()["request_id"].as_str().unwrap().to_owned();
+            let other=state.dispatch(&peer,submit_fixture(Mode::Ask,"other","other question")).unwrap()["request_id"].as_str().unwrap().to_owned();
+            let (cancel,mut receiver)=ui_bridge::Cancellation::pair().unwrap();
+            let (other_cancel,mut other_receiver)=ui_bridge::Cancellation::pair().unwrap();
+            receiver.set_read_timeout(Some(Duration::from_millis(20))).unwrap();other_receiver.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
+            let task=state.tasks.get_mut(&id).unwrap();task.native_cancel=Some(cancel);task.status.state="inspecting".into();
+            state.tasks.get_mut(&other).unwrap().native_cancel=Some(other_cancel);
+            assert_eq!(state.dispatch(&foreign,Operation::Cancel{task_id:id.clone()}).unwrap_err(),ErrorCode::PermissionDenied);
+            let mut byte=[0];assert!(receiver.read(&mut byte).is_err());
+            // The desktop query's mutex stays held throughout public control.
+            let query=Mutex::new(());let _busy=query.lock().unwrap();let start=Instant::now();
+            match operation {
+                "cancel"=>{state.dispatch(&peer,Operation::Cancel{task_id:id.clone()}).unwrap();},
+                "forget"=>{state.dispatch(&peer,Operation::Forget{task_id:id.clone()}).unwrap();},
+                "disconnect"=>state.disconnect(&peer),
+                "deadline"=>{state.tasks.get_mut(&id).unwrap().boottime_deadline=0;state.prune();},
+                _=>unreachable!(),
+            }
+            assert!(start.elapsed()<Duration::from_millis(100));assert_eq!(receiver.read(&mut byte).unwrap(),0);
+            if operation!="disconnect"{assert!(other_receiver.read(&mut byte).is_err(),"unrelated task was revoked");}
+            else{assert_eq!(other_receiver.read(&mut byte).unwrap(),0);}
+            if operation=="forget"{assert_eq!(state.task(&id,&peer).err(),Some(ErrorCode::TargetNotFound));}
+            else{assert_ne!(state.tasks[&id].control.load(Ordering::Acquire),0);}
+        }
     }
 }
