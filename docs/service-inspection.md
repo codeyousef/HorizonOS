@@ -132,8 +132,10 @@ It refuses to replace an existing user service and cleans up only its own
 temporary runtime registration.
 
 `python3 tools/devctl.py test --suite integration --provider installed-session-inference
---json` exercises the packaged hardened user service against the real installed
-CPU model in the disposable model acceptance image. It checks a read-only answer
+--json` exercises the installed hardened user service against the real installed
+CPU model in the disposable model acceptance image. Both client and broker come
+from the current system closure's root-owned immutable packages, with their
+executable hashes recorded. It checks a read-only answer
 with fresh system evidence, unchanged unit bytes, effective restrictions, service
 inspection and broker restart. It requires an enrolled normal user and retains
 failed responses. It does not qualify graphical inference, model crash reporting

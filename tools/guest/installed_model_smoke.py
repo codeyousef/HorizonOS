@@ -63,6 +63,22 @@ def main():
         if status['isolation']['evidence_kind']!='actual-installed-kernel-denials' or len(status['isolation']['checks'])!=13:
             raise RuntimeError('installed model lacks actual fixed kernel denial proof')
         results['initial_status']=status
+        if set(status)!={'loaded','busy','isolation','own_queued','queue_limit','idle_unload_seconds',
+                         'context_tokens','maximum_input_tokens','threads','profiles'}:
+            raise RuntimeError('installed status exposed non-lifecycle metadata')
+        denied=[]
+        for operation,error in [
+                ({'kind':'execute_tool','action_id':'shell.run','arguments':{}},'UNKNOWN_CAPABILITY'),
+                ({'kind':'download_model','url':'https://example.invalid/model.gguf'},'UNKNOWN_CAPABILITY'),
+                ({'kind':'load_model','model_directory':'/home/dev/model'},'UNKNOWN_CAPABILITY'),
+                ({'kind':'get_status','uid':0},'INVALID_ARGUMENT'),
+                ({'kind':'unload','approved':True},'INVALID_ARGUMENT'),
+                ({'kind':'generate','grammar':'root ::= anything'},'INVALID_ARGUMENT')]:
+            response=first.call(operation)
+            if response['error']!=error or response['data'] is not None:
+                raise RuntimeError('installed model admitted an unregistered route or caller authority')
+            denied.append({'operation':operation['kind'],'error':response['error']})
+        results['unregistered_routes_and_authority_denied']=denied
         names=['ActiveState','User','Group','MainPID','ExecStart','FragmentPath','DropInPaths','NoNewPrivileges','CapabilityBoundingSet','AmbientCapabilities',
                'PrivateNetwork','PrivateTmp','PrivateDevices','ProtectSystem','ProtectHome','ProtectProc','InaccessiblePaths','RestrictAddressFamilies',
                'MemoryDenyWriteExecute','RestrictNamespaces','MemoryMax','MemoryHigh','TasksMax','CPUQuotaPerSecUSec','Restart','RestartUSec',
@@ -135,7 +151,9 @@ def main():
             if value['error']!='MODEL_UNAVAILABLE':raise RuntimeError('unconfigured profile silently substituted: '+profile)
         results['before_unload']=first.call({'kind':'get_status'})['data']
         if not results['before_unload']['loaded']:raise RuntimeError('actual model did not remain loaded')
-        if first.call({'kind':'unload'})['error']:raise RuntimeError('installed explicit unload rejected')
+        unloaded=first.call({'kind':'unload'})
+        if unloaded['error'] or unloaded['data']!={'unload_requested':True}:
+            raise RuntimeError('installed explicit unload rejected or exposed unexpected data')
         deadline=time.monotonic()+10
         while first.call({'kind':'get_status'})['data']['loaded']:
             if time.monotonic()>deadline:raise RuntimeError('installed weights failed to unload')

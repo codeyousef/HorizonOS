@@ -6,6 +6,7 @@ import json
 import fcntl
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -15,13 +16,26 @@ from service_inspection_smoke import products
 UNIT = "aios-session-acceptance-" + uuid.uuid4().hex + ".service"
 
 
+def installed_products():
+    binaries={}; paths=[]
+    for program,package in (("aios-sessiond","aios-core"),("aiosctl","aios-cli")):
+        binary=Path("/run/current-system/sw/bin",program).resolve(strict=True)
+        info=binary.stat(); output=binary.parents[1]
+        if (not re.fullmatch(r"/nix/store/[a-z0-9]{32}-"+package+r"-[A-Za-z0-9._+-]+",str(output))
+                or binary!=output/"bin"/program or not stat.S_ISREG(info.st_mode)
+                or info.st_uid!=0 or info.st_mode&0o222 or not info.st_mode&0o111):
+            raise RuntimeError("installed client/broker is not a protected store executable")
+        binaries[program]=binary;paths.append(output)
+    return paths,binaries
+
+
 def main():
     installed_model = sys.argv[1:] == ["--installed-model"]
     if sys.argv[1:] and not installed_model:
         raise RuntimeError("unregistered user-service scenario")
     if installed_model and (os.geteuid() == 0 or Path("/etc/aios/model-test-profile").read_text().strip() != "installed-normal-cpu-model-v1"):
         raise RuntimeError("installed inference requires the model test image and normal UID")
-    paths, binaries = products()
+    paths, binaries = installed_products() if installed_model else products()
     runtime = Path(f"/run/user/{os.geteuid()}")
     info = runtime.lstat()
     if runtime.resolve() != runtime or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
@@ -118,6 +132,8 @@ def main():
             raise RuntimeError("packaged restart did not establish a new daemon")
         print("AIOS_USER_SERVICE=" + json.dumps({"outputs":[str(p) for p in paths], "before":properties, "after":after,
             "unit_name":UNIT,"package_unit_sha256":hashlib.sha256(unit_bytes).hexdigest(),"exact_unit_bytes":True,
+            "binary_source":"installed-system-closure" if installed_model else "nix-built-packages",
+            "executables":{k:{"path":str(v),"sha256":hashlib.sha256(v.read_bytes()).hexdigest()} for k,v in binaries.items()},
             "capabilities":capabilities,"ui_selection_denial":ui_denial,"installed_model":installed_model,"model_answer":answer,"service_observation":observed}), flush=True)
     except Exception:
         print("AIOS_USER_SERVICE_FAILURE=" + json.dumps(show()), flush=True)

@@ -145,6 +145,9 @@ checks the actual root-managed socket, production-mode executable, immutable
 runtime/model data, effective systemd limits and process privileges. It uses
 the installed daemon for cited answers, request ownership, quotas, deadlines,
 cancellation, overflow and explicit unload; it does not launch a replacement.
+It also checks rejection of tool execution, model download/load routes,
+caller-supplied authority and custom grammars, and permits only lifecycle/budget
+metadata in status and the fixed acknowledgement in unload responses.
 `installed-model-users` requires two separately enrolled workspaces for different
 normal users on that same VM. It retains both original connections, verifies
 foreign result/cancel denial and serialization, and checks that an owner-only
