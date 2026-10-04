@@ -147,6 +147,11 @@ impl ReadProposal {
         let process = Command::new(launcher).env_clear().env("XDG_RUNTIME_DIR",&runtime)
             .env("WAYLAND_DISPLAY",&self.desktop.socket_name).env("DBUS_SESSION_BUS_ADDRESS",format!("unix:path={}/bus",runtime.display()))
             .env("QT_QPA_PLATFORM","wayland").env("LANG","C.UTF-8")
+            // Keep the native permission surface usable by ordinary assistive
+            // technology even when no screen reader is active. The AIOS
+            // provider separately excludes this pinned executable before any
+            // content/action query; accessibility does not grant AIOS input.
+            .env("QT_LINUX_ACCESSIBILITY_ALWAYS_ON","1")
             .stdin(Stdio::from(std::os::fd::OwnedFd::from(child))).stdout(Stdio::null()).stderr(Stdio::null())
             .spawn().map_err(|_|ErrorCode::TargetChanged)?;
         let frame = (data.len() as u32).to_be_bytes();

@@ -152,6 +152,11 @@ object identity is `aios-protected-confirmation`; AIOS computer-use providers
 must exclude confirmation surfaces from observation and activation. Ordinary
 native assistive technology remains available.
 
+The policy-owned launcher explicitly enables Qt's native accessibility bridge
+for this dialog even when the desktop reports no active screen reader. This
+fixed setting is independent of request fields and does not register the
+confirmation executable as an AIOS observation or input target.
+
 `checks.x86_64-linux.consent-ui` contains widget fixtures for literal untrusted
 text, accessibility, default cancellation, explicit keyboard choice, immutable
 display, expiry and withdrawal. Its activation test binary is absent from the
@@ -168,3 +173,19 @@ closing the originating connection revokes pending consent. Its document is
 synthetic. It does not press Allow, issue a native grant or qualify semantic
 mutations. Synthetic policy tests exercise issuance postconditions separately
 and must not be reported as native human confirmation evidence.
+
+The registered `ui-provider` scenario uses the exact packaged broker/provider
+units in the disposable tester desktop. Its test-only assistive actor verifies
+the pinned production renderer, its managed-provider parent, native process
+stamps, the unique synthetic request, exact displayed window identity, target,
+session, profile and read scope. It checks the native Allow button's role,
+enabled/sensitive/visible/showing states and action before one input attempt;
+input failures or timeouts are never retried. The resulting snapshot must come
+through the original authenticated client, validate against the contract and
+be retrievable once. Reconnected clients, forged decisions, pending reads and
+cancelled tasks remain denied. Production window discovery must exclude the
+permission renderer while it is open. The actor is compiled only into the
+ignored guest integration test, is absent from installed products, and requires
+the disposable profile, tester UID and explicit registered scenario. This is
+native assistive-input fixture evidence, never evidence of human review or
+AIOS semantic input permission.

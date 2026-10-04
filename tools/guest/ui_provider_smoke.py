@@ -119,7 +119,7 @@ def main():
             print(output,flush=True)
             if result.returncode:raise RuntimeError('native bridge qualification failed')
             if "NATIVE_PROVIDER_BRIDGE=" not in output:raise RuntimeError("native bridge scenario did not run")
-            print("NATIVE_MANAGED_UI_PROVIDER="+json.dumps({"evidence_kind":"actual-exact-managed-package-and-native-original-fd-bridge-no-allow",
+            print("NATIVE_MANAGED_UI_PROVIDER="+json.dumps({"evidence_kind":"actual-exact-managed-package-original-fd-bridge-and-owned-native-assistive-input-fixture-not-human-approval",
                 "uid":1001,"outputs":[str(p) for p in paths],"before":before,"effective":effective,
                 "unit_sha256":{name:hashlib.sha256(data).hexdigest() for name,data in units.items()},"unmanaged_client_denied":True,
                 "native_privilege_state":{key:native_fields[key].strip() for key in ('CapEff','CapPrm','CapInh','CapAmb','NoNewPrivs')},

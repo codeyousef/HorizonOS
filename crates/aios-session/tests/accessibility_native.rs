@@ -1,5 +1,7 @@
 //! Explicit disposable-guest qualification. Native app/desktop observations
-//! with a synthetic document; no model context or policy grant is issued.
+//! with a synthetic document. The managed bridge scenario includes explicitly
+//! labeled test-only assistive input to the actual production permission UI.
+#[path="support/native_confirmation.rs"] mod native_confirmation;
 use aios_session::{accessibility::WindowBinding,display::DisplayBinding};
 use aios_protocol::contracts::ErrorCode;
 use std::{fs,io::Read,os::{fd::{OwnedFd,FromRawFd,AsRawFd},unix::fs::{DirBuilderExt,PermissionsExt,OpenOptionsExt}},path::PathBuf,process::{Child,Command,Stdio},sync::atomic::AtomicU8,time::{Duration,Instant}};
@@ -195,7 +197,39 @@ fn qualify_broker_bridge(display:&DisplayBinding,window:&WindowBinding){
     let denied=client.call(json!({"kind":"take_ui_snapshot","task_id":task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::Cancelled);
     assert!(client.call(json!({"kind":"forget_ui_read","task_id":task})).unwrap().error.is_none());
     let denied=client.call(json!({"kind":"get_ui_read_status","task_id":task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::TargetNotFound);
-    println!("NATIVE_PROVIDER_BRIDGE={}",json!({"evidence_kind":"real-exact-managed-broker-and-provider-native-original-fd-and-window-synthetic-document-no-allow",
+    let goal=format!("Native permission fixture {}",uuid::Uuid::new_v4());
+    let start=client.call(json!({"kind":"start_ui_read","window_handle":selected_window,"goal":goal,"mode":"ask"})).unwrap();
+    assert!(start.error.is_none(),"{start:?}");let allowed_task=start.data.unwrap()["task_id"].as_str().unwrap().to_owned();
+    let until=Instant::now()+Duration::from_secs(5);
+    loop{
+        let status=client.call(json!({"kind":"get_ui_read_status","task_id":allowed_task})).unwrap();assert!(status.error.is_none(),"{status:?}");
+        let status=status.data.unwrap();if status["state"]=="needs_permission"{break;}
+        assert_eq!(status["state"],"queued","unexpected positive read state {status}");
+        assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(20));
+    }
+    let candidates=WindowBinding::discover(display,&AtomicU8::new(0)).unwrap();
+    assert_eq!(candidates.len(),1,"production provider must exclude its permission UI");assert_eq!(candidates[0].title,window.title);
+    let input=native_confirmation::allow_owned_read(display,&goal,&selected_window,&window.title,windows[0]["identity_sha256"].as_str().unwrap());
+    let until=Instant::now()+Duration::from_secs(8);
+    let completed=loop{
+        let status=client.call(json!({"kind":"get_ui_read_status","task_id":allowed_task})).unwrap();assert!(status.error.is_none(),"{status:?}");
+        let status=status.data.unwrap();if status["state"]=="completed"{break status;}
+        assert!(matches!(status["state"].as_str(),Some("needs_permission"|"inspecting")),"native Allow did not complete scoped read {status}");
+        assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(completed["snapshot_ready"],true);
+    let denied=reconnect.call(json!({"kind":"take_ui_snapshot","task_id":allowed_task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::AuthRequired);
+    let scoped=client.call(json!({"kind":"take_ui_snapshot","task_id":allowed_task})).unwrap();assert!(scoped.error.is_none(),"{scoped:?}");let scoped=scoped.data.unwrap();
+    aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.snapshot","data").unwrap(),&scoped).unwrap();
+    assert_eq!(scoped["window_handle"],selected_window);let nodes=scoped["nodes"].as_array().unwrap();assert!(!nodes.is_empty() && nodes.len()<=300);
+    let denied=client.call(json!({"kind":"take_ui_snapshot","task_id":allowed_task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::TargetNotFound);
+    assert!(client.call(json!({"kind":"cancel_ui_read","task_id":allowed_task})).unwrap().error.is_none());
+    let denied=client.call(json!({"kind":"take_ui_snapshot","task_id":allowed_task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::Cancelled);
+    assert!(client.call(json!({"kind":"forget_ui_read","task_id":allowed_task})).unwrap().error.is_none());
+    println!("NATIVE_PROVIDER_BRIDGE={}",json!({"evidence_kind":"real-exact-managed-broker-provider-original-fd-scoped-snapshot-with-owned-native-input-fixture",
         "session_id":display.session.id,"uid":display.session.uid,"metadata":discovered,"original_fd_bound":true,"unconfirmed_snapshot_denied":true,
-        "forged_decision_denied":true,"reconnect_denied":true,"cancellation_ms":cancellation_ms,"cancelled_snapshot_denied":true,"forget_verified":true}));
+        "forged_decision_denied":true,"reconnect_denied":true,"cancellation_ms":cancellation_ms,"cancelled_snapshot_denied":true,"forget_verified":true,
+        "permission_ui_excluded_from_production_discovery":true,"native_input_fixture":input,"completed_status":completed,
+        "scoped_snapshot_id":scoped["snapshot_id"],"scoped_node_count":nodes.len(),"one_shot_snapshot_verified":true,
+        "reconnected_snapshot_denied":true,"post_completion_stop_revokes_snapshot":true}));
 }
