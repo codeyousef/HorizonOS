@@ -215,6 +215,13 @@ sync
     return encoded_console_script(script, "AIOS_REPAIR_EXIT")
 
 
+def console_exit(data, sentinel):
+    # Nix progress output can erase the line immediately before the fixed exit
+    # marker. Strip terminal CSI controls while retaining actual line breaks.
+    plain = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
+    return re.search(rb"(?:^|[\r\n])" + re.escape(sentinel) + rb"=([0-9]+)[\r\n]", plain)
+
+
 def console_keys(text):
     plain = {" ": "spc", "-": "minus", "=": "equal", "/": "slash",
              ".": "dot", ",": "comma", ";": "semicolon", "'": "apostrophe", "\\": "backslash"}
@@ -464,7 +471,7 @@ class QMP:
                         serial.sendall(payload)
                         payload = None
                     sentinel = b"AIOS_QUALIFICATION_EXIT" if qualification is not None else b"AIOS_REPAIR_EXIT" if repair else b"AIOS_AUDIT_EXIT" if audit else b"AIOS_FINISH_EXIT" if finish else b"AIOS_BOOTSTRAP_EXIT"
-                    match = re.search(rb"(?:^|[\r\n])" + sentinel + rb"=([0-9]+)[\r\n]", trailing)
+                    match = console_exit(trailing, sentinel)
                     if match:
                         status = int(match[1])
                         if status == 0 and not audit and not repair and qualification is None:

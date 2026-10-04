@@ -27,6 +27,14 @@ class ProvisionTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.config = VMConfig.from_data(self.root, EXAMPLE)
 
+    def test_console_exit_accepts_terminal_line_erasure_but_not_command_echo(self):
+        from aios_dev.vm import console_exit
+        marker=b"AIOS_BOOTSTRAP_EXIT"
+        value=console_exit(b"progress\r\x1b[KAIOS_BOOTSTRAP_EXIT=1\r\n",marker)
+        self.assertEqual(value[1],b"1")
+        self.assertIsNone(console_exit(b"echo AIOS_BOOTSTRAP_EXIT=0\r\n",marker))
+        self.assertIsNone(console_exit(b"\rAIOS_FINISH_EXIT=0\r\n",marker))
+
     def test_plan_persists_uuid_without_creating_disk_or_key(self):
         with patch("aios_dev.provision.run") as execute, patch("aios_dev.provision.fetch_media") as fetch:
             code, data = create(self.config, None)
