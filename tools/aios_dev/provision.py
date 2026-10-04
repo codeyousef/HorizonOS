@@ -24,7 +24,7 @@ from .errors import DevctlError, ExitCode
 CHECKSUM_URL = "https://channels.nixos.org/nixos-26.05/latest-nixos-minimal-x86_64-linux.iso.sha256"
 OFFICIAL_HOSTS = {"channels.nixos.org", "releases.nixos.org"}
 DISK_SERIAL = "AIOS_DEV_ROOT"
-SOURCE_ROOTS = {"crates", "native", "nix", "schemas", "capabilities", "policies", "models", "prompts", "tools", "dev", "tests", "docs"}
+SOURCE_ROOTS = {"crates", "native", "desktop", "nix", "schemas", "capabilities", "policies", "models", "prompts", "tools", "dev", "tests", "docs"}
 SOURCE_FILES = {".gitignore", "AGENTS.md", "README.md", "flake.nix", "flake.lock", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "VERSION", "CHANGELOG.md"}
 PRIVATE_PARTS = {".git", ".local", ".agents", ".aws", ".codex", ".ssh", ".gnupg", ".venv", "__pycache__", "target", "node_modules"}
 PRIVATE_SUFFIXES = {".key", ".pem", ".qcow2", ".iso", ".gguf", ".safetensors", ".pyc"}
@@ -80,7 +80,7 @@ def run(arguments, timeout=60):
 def prepare_plan(config: VMConfig) -> dict:
     if config.values["provider"] != "qemu":
         raise failure(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "External targets cannot be provisioned by QEMU")
-    if config.values["ssh_user"] != "dev" or config.values["guest_build_target"] not in ("aios-dev", "aios-desktop-test") or config.values.get("guest_role", "development") != "development":
+    if config.values["ssh_user"] != "dev" or config.values["guest_build_target"] not in ("aios-dev", "aios-desktop-test", "aios-model-test") or config.values.get("guest_role", "development") != "development":
         raise invalid("Bootstrap requires the dev user, development role and a registered image target")
     private_directory(config.root, ".local")
     plan_path = project_path(config.root, ".local/provisioning-plan.json", ".local")
@@ -255,6 +255,8 @@ def refresh_seed(config: VMConfig):
                             ("disk.serial", DISK_SERIAL), ("authorized.uuid", record["authorized_uuid"]), ("dev.pub", public), ("image.target", config.values["guest_build_target"])):
             write_new(seed / name, (value + "\n").encode(), 0o644)
         write_new(seed / "bootstrap.sh", (config.root / "dev/seed/bootstrap.sh").read_bytes(), 0o644)
+        from .model_seed import stage
+        stage(config, seed)
         seed_manifest(seed)
         iso = directory / (seed.name + ".iso")
         run(["xorriso", "-as", "mkisofs", "-quiet", "-V", "AIOS_SEED", "-o", str(iso), str(seed)])
@@ -329,6 +331,8 @@ def create_locked(config: VMConfig, authorization: str | None) -> tuple[ExitCode
     for name, value in (("guest.uuid", plan["guest_uuid"]), ("installation.uuid", plan["installation_uuid"]), ("disk.serial", DISK_SERIAL), ("authorized.uuid", authorization), ("dev.pub", public), ("image.target", config.values["guest_build_target"])):
         write_new(seed / name, (value + "\n").encode(), 0o644)
     write_new(seed / "bootstrap.sh", (config.root / "dev/seed/bootstrap.sh").read_bytes(), 0o644)
+    from .model_seed import stage
+    stage(config, seed)
     seed_manifest(seed)
     seed_iso = vm_dir / "seed.iso"
     run(["xorriso", "-as", "mkisofs", "-quiet", "-V", "AIOS_SEED", "-o", str(seed_iso), str(seed)])

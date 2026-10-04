@@ -139,6 +139,13 @@ class ProvisionTests(unittest.TestCase):
         with patch("aios_dev.provision.run", return_value=subprocess.CompletedProcess([], 0, "tools/link.py\0", "")), self.assertRaises(DevctlError):
             source_files(self.root)
 
+    def test_reviewed_qt_desktop_sources_enter_initial_image(self):
+        names=['flake.nix','dev/seed/bootstrap.sh','desktop/consent/scope_dialog.cpp']
+        for name in names:
+            p=self.root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('public source fixture')
+        with patch("aios_dev.provision.run", return_value=subprocess.CompletedProcess([],0,"\0".join(names)+"\0","")):
+            self.assertEqual(source_files(self.root), sorted(map(Path,names)))
+
     def test_seed_cannot_supply_existing_machine_enrollment(self):
         name = "nix/machines/aios-dev/enrollment.json"
         target = self.root / name

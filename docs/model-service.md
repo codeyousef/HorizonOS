@@ -101,3 +101,34 @@ Run the registered guest checks from the host:
 python3 tools/devctl.py test --suite unit --detach --json
 python3 tools/devctl.py test --suite integration --provider model-service --detach --json
 ```
+
+## Initial model-enabled acceptance image
+
+The `aios-model-test` image installs the real socket-activated model service for
+both `dev` and `tester`. It inherits the disposable desktop's synthetic login;
+this image is not a production release. The other development/desktop images
+remain model-disabled.
+
+The host administrator exports public data from an enrolled builder's immutable
+`horizon-os-model-normal-*` package with:
+
+```fish
+python3 tools/devctl.py model-seed --artifact /nix/store/REVIEWED_MODEL_DATA_PACKAGE --json
+python3 tools/devctl.py test --suite desktop --with-model --json
+```
+
+Use the actual package path reported by the verified model-artifact build.
+The export admits only the exact locked weights and small source metadata,
+checks pinned guest identity before and after each transfer, and verifies size
+and SHA256 before accepting a file. All persistent host artifacts live under
+`/mnt/Storage`. The private `.local/model-seed` cache is data, never a Nix source
+or inference download route. Partial or changed caches fail closed.
+
+Initial provisioning copies the data into read-only seed media. The registered
+installer validates every data checksum/size before formatting its authorized fresh virtual disk, then repeats those checks
+and imports the fixed files into the mounted target store used by nixos-install. The image's existing
+`requireFile` derivation then creates an independent immutable data package.
+Seed media is removed before installed startup. This route cannot activate or
+replace an existing installation; guarded deployment remains a separate
+contract. Creating/booting this image alone does not establish inference,
+sandbox, two-user privacy, or elapsed idle-unload acceptance.

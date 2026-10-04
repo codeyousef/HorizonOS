@@ -104,6 +104,11 @@
         specialArgs = { aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ./nix/machines/aios-desktop-test.nix ];
       };
+      nixosConfigurations.aios-model-test = nixpkgs.lib.nixosSystem {
+        inherit system;
+        specialArgs = { aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
+        modules = [ ./nix/machines/aios-dev ./nix/machines/aios-desktop-test.nix ./nix/machines/aios-model-test.nix ];
+      };
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios;
       nixosModules.production = import ./nix/modules/aios/production.nix;

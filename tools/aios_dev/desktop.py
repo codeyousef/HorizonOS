@@ -11,7 +11,7 @@ from pathlib import Path
 import time
 import uuid
 
-from . import acceptance, guest, provision, sync, vm
+from . import acceptance, guest, provision, sync, vm, model_seed
 from .config import VMConfig, invalid, load_config, read_json
 from .errors import DevctlError, ExitCode
 
@@ -53,7 +53,7 @@ def binding(owner, run_id):
     value = read_binding_record(path)
     if set(value) != {"schema_version", "run_id", "owner_workspace", "configuration", "guest_uuid", "installation_uuid", "disk_device", "disk_inode", "manifest", "snapshot_digest"} or value["schema_version"] != 1 or value["run_id"] != run_id or value["owner_workspace"] != str(owner.root) or value["configuration"] != config.values:
         raise invalid("Desktop fixture binding mismatch")
-    if not owner.root.is_relative_to(acceptance.STORAGE_ROOT) or directory.resolve() != directory or config.values["guest_build_target"] != "aios-desktop-test":
+    if not owner.root.is_relative_to(acceptance.STORAGE_ROOT) or directory.resolve() != directory or config.values["guest_build_target"] not in ("aios-desktop-test", model_seed.TARGET):
         raise invalid("Desktop runner requires its isolated workspace under /mnt/Storage")
     if sync.contract.validate_manifest(value["manifest"]) != value["snapshot_digest"]:
         raise invalid("Desktop source manifest mismatch")
@@ -66,11 +66,13 @@ def binding(owner, run_id):
     return config, value
 
 
-def prepare(owner):
+def prepare(owner, *, with_model=False):
     if owner.values["provider"] != "qemu" or not owner.root.is_relative_to(acceptance.STORAGE_ROOT):
         raise invalid("Desktop runner requires a managed owner under /mnt/Storage")
     # Verify the developer target before collecting any source or creating a VM.
     guest.enrolled_identity(owner)
+    if with_model:
+        model_seed.validate_cache(owner.root)
     manifest, digest, contents = sync.collect(owner.root)
     run_id = str(uuid.uuid4())
     directory = provision.private_directory(owner.root, ".local/d/" + identifier(run_id).hex[:8])
@@ -81,7 +83,7 @@ def prepare(owner):
     provision.run(["git", "-C", str(directory), "init", "-q"])
     provision.run(["git", "-C", str(directory), "add", "."])
     provision.run(["git", "-C", str(directory), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=AIOS Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Public synthetic desktop fixture"])
-    values = {**owner.values, "guest_build_target": "aios-desktop-test", "ssh_host": "127.0.0.1", "ssh_port": acceptance.free_port(),
+    values = {**owner.values, "guest_build_target": model_seed.TARGET if with_model else "aios-desktop-test", "ssh_host": "127.0.0.1", "ssh_port": acceptance.free_port(),
               "vcpus": 8, "memory_mib": 16384, "disk_gib": 96}
     for field in ("guest_uuid", "installation_uuid", "guest_role"):
         values.pop(field, None)
@@ -92,6 +94,8 @@ def prepare(owner):
     if provision.digest_file(Path(media["path"])) != media["sha256"]:
         raise invalid("Installer cache changed")
     os.link(media["path"], directory / ".local/vm" / Path(media["path"]).name)
+    if with_model:
+        model_seed.copy_cache(owner.root, directory)
     plan = provision.prepare_plan(config)
     code, result = provision.create(config, plan["guest_uuid"])
     if code != ExitCode.SUCCESS:
@@ -131,9 +135,9 @@ def observe(config):
     return {"identity": identity, "host_key_fingerprint": trust["host_key_fingerprint"], "desktop": value}
 
 
-def run(owner, run_id=None):
+def run(owner, run_id=None, *, with_model=False):
     if run_id is None:
-        run_id = prepare(owner)
+        run_id = prepare(owner, with_model=with_model)
     config, value = binding(owner, run_id)
     record = vm.load_record(config)
     host_manifest, host_digest, _ = sync.collect(owner.root)

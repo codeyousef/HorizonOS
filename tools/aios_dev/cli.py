@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .doctor import host_report
 from .errors import DevctlError, ExitCode
-from . import acceptance, deploy, desktop, guest, jobs, native_rpc, provision, reenrollment, snapshots, storage, sync, vm
+from . import acceptance, deploy, desktop, guest, jobs, native_rpc, provision, reenrollment, snapshots, storage, sync, vm, model_seed
 
 
 class Parser(argparse.ArgumentParser):
@@ -56,6 +56,7 @@ def parser() -> Parser:
     enrollment = enrollment_parser.add_mutually_exclusive_group()
     enrollment.add_argument("--pin-console-only", action="store_true")
     enrollment.add_argument("--trust-file", metavar="LOCAL_CONSOLE_JSON")
+    commands.add_parser("model-seed", help="export locked public model data from a verified builder").add_argument("--artifact", required=True)
     commands.add_parser("sync")
     lock = commands.add_parser("lock", help="generate Nix/Cargo locks inside a verified guest job")
     lock.add_argument("--detach", action="store_true")
@@ -66,6 +67,7 @@ def parser() -> Parser:
     test = commands.add_parser("test")
     test.add_argument("--suite", choices=("unit", "integration", "desktop"), required=True)
     test.add_argument("--detach", action="store_true")
+    test.add_argument("--with-model", action="store_true", help="create a disposable desktop with the locked installed CPU model")
     test.add_argument("--desktop-run", metavar="RUN_UUID", help="resume only the registered disposable desktop workspace")
     test.add_argument("--bootstrap-case", choices=("all", *acceptance.CASES), help="run only the named disposable installer guard qualification")
     test.add_argument("--provider", choices=("system-info", "service-inspection", "public-session", "consent-ui", "accessibility", "ui-provider", "model-compatibility", "upstream-compatibility", "host-boundary", "protocol-conformance", "model-profile-low", "model-profile-high", "model-inference", "model-service", "session-inference", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime", "installed-policy", "installed-development", "installed-guard", "installed-executor"), help="run the named real product provider smoke in the verified guest")
@@ -103,6 +105,8 @@ def dispatch(args) -> tuple[ExitCode, dict]:
             trust = guest.pin_console(config)
             return ExitCode.SUCCESS, {"state": "console-trust-pinned", "identity_verified": False, "host_key_fingerprint": trust["host_key_fingerprint"]}
         return guest.enroll(load_config(args.workspace), args.trust_file)
+    if args.command == "model-seed":
+        return model_seed.export(load_config(args.workspace), args.artifact)
     if args.command == "sync":
         return sync.synchronize(load_config(args.workspace))
     if args.command == "deploy":
@@ -114,12 +118,14 @@ def dispatch(args) -> tuple[ExitCode, dict]:
             raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Package selection requires the packages build target")
         return jobs.start(load_config(args.workspace), "build-" + args.target, package=args.package, detach=args.detach)
     if args.command == "test":
+        if args.with_model and (args.suite != "desktop" or args.desktop_run is not None):
+            raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Model image selection requires a fresh desktop run")
         if args.desktop_run is not None and args.suite != "desktop":
             raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Desktop run requires desktop scope")
         if args.suite == "desktop":
             if args.detach or args.provider is not None or args.bootstrap_case is not None:
                 raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Desktop runner requires its own scope without detach/provider/bootstrap case")
-            return desktop.run(load_config(args.workspace), args.desktop_run)
+            return desktop.run(load_config(args.workspace), args.desktop_run, with_model=args.with_model)
         if args.provider is not None:
             if args.suite != "integration" or args.bootstrap_case is not None:
                 raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Provider smoke requires integration scope without a bootstrap case")

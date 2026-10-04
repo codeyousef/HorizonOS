@@ -17,7 +17,7 @@ installation_uuid=$(cat installation.uuid)
 serial=$(cat disk.serial)
 image_target=aios-dev
 [[ ! -e image.target ]] || image_target=$(cat image.target)
-[[ $image_target == aios-dev || $image_target == aios-desktop-test ]] || die 'Unregistered image target'
+[[ $image_target == aios-dev || $image_target == aios-desktop-test || $image_target == aios-model-test ]] || die 'Unregistered image target'
 [[ $guest_uuid =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]] || die 'Invalid guest UUID'
 [[ $installation_uuid =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]] || die 'Invalid installation UUID'
 [[ $serial == AIOS_DEV_ROOT ]] || die 'Unexpected disk serial'
@@ -67,6 +67,15 @@ fi
 printf 'Verified NixOS installer, virt=%s, DMI=%s, role=development, disk=%s, serial=%s\n' "$virt" "$guest_uuid" "$disk" "$serial"
 printf 'Authorization: fresh virtual disk only; installation UUID=%s\n' "$installation_uuid"
 
+if [[ $image_target == aios-model-test ]]; then
+  [[ -f model-import.sh && ! -L model-import.sh && -d model ]] || die 'Verified model seed is missing'
+  # Only initial provisioning reaches this data import. Reviewed hashes and
+  # sizes are checked again inside the fixed generated import operation.
+  bash ./model-import.sh --verify
+else
+  [[ ! -e model-import.sh && ! -e model ]] || die 'Unexpected model seed in a model-disabled image'
+fi
+
 # No destructive operation appears above the identity/fresh-disk checks.
 if [[ $mode == fresh ]]; then
   sgdisk --clear --disk-guid="$guest_uuid" --new=1:0:+1G --typecode=1:ef00 --change-name=1:AIOS_DEV_EFI \
@@ -93,6 +102,11 @@ cp -r source/. "$candidate/"
 chmod -R u+w "$candidate"
 printf '{"authorized_key":"%s","disk_serial":"AIOS_DEV_ROOT","dmi_uuid":"%s","guest_role":"development","installation_uuid":"%s","management_channel":"ssh-development","schema_version":1}' \
   "$public_key" "$guest_uuid" "$installation_uuid" >"$candidate/nix/machines/aios-dev/enrollment.json"
+if [[ $image_target == aios-model-test ]]; then
+  # nixos-install builds in the mounted target store, not the live ISO store.
+  # Import only the checked public data into that same fixed /mnt store.
+  bash ./model-import.sh --import
+fi
 nixos-install --root /mnt --no-root-passwd --no-channel-copy \
   --flake "path:$candidate#$image_target" --no-update-lock-file --no-write-lock-file \
   --option pure-eval true --option allow-import-from-derivation false \
