@@ -45,6 +45,14 @@ the task terminates with `MODEL_UNAVAILABLE`. `act`/`automate` orchestration is
 currently unsupported. The isolated `--socket` fixture remains model-disabled.
 Task ownership does not support resuming from a different client connection.
 
+The hardened user service authenticates the installed model socket using kernel
+credentials. Its user namespace can map the system's root and inference group
+to overflow IDs. The client translates expected ownership through the kernel's
+UID/GID maps and still requires the socket peer to be PID 1, checks the fixed
+protected directories, socket mode and group, and rechecks the socket inode.
+An overflow UID alone never proves root identity. These checks require no
+exception to the user service's namespaces or filesystem/network restrictions.
+
 Queued cancellation stops before inference. Running cancellation remains in
 `cancelling` until the native context terminates; transport failures report their
 actual error. Forgetting or losing a requester cancels outstanding work. The
@@ -122,6 +130,14 @@ tests; they do not establish two-user desktop or privileged-policy acceptance.
 systemd user service, its effective hardening, default endpoints and restart.
 It refuses to replace an existing user service and cleans up only its own
 temporary runtime registration.
+
+`python3 tools/devctl.py test --suite integration --provider installed-session-inference
+--json` exercises the packaged hardened user service against the real installed
+CPU model in the disposable model acceptance image. It checks a read-only answer
+with fresh system evidence, unchanged unit bytes, effective restrictions, service
+inspection and broker restart. It requires an enrolled normal user and retains
+failed responses. It does not qualify graphical inference, model crash reporting
+or the complete orchestration loop.
 
 `python3 tools/devctl.py test --suite integration --provider session-inference
 --json` runs actual native session and model daemons with private development

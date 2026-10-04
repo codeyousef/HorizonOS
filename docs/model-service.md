@@ -167,6 +167,10 @@ request state was discarded, and asks the recovered service for a cited answer.
 Its test-only capability exceptions are `CAP_KILL` and `CAP_SYS_PTRACE`, for the
 fixed kill and process observation. The module asserts a development image and
 is absent from production composition. The production model gains no privilege.
+The fixture compares the root-owned read-only installed authority file with the
+immutable compiled authority in the current system closure, then checks the
+actual installation, DMI, disk and management identities. Its execution does not
+hold the multi-user or graphical boot targets while measurements run.
 
 The root-owned report binds the current installation and boot. The normal-user
 `installed-model-lifecycle` provider reads it without mutations. Desktop acceptance
@@ -180,6 +184,7 @@ python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE 
 python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model-users --peer-workspace /mnt/Storage/PATH_TO_ENROLLED_TESTER_WORKSPACE --json
 python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model-idle --detach --json
 python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model-lifecycle --detach --json
+python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-session-inference --detach --json
 ```
 
 Replace workspace placeholders with independently verified configurations.

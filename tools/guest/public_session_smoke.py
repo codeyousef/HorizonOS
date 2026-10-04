@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import sys
 import time
 from service_inspection_smoke import products
 
@@ -15,6 +16,11 @@ UNIT = "aios-session-acceptance-" + uuid.uuid4().hex + ".service"
 
 
 def main():
+    installed_model = sys.argv[1:] == ["--installed-model"]
+    if sys.argv[1:] and not installed_model:
+        raise RuntimeError("unregistered user-service scenario")
+    if installed_model and (os.geteuid() == 0 or Path("/etc/aios/model-test-profile").read_text().strip() != "installed-normal-cpu-model-v1"):
+        raise RuntimeError("installed inference requires the model test image and normal UID")
     paths, binaries = products()
     runtime = Path(f"/run/user/{os.geteuid()}")
     info = runtime.lstat()
@@ -77,8 +83,8 @@ def main():
             time.sleep(0.01)
         if stat.S_IMODE(socket.stat().st_mode) != 0o600:
             raise RuntimeError("private socket mode mismatch")
-        def cli(*arguments):
-            return subprocess.run([str(binaries["aiosctl"]), *arguments], env=env, stdout=subprocess.PIPE, timeout=10)
+        def cli(*arguments, timeout=10):
+            return subprocess.run([str(binaries["aiosctl"]), *arguments], env=env, stdout=subprocess.PIPE, timeout=timeout)
         status = cli("status", "--json")
         if status.returncode != 0:
             raise RuntimeError("packaged status client failed")
@@ -89,9 +95,18 @@ def main():
         ui_denial = json.loads(ui.stdout)
         if ui.returncode != 1 or ui_denial["error"]["code"] != "TARGET_NOT_FOUND":
             raise RuntimeError("hardened UI observer did not return the stable missing-session error")
-        question = cli("ask", "Why is sshd running?", "--json")
+        question = cli("ask", "What operating system is running? Cite the provided observation.", "--json", timeout=100 if installed_model else 10)
         answer = json.loads(question.stdout)
-        if question.returncode != 1 or answer["error"] != "MODEL_UNAVAILABLE" or answer["mutation_performed"]:
+        print("AIOS_USER_MODEL_ANSWER=" + json.dumps({"installed_model": installed_model, "upstream_exit": question.returncode, "answer": answer}), flush=True)
+        if installed_model:
+            if question.returncode != 0 or answer["state"] != "completed" or answer["error"] is not None or answer["mutation_performed"]:
+                raise RuntimeError("hardened user broker did not reach the actual installed model")
+            output = answer["output"]
+            if (output["response"]["kind"] != "answer" or "NixOS" not in output["response"]["text"]
+                    or len(output["evidence"]) != 1 or output["response"]["evidence_ids"] != output["evidence"][0]["evidence_ids"]
+                    or output["evidence"][0]["data"]["os_id"] != "nixos" or not output["local_cpu"] or output["mutation_performed"]):
+                raise RuntimeError("installed inference did not return independently enrolled system evidence")
+        elif question.returncode != 1 or answer["error"] != "MODEL_UNAVAILABLE" or answer["mutation_performed"]:
             raise RuntimeError("unavailable model was not reported truthfully")
         inspection = cli("inspect", "service", "sshd.service", "--json")
         observed = json.loads(inspection.stdout)
@@ -103,7 +118,7 @@ def main():
             raise RuntimeError("packaged restart did not establish a new daemon")
         print("AIOS_USER_SERVICE=" + json.dumps({"outputs":[str(p) for p in paths], "before":properties, "after":after,
             "unit_name":UNIT,"package_unit_sha256":hashlib.sha256(unit_bytes).hexdigest(),"exact_unit_bytes":True,
-            "capabilities":capabilities,"ui_selection_denial":ui_denial,"unavailable_model":answer,"service_observation":observed}), flush=True)
+            "capabilities":capabilities,"ui_selection_denial":ui_denial,"installed_model":installed_model,"model_answer":answer,"service_observation":observed}), flush=True)
     except Exception:
         print("AIOS_USER_SERVICE_FAILURE=" + json.dumps(show()), flush=True)
         journal = subprocess.run(["journalctl", "--user", "--user-unit=" + UNIT, "--boot", "--lines=20", "--no-pager", "--output=json", "--output-fields=MESSAGE,PRIORITY,_BOOT_ID,_UID"],

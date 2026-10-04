@@ -34,7 +34,9 @@ in {
     wantedBy = [ "multi-user.target" ];
     after = [ "sshd.service" "aios-model.socket" ];
     serviceConfig = {
-      Type = "oneshot";
+      # Exec startup completes immediately; inference tests must not hold the
+      # multi-user/graphical target until their measurements finish.
+      Type = "exec";
       ExecStart = "${preflight}/bin/model_lifecycle_preflight";
       RuntimeDirectory = "aios-model-acceptance";
       RuntimeDirectoryMode = "0755";

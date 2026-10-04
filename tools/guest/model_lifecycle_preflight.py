@@ -24,11 +24,16 @@ SYSTEMCTL = '/run/current-system/sw/bin/systemctl'
 
 def identity():
     value = snapshot.identity()
-    authority = Path('/etc/aios/target-authority.json').resolve(strict=True)
+    authority = Path('/run/current-system/etc/aios/target-authority.json').resolve(strict=True)
     info = authority.stat()
-    expected = json.loads(authority.read_text())
+    data = authority.read_bytes()
+    installed = Path('/etc/aios/target-authority.json')
+    installed_info = installed.stat()
+    expected = json.loads(data)
     actual_dmi = Path('/sys/class/dmi/id/product_uuid').read_text().strip().lower()
     if (not authority.is_relative_to('/nix/store') or info.st_uid != 0 or info.st_mode & 0o222
+            or not stat.S_ISREG(installed_info.st_mode) or installed_info.st_uid != 0 or installed_info.st_mode & 0o222
+            or installed.read_bytes() != data
             or value['os_id'] != 'nixos' or value['guest_role'] != 'development'
             or value['dmi_uuid'] != actual_dmi or value['disk_serial'] != 'AIOS_DEV_ROOT'
             or Path('/etc/aios/management-channel').read_text().strip() != 'ssh-development'
@@ -117,14 +122,15 @@ def main():
     parent = REPORT.parent.stat()
     if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_mode & 0o022 or REPORT.exists():
         return 8
-    expected = identity()
     report = {'schema_version': 1, 'evidence_kind': 'actual-installed-model-fixed-root-lifecycle-fixture',
-              'identity': expected, 'verified': False, 'controls': [], 'restarts': [], 'memory_samples': [],
+              'identity': None, 'verified': False, 'controls': [], 'restarts': [], 'memory_samples': [],
               'limits': ['Root-only initial acceptance instrumentation; absent from production composition.',
                          'PSS observations are samples, not a true process peak or all-buffer forensic proof.',
                          'Direct inference transport loss is observed; user-facing MODEL_CRASHED qualification is separate.']}
     client = None
     try:
+        expected = identity()
+        report['identity'] = expected
         client = Client('/run/aios/model.sock')
         report['initial_status'] = status(client)
         answer = client.wait(generate(client))

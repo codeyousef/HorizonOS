@@ -20,6 +20,39 @@ struct Secret(String);
 impl Drop for Secret { fn drop(&mut self) { wipe(&mut self.0); } }
 
 pub struct Endpoint { path: PathBuf, qualification_pid: Option<u32> }
+
+// Kernel object ownership and SO_PEERCRED IDs are expressed in the caller's
+// user namespace. The hardened user unit maps only its own identity; PID 1's
+// root identity and the inference group can consequently be unmapped. Translate
+// the expected IDs through the kernel map rather than treating overflow as root.
+fn mapped_id(id:u32,map:&str,overflow:u32)->Result<u32,ErrorCode> {
+    let mut ranges=Vec::new();
+    for line in map.lines() {
+        let fields=line.split_whitespace().map(str::parse::<u64>).collect::<Result<Vec<_>,_>>()
+            .map_err(|_|ErrorCode::PermissionDenied)?;
+        if fields.len()!=3 || fields[2]==0 || fields[0].checked_add(fields[2]).is_none_or(|end|end>u32::MAX as u64)
+            || fields[1].checked_add(fields[2]).is_none_or(|end|end>u32::MAX as u64) {
+            return Err(ErrorCode::PermissionDenied);
+        }
+        let (inside,outside,count)=(fields[0],fields[1],fields[2]);
+        if ranges.iter().any(|&(a,b,n)| inside<a+n && a<inside+count || outside<b+n && b<outside+count) {
+            return Err(ErrorCode::PermissionDenied);
+        }
+        ranges.push((inside,outside,count));
+    }
+    if ranges.is_empty() {return Err(ErrorCode::PermissionDenied);}
+    Ok(ranges.iter().find_map(|&(inside,outside,count)| {
+        let id=id as u64;
+        (id>=outside && id<outside+count).then(||(inside+id-outside) as u32)
+    }).unwrap_or(overflow))
+}
+fn kernel_id(id:u32,group:bool)->Result<u32,ErrorCode> {
+    let (map,overflow)=if group {("/proc/self/gid_map","/proc/sys/kernel/overflowgid")} else {("/proc/self/uid_map","/proc/sys/kernel/overflowuid")};
+    let map=fs::read_to_string(map).map_err(|_|ErrorCode::PermissionDenied)?;
+    let overflow=fs::read_to_string(overflow).map_err(|_|ErrorCode::PermissionDenied)?
+        .trim().parse().map_err(|_|ErrorCode::PermissionDenied)?;
+    mapped_id(id,&map,overflow)
+}
 impl Endpoint {
     pub fn installed() -> Self { Self { path: PathBuf::from("/run/aios/model.sock"), qualification_pid: None } }
     /// Explicit development-only transport qualification. No mutation or grant
@@ -49,16 +82,19 @@ impl Endpoint {
         } else {
             // systemd owns and creates the listening socket before passing it to
             // the sandboxed model service. SO_PEERCRED identifies PID 1 here.
+            let root=kernel_id(0,false)?;
             for directory in [Path::new("/run"), Path::new("/run/aios")] {
                 let m = fs::symlink_metadata(directory).map_err(|_| ErrorCode::ModelUnavailable)?;
-                if !m.is_dir() || m.uid() != 0 || m.mode() & 0o022 != 0 || directory.canonicalize().ok().as_deref() != Some(directory) {
+                if !m.is_dir() || m.uid() != root || m.mode() & 0o022 != 0 || directory.canonicalize().ok().as_deref() != Some(directory) {
                     return Err(ErrorCode::PermissionDenied);
                 }
             }
             let group = nix::unistd::Group::from_name("aios-inference").map_err(|_| ErrorCode::PermissionDenied)?
                 .ok_or(ErrorCode::ModelUnavailable)?;
-            if meta.uid() != 0 || meta.gid() != group.gid.as_raw() || meta.mode() & 0o777 != 0o660 { return Err(ErrorCode::PermissionDenied); }
-            (0, 1)
+            if meta.uid() != root || meta.gid() != kernel_id(group.gid.as_raw(),true)? || meta.mode() & 0o777 != 0o660 { return Err(ErrorCode::PermissionDenied); }
+            // An unmapped UID alone cannot identify root: require kernel PID 1
+            // as well. Another unmapped process never satisfies this binding.
+            (root, 1)
         };
         let stream = UnixStream::connect(&self.path).map_err(|_| ErrorCode::ModelUnavailable)?;
         stream.set_read_timeout(Some(Duration::from_secs(2))).map_err(|_| ErrorCode::ModelUnavailable)?;
@@ -215,6 +251,18 @@ mod tests {
     use super::*;
     use crate::{State, Operation, Mode, Submit};
     use std::{os::unix::net::UnixListener, sync::Mutex};
+    #[test]
+    fn kernel_namespace_mapping_does_not_assume_overflow_means_root() {
+        assert_eq!(mapped_id(0,"0 0 4294967295\n",65534),Ok(0));
+        assert_eq!(mapped_id(991,"0 0 4294967295\n",65534),Ok(991));
+        assert_eq!(mapped_id(0,"1000 1000 1\n",65534),Ok(65534));
+        assert_eq!(mapped_id(1000,"1000 1000 1\n",65534),Ok(1000));
+        assert_eq!(mapped_id(991,"100 100 1\n",65534),Ok(65534));
+        assert_eq!(mapped_id(1000,"0 1000 1\n",65534),Ok(0));
+        for bad in ["", "0 0 0", "0 0 1\n0 1 1", "0 0 2\n3 1 1", "0 0 4294967296", "18446744073709551615 0 1", "not a map", "0 0 1 extra"] {
+            assert_eq!(mapped_id(0,bad,65534),Err(ErrorCode::PermissionDenied));
+        }
+    }
     fn submit(state:&SharedState,peer:&Peer,text:&str)->String {
         state.lock().unwrap().dispatch(peer,Operation::Submit {request:Submit {mode:Mode::Ask,text:text.into(),client_nonce:Uuid::new_v4().to_string(),context_handles:vec![],selected_app_handle:None,selected_session_handle:None}}).unwrap()["request_id"].as_str().unwrap().into()
     }
