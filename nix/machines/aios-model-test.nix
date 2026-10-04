@@ -2,12 +2,37 @@
 # No mock model, alternate daemon mode, or model privilege bypass is enabled.
 { aiosModelArtifact, config, pkgs, lib, ... }:
 let
+  lock = builtins.fromJSON (builtins.readFile ../../models/lock.json);
+  corrupt = pkgs.runCommandNoCC "aios-model-corruption-test" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+    mkdir -p "$out"
+    python3 - ${aiosModelArtifact}/${lock.artifact.filename} "$out/${lock.artifact.filename}" "$out/profile.json" <<'PY'
+    import hashlib,json,os,sys
+    original,changed,profile=sys.argv[1:]
+    with open(original,'rb') as source,open(changed,'wb') as target:
+        first=source.read(1); target.write(bytes([first[0]^1]))
+        while data:=source.read(1024*1024): target.write(data)
+    os.chmod(changed,0o444)
+    def digest(path):
+        h=hashlib.sha256()
+        with open(path,'rb') as source:
+            while data:=source.read(1024*1024): h.update(data)
+        return h.hexdigest()
+    expected='${lock.artifact.sha256}'
+    assert os.stat(original).st_size==os.stat(changed).st_size==${toString lock.artifact.bytes}
+    assert digest(original)==expected and digest(changed)!=expected
+    with open(profile,'w') as target:
+        json.dump({'schema_version':1,'original':original,'corrupt':changed,'bytes':os.stat(original).st_size,'expected_sha256':expected,'corrupt_sha256':digest(changed)},target)
+    os.chmod(profile,0o444)
+    PY
+  '';
   fixture = pkgs.runCommandNoCC "aios-model-acceptance-fixture" {} ''
     mkdir -p "$out"
     install -m444 ${../../tools/guest/model_lifecycle_preflight.py} "$out/model_lifecycle_preflight.py"
     install -m444 ${../../tools/guest/installed_model_lifecycle_smoke.py} "$out/installed_model_lifecycle_smoke.py"
     install -m444 ${../../tools/guest/model_service_smoke.py} "$out/model_service_smoke.py"
     install -m444 ${../../tools/guest/model_queue_fixture.py} "$out/model_queue_fixture.py"
+    install -m444 ${../../tools/guest/model_public_fixture.py} "$out/model_public_fixture.py"
+    install -m444 ${../../tools/guest/desktop_probe.py} "$out/desktop_probe.py"
     install -m444 ${../../tools/guest/snapshot.py} "$out/snapshot.py"
   '';
   runner = file: pkgs.writeScriptBin file ''
@@ -39,13 +64,16 @@ in {
     manifest = "${aiosModelArtifact}/lock.json";
   };
   environment.etc."aios/model-test-profile".text = "installed-normal-cpu-model-v1\n";
+  environment.etc."aios/model-corruption-test.json" = { source = "${corrupt}/profile.json"; mode = "symlink"; };
+  systemd.tmpfiles.rules = [ "d /run/systemd/system/aios-model.service.d 0700 root root -" ];
   environment.systemPackages = [ probe ];
   # No RPC or sudo route. Only this compiled initial test-image unit can invoke
   # the root fixture; it names one fixed service and accepts no arguments.
   systemd.services.aios-model-acceptance = {
     description = "Fixed initial Horizon OS model crash/restart acceptance";
     wantedBy = [ "multi-user.target" ];
-    after = [ "sshd.service" "aios-model.socket" ];
+    after = [ "sshd.service" "aios-model.socket" "user@1001.service" ];
+    requires = [ "user@1001.service" ];
     serviceConfig = {
       # Exec startup completes immediately; inference tests must not hold the
       # multi-user/graphical target until their measurements finish.
@@ -65,7 +93,11 @@ in {
       RestrictAddressFamilies = "AF_UNIX";
       PrivateTmp = true;
       ProtectSystem = "strict";
-      ProtectHome = true;
+      # Fixed tester bus/runtime and one root-only test mount drop-in directory.
+      # No home contents, arbitrary unit file or public privileged RPC.
+      ProtectHome = "tmpfs";
+      BindPaths = [ "/run/user/1001" ];
+      ReadWritePaths = [ "/run/systemd/system/aios-model.service.d" ];
     };
   };
 }

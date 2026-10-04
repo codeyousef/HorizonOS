@@ -41,6 +41,16 @@ kernel UID/GID/start identity rechecks. There is no public root RPC, arbitrary
 unit/process/command selector or model invocation of the fixture. Three extra
 load accounts cannot log in and have no SSH keys/home. The module asserts a
 development image; production excludes this fixture and its privilege bounds.
+Public failure instrumentation additionally binds only `/run/user/1001` under
+an empty home view, starts a copied original hardened user unit as the permanently
+dropped tester, and requests only fixed CLI ask/service-inspection and read-only
+KWin operations. Its root write exception is one root-only runtime model drop-in
+directory: the compiled one-byte corruption profile supplies a fixed read-only
+GGUF binding, never a caller-selected path or writable mount. The fixture checks
+actual daemon-view and unchanged store digests, removes only its exact owned
+drop-in, restores the original view and verifies recovery. It has no SYS_ADMIN
+capability and exposes no root RPC. Pending phase files are observations for
+host verification, never approvals, task authority or production heartbeats.
 
 The graphical native provider requires the desktop's original user namespace
 for kernel process/executable verification. Unprivileged user-unit mount/network

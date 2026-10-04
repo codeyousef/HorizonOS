@@ -9,6 +9,33 @@ import subprocess
 import snapshot
 
 REPORT = Path('/run/aios-model-acceptance/result.json')
+PHASE = REPORT.parent / 'phase.json'
+
+
+def pending_phase(identity):
+    if not PHASE.exists():
+        return None
+    directory = PHASE.parent.lstat()
+    if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != 0 or directory.st_mode & 0o022:
+        raise RuntimeError('unsafe model phase directory')
+    fd = os.open(PHASE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as file:
+        before = os.fstat(file.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or before.st_mode & 0o222 != 0o200 or before.st_size > 32768:
+            raise RuntimeError('unsafe model phase file')
+        value = snapshot.decode(file.read(32769))
+        after = os.fstat(file.fileno())
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise RuntimeError('model phase file changed')
+    if (set(value) != {'schema_version', 'evidence_kind', 'identity', 'phase', 'model_unit', 'observed_boottime_ns'}
+            or value['schema_version'] != 1 or value['evidence_kind'] != 'actual-fixed-model-failure-phase'
+            or value['identity'] != identity or value['phase'] not in ('crash_outage', 'corrupt_model', 'restored')):
+        raise RuntimeError('model phase belongs to another boot or target')
+    current = subprocess.run(['/run/current-system/sw/bin/systemctl', 'show', 'aios-model.service', '--property=MainPID',
+                              '--property=ActiveState', '--property=SubState', '--property=NRestarts'],
+                             capture_output=True, text=True, check=True, timeout=5)
+    value['current_model_unit'] = dict(line.split('=', 1) for line in current.stdout.splitlines() if '=' in line)
+    return value
 
 
 def observe():
@@ -20,7 +47,10 @@ def observe():
                             capture_output=True, text=True, check=True, timeout=10)
     unit = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
     if unit['ActiveState'] in ('activating', 'active') or not REPORT.exists() and unit['Result'] == 'success':
-        return 3, {'schema_version': 1, 'state': 'pending', 'identity': identity, 'unit': unit}
+        phase = pending_phase(identity)
+        if snapshot.identity() != identity:
+            raise RuntimeError('model phase target changed')
+        return 3, {'schema_version': 1, 'state': 'pending', 'identity': identity, 'unit': unit, 'phase': phase}
     directory = REPORT.parent.lstat()
     if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != 0 or directory.st_mode & 0o022:
         raise RuntimeError('unsafe model lifecycle evidence directory')
@@ -42,6 +72,9 @@ def observe():
                and len(queue.get('accepted_generation_ids', [])) == 9 and queue.get('running') == 1 and queue.get('queued') == 8
                and queue.get('global_queue_denial', {}).get('error') == 'RESOURCE_EXHAUSTED'
                and type(queue.get('cancel_elapsed_ms')) is int and 0 <= queue['cancel_elapsed_ms'] < 2000
+               and report.get('public_crash_failure', {}).get('answer', {}).get('error') == 'MODEL_CRASHED'
+               and report.get('corrupt_model', {}).get('verified') is True
+               and report.get('corrupt_model', {}).get('public_failure', {}).get('answer', {}).get('error') == 'TARGET_CHANGED'
                and unit == {'ActiveState': 'inactive', 'SubState': 'dead', 'Result': 'success', 'ExecMainStatus': '0'})
     return (0 if success else 8), {'schema_version': 1, 'state': 'verified' if success else 'failed', 'unit': unit, 'proof': report}
 

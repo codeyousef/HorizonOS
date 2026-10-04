@@ -140,7 +140,21 @@ def observe(config):
         if guest.enrolled_identity(config)[1] != identity:
             raise invalid("Model lifecycle target changed during observation")
         if code == 3:
-            raise DevctlError(ExitCode.UNMET_PREREQUISITE, "MODEL_LIFECYCLE_PENDING", "The same fixed initial model lifecycle test is still running")
+            pending = sync.contract.decode(output)
+            phase = pending.get("phase")
+            details = {}
+            if phase is not None:
+                if (pending.get("state") != "pending" or pending.get("identity") != identity or not isinstance(phase, dict)
+                        or phase.get("identity") != identity or phase.get("evidence_kind") != "actual-fixed-model-failure-phase"):
+                    raise invalid("Pending model failure phase belongs to another target")
+                current = phase.get("current_model_unit", {})
+                outage = (phase.get("phase") == "crash_outage" and current.get("ActiveState") in ("activating", "inactive", "failed", "deactivating") and current.get("MainPID") == "0")
+                corrupt = (phase.get("phase") == "corrupt_model" and current.get("ActiveState") == "active"
+                           and current.get("MainPID") == phase.get("model_unit", {}).get("MainPID"))
+                if outage or corrupt:
+                    details = {"pending_observation": {**observation, "model_failure_phase": phase,
+                               "host_observed_at": datetime.now(timezone.utc).isoformat(), "pinned_ssh_commands_succeeded": True}}
+            raise DevctlError(ExitCode.UNMET_PREREQUISITE, "MODEL_LIFECYCLE_PENDING", "The same fixed initial model lifecycle test is still running", details=details)
         if code != 0:
             raise DevctlError(ExitCode.VERIFICATION_FAILURE, "MODEL_LIFECYCLE_FAILED", "Fixed model lifecycle test failed; disposable VM retained", details={"upstream_exit": code})
         proof = sync.contract.decode(output)
@@ -161,7 +175,7 @@ def run(owner, run_id=None, *, with_model=False):
               "source_head": value["manifest"]["git_head"], "source_dirty": value["manifest"]["dirty"], "snapshot_digest": value["snapshot_digest"],
               "host_source": {"manifest": host_manifest, "snapshot_digest": host_digest},
               "lock_hashes": {item["path"]: item["sha256"] for item in value["manifest"]["files"] if item["path"] in {"flake.lock", "Cargo.lock"}},
-              "model_hash": None, "runtime_hash": None, "workspace": str(config.root), "steps": [],
+              "model_hash": None, "runtime_hash": None, "workspace": str(config.root), "steps": [], "model_failure_observations": [],
               "target": {"guest_uuid": value["guest_uuid"], "installation_uuid": value["installation_uuid"], "guest_role": "development",
                          "fixture_role": "synthetic-disposable-desktop", "disk_serial": provision.DISK_SERIAL,
                          "media_sha256": record["media"]["sha256"], "seed_sha256": record["seed_sha256"], "firmware_sha256": record["firmware_sha256"]},
@@ -201,9 +215,18 @@ def run(owner, run_id=None, *, with_model=False):
                     observation = observe(config)
                     break
                 except DevctlError as error:
+                    pending = error.details.get("pending_observation")
+                    if pending is not None:
+                        if len(report["model_failure_observations"]) >= 100:
+                            raise invalid("Model failure observation count exceeds bound")
+                        report["model_failure_observations"].append(pending)
                     if error.exit_code != ExitCode.UNMET_PREREQUISITE or time.monotonic() >= deadline:
                         raise
-                    time.sleep(3)
+                    time.sleep(0.2 if error.code == "MODEL_LIFECYCLE_PENDING" else 3)
+            if config.values["guest_build_target"] == model_seed.TARGET:
+                phases = {item["model_failure_phase"]["phase"] for item in report["model_failure_observations"]}
+                if not {"crash_outage", "corrupt_model"}.issubset(phases):
+                    raise DevctlError(ExitCode.VERIFICATION_FAILURE, "MODEL_FAILURE_SSH_UNQUALIFIED", "Actual pinned SSH reads were not observed in both model failure phases")
             report["observation"] = observation
             guest.enrolled_identity(config)
             screenshot = step("vm console --capture", lambda: vm.console(config, capture=True))

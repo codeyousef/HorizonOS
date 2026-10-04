@@ -5,6 +5,8 @@ No RPC, arguments, arbitrary units, commands, paths or model-selected operation.
 The production model receives no authorization to invoke this fixture.
 """
 import hashlib
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -16,11 +18,124 @@ import time
 
 from model_service_smoke import Client
 import model_queue_fixture
+from model_public_fixture import PublicProbe, require_failure
+import desktop_probe
 import snapshot
 
 REPORT = Path('/run/aios-model-acceptance/result.json')
 UNIT = 'aios-model.service'
 SYSTEMCTL = '/run/current-system/sw/bin/systemctl'
+PHASE = REPORT.parent / 'phase.json'
+DROPIN = Path('/run/systemd/system/aios-model.service.d/99-aios-model-corruption.conf')
+
+
+def phase(expected, name):
+    recheck(expected)
+    value = {'schema_version': 1, 'evidence_kind': 'actual-fixed-model-failure-phase', 'identity': expected,
+             'phase': name, 'model_unit': unit(expected), 'observed_boottime_ns': time.clock_gettime_ns(time.CLOCK_BOOTTIME)}
+    temporary = PHASE.with_suffix('.tmp')
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'w') as output:
+        json.dump(value, output); output.flush(); os.fsync(output.fileno())
+    os.chmod(temporary, 0o644)
+    os.replace(temporary, PHASE)
+    recheck(expected)
+
+
+def desktop(expected):
+    recheck(expected)
+    with contextlib.redirect_stdout(io.StringIO()) as output:
+        desktop_probe.main()
+    value = json.loads(output.getvalue())
+    if value['boot_id'] != expected['boot_id']:
+        raise RuntimeError('desktop continuity target changed')
+    recheck(expected)
+    return value
+
+
+def digest(path):
+    h = hashlib.sha256()
+    with path.open('rb') as file:
+        while data := file.read(1024 * 1024):
+            h.update(data)
+    return h.hexdigest()
+
+
+def reload(expected):
+    recheck(expected)
+    result = subprocess.run([SYSTEMCTL, 'daemon-reload'], capture_output=True, timeout=10)
+    recheck(expected)
+    if result.returncode:
+        raise RuntimeError('fixed test mount reload failed')
+
+
+def corrupt_model(expected, public):
+    if os.getuid() != 0 or os.geteuid() != 0:
+        raise PermissionError('corruption coordinator requires initial root fixture')
+    recheck(expected)
+    profile = Path('/etc/aios/model-corruption-test.json').resolve(strict=True)
+    info = profile.stat()
+    if not profile.is_relative_to('/nix/store') or info.st_uid != 0 or info.st_mode & 0o222:
+        raise RuntimeError('corruption profile is not immutable compiled test data')
+    data = snapshot.decode(profile.read_bytes())
+    if set(data) != {'schema_version', 'original', 'corrupt', 'bytes', 'expected_sha256', 'corrupt_sha256'} or data['schema_version'] != 1:
+        raise RuntimeError('invalid compiled corruption profile')
+    original, bad = Path(data['original']), Path(data['corrupt'])
+    for path in (original, bad):
+        info = path.lstat()
+        if (path.resolve(strict=True) != path or not path.is_relative_to('/nix/store') or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != 0 or info.st_mode & 0o222 or info.st_size != data['bytes']):
+            raise RuntimeError('corruption fixture artifact is not protected immutable data')
+    if digest(original) != data['expected_sha256'] or digest(bad) != data['corrupt_sha256'] or data['corrupt_sha256'] == data['expected_sha256']:
+        raise RuntimeError('immutable corruption fixture digests differ')
+    parent = DROPIN.parent.lstat()
+    if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or stat.S_IMODE(parent.st_mode) != 0o700 or DROPIN.exists() or DROPIN.is_symlink():
+        raise RuntimeError('fixed corruption drop-in directory is unsafe')
+    payload = ('[Service]\nBindReadOnlyPaths=' + str(bad) + ':' + str(original) + ':norbind\n').encode()
+    control(expected, 'stop')
+    control(expected, 'reset-failed')
+    fd = os.open(DROPIN, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as output:
+        output.write(payload); output.flush(); os.fsync(output.fileno())
+        owned = os.fstat(output.fileno())
+    try:
+        reload(expected)
+        control(expected, 'start')
+        before = process(expected)
+        # Observe the actual running daemon's mount view, never alter store data.
+        actual_path = Path('/proc') / str(before['pid']) / 'root' / str(original).lstrip('/')
+        actual_sha = digest(actual_path)
+        if actual_sha != data['corrupt_sha256'] or digest(original) != data['expected_sha256'] or process(expected)['start_ticks'] != before['start_ticks']:
+            raise RuntimeError('actual daemon did not see only the immutable one-byte corrupt view')
+        public.call('start_short')
+        rejected = public.call('result')
+        require_failure(rejected, 'TARGET_CHANGED')
+        probe = Client('/run/aios/model.sock')
+        try:
+            rejected_status = status(probe)
+        finally:
+            probe.socket.close()
+        if rejected_status['loaded'] or rejected_status['busy'] or rejected_status['own_queued']:
+            raise RuntimeError('hash-mismatched model retained inference state')
+        phase(expected, 'corrupt_model')
+        health = public.call('health')
+        desktop_proof = desktop(expected)
+        # Give the registered host runner time to perform actual pinned SSH
+        # reads in this failure phase; the data view remains corrupt throughout.
+        time.sleep(4)
+        return {'verified': True, 'evidence_kind': 'actual-installed-production-daemon-immutable-hash-mismatch',
+                'artifact': data, 'actual_daemon_view_sha256': actual_sha, 'process': before, 'public_failure': rejected,
+                'status_after_rejection': rejected_status, 'deterministic_and_kwin_health': health, 'desktop': desktop_proof}
+    finally:
+        control(expected, 'stop')
+        info = DROPIN.lstat()
+        if (info.st_dev, info.st_ino, info.st_uid, stat.S_IMODE(info.st_mode)) != (owned.st_dev, owned.st_ino, 0, 0o600) or DROPIN.read_bytes() != payload:
+            raise RuntimeError('fixed corruption drop-in changed; cleanup refused')
+        DROPIN.unlink()
+        reload(expected)
+        control(expected, 'reset-failed')
+        control(expected, 'start')
+        phase(expected, 'restored')
 
 
 def identity():
@@ -127,8 +242,9 @@ def main():
               'identity': None, 'verified': False, 'controls': [], 'restarts': [], 'memory_samples': [],
               'limits': ['Root-only initial acceptance instrumentation; absent from production composition.',
                          'PSS observations are samples, not a true process peak or all-buffer forensic proof.',
-                         'Direct inference transport loss is observed; user-facing MODEL_CRASHED qualification is separate.']}
+                         'Finite desktop/SSH failure-phase samples do not prove continuous or latency-qualified availability.']}
     client = None
+    public = None
     try:
         expected = identity()
         report['identity'] = expected
@@ -152,9 +268,24 @@ def main():
                 raise RuntimeError('model explicit unload did not finish')
             time.sleep(0.05)
         report['memory_samples'].append({'phase': 'unloaded', **process(expected)})
-        active = generate(client, long=True)
+        # Type=exec lets the graphical target finish independently of this test.
+        ready_by = time.monotonic() + 30
+        while True:
+            try:
+                report['desktop_before_crashes'] = desktop(expected)
+                break
+            except (ValueError, subprocess.SubprocessError):
+                if time.monotonic() > ready_by:
+                    raise RuntimeError('actual desktop did not become ready')
+                time.sleep(0.1)
+        public = PublicProbe(expected, recheck)
+        report['public_client'] = public.proof
+        report['public_cli_start'] = public.call('start_crash')
         deadline = time.monotonic() + 10
-        while not status(client)['busy']:
+        while True:
+            observed = status(client)
+            if observed['busy'] and observed['loaded']:
+                break
             if time.monotonic() > deadline:
                 raise RuntimeError('model active request did not start')
             time.sleep(0.01)
@@ -162,13 +293,19 @@ def main():
             before = process(expected)
             began = time.monotonic()
             report['controls'].append(control(expected, 'kill', '--kill-whom=main', '--signal=KILL'))
+            phase(expected, 'crash_outage')
             if iteration == 0:
+                report['public_crash_failure'] = public.call('result')
+                require_failure(report['public_crash_failure'], 'MODEL_CRASHED')
                 try:
-                    client.result(active)
+                    status(client)
                 except (RuntimeError, OSError):
                     report['active_request_transport_lost'] = True
                 else:
                     raise RuntimeError('crashed process returned a result')
+            during = unit(expected)
+            health = public.call('health')
+            report.setdefault('crash_continuity', []).append({'model_unit': during, 'health': health, 'desktop': desktop(expected)})
             client.socket.close(); client = None
             deadline = began + 40
             while True:
@@ -188,10 +325,24 @@ def main():
             if after_status['loaded'] or after_status['busy'] or after_status['own_queued']:
                 raise RuntimeError('restarted model inherited request or model state')
             report['restarts'].append({'before': before, 'after': after, 'delay_seconds': round(delay, 3), 'status': after_status})
+            phase(expected, 'restored')
         recovered = client.wait(generate(client))
         if recovered['state'] != 'completed' or recovered['output']['evidence_ids'] != ['ev_lifecycle'] or recovered['mutation_performed']:
             raise RuntimeError('model did not answer after restart recovery')
         report['recovered_answer'] = recovered
+        client.socket.close(); client = None
+        report['corrupt_model'] = corrupt_model(expected, public)
+        public.call('start_short')
+        restored = public.call('result')
+        answer = restored['answer']
+        if (restored['upstream_exit'] != 0 or answer['state'] != 'completed' or answer['error'] is not None
+                or answer['mutation_performed'] or 'NixOS' not in answer['output']['response']['text']):
+            raise RuntimeError('public model did not recover after restoring the immutable view')
+        report['public_answer_after_corrupt_view_restored'] = restored
+        report['desktop_after_failures'] = desktop(expected)
+        if report['desktop_before_crashes']['processes'] != report['desktop_after_failures']['processes']:
+            raise RuntimeError('desktop processes restarted during model failures')
+        public.close(); public = None
         recheck(expected)
         report['verified'] = True
     except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
@@ -200,6 +351,13 @@ def main():
     finally:
         if client is not None:
             client.socket.close()
+        if public is not None:
+            try:
+                public.close()
+            except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
+                report['verified'] = False
+                report['cleanup_failure_type'] = type(error).__name__
+                report['cleanup_failure'] = str(error)
         descriptor = os.open(REPORT, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
         with os.fdopen(descriptor, 'w') as output:
             json.dump(report, output, sort_keys=True); output.write('\n'); output.flush(); os.fsync(output.fileno())

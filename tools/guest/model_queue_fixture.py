@@ -56,24 +56,28 @@ def generation(long=False):
         'evidence_ids': ['ev_queue'], 'deadline_ms': 90000}}
 
 
+def drop_ids(channel, account, inference_gid):
+    # Close inherited model/other coordinator descriptors before changing
+    # identity. Only this fork's private socket survives.
+    keep = channel.fileno()
+    for name in os.listdir('/proc/self/fd'):
+        fd = int(name)
+        if fd >= 3 and fd != keep:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    os.setgroups(sorted({account.pw_gid, inference_gid}))
+    os.setresgid(account.pw_gid, account.pw_gid, account.pw_gid)
+    os.setresuid(account.pw_uid, account.pw_uid, account.pw_uid)
+    if os.getresuid() != (account.pw_uid,) * 3 or os.getresgid() != (account.pw_gid,) * 3:
+        raise RuntimeError('fixture subject did not permanently drop root IDs')
+
+
 def child(channel, account, inference_gid):
     client = None
     try:
-        # Close inherited model/other coordinator descriptors before changing
-        # identity. Only this fork's private socket survives.
-        keep = channel.fileno()
-        for name in os.listdir('/proc/self/fd'):
-            fd = int(name)
-            if fd >= 3 and fd != keep:
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
-        os.setgroups(sorted({account.pw_gid, inference_gid}))
-        os.setresgid(account.pw_gid, account.pw_gid, account.pw_gid)
-        os.setresuid(account.pw_uid, account.pw_uid, account.pw_uid)
-        if os.getresuid() != (account.pw_uid,) * 3 or os.getresgid() != (account.pw_gid,) * 3:
-            raise RuntimeError('queue subject did not permanently drop root IDs')
+        drop_ids(channel, account, inference_gid)
         client = Client('/run/aios/model.sock')
         owned = []
         send(channel, {'ready': True, 'uid': os.getuid(), 'pid': os.getpid()})

@@ -188,12 +188,33 @@ then broadcasts cancellation and requires all nine contexts to finish within
 two seconds. It records a process PSS sample at full queue; this is not a peak
 measurement. Only its own unreaped children can be signalled during cleanup.
 
+The fixture's first crash is a real public `aiosctl ask` through the unchanged
+installed broker/unit as a permanently dropped normal tester. It requires a
+terminal `MODEL_CRASHED` with no output or mutation. Fixed deterministic SSH
+inspection and KWin's read-only `supportInformation` must still respond; the
+desktop processes must retain their identities. This fixture binds only the
+tester runtime under its empty home view, and orders itself after that user's
+manager without holding the graphical target.
+
+For hash-mismatch acceptance, a separate immutable test artifact has exactly one
+changed GGUF byte and the original length. The root fixture can create only its
+fixed root-owned runtime drop-in in `/run/systemd/system/aios-model.service.d`.
+It adds a read-only bind of that file over the original GGUF in the same
+production-mode daemon's mount view, observes the actual namespace digest,
+requires public `TARGET_CHANGED` with no answer and no retained loaded state,
+then removes only the exact owned drop-in and restores/restarts the original
+view. No store data is patched, no model capabilities are added, and there is
+no public root configuration route. Deterministic service/KWin responses and a
+real cited answer after restoration are required.
+
 The root-owned report binds the current installation and boot. The normal-user
 `installed-model-lifecycle` provider reads it without mutations. Desktop acceptance
 waits for the same initial fixture; failure retains the VM and evidence. PSS
-observations are samples rather than a true peak; transport loss alone does not
-qualify the broker's user-facing `MODEL_CRASHED` response. Model corruption and
-desktop/SSH continuity remain separate checks.
+observations are samples rather than a true peak. During pending tests, a
+separate protected phase file and fresh model-unit state let the registered
+host runner record actual pinned SSH/desktop reads while inference is restarting
+or corrupt. It requires observations in both failure phases. These finite
+samples do not establish continuous availability or latency qualification.
 
 ```fish
 python3 tools/devctl.py --workspace /mnt/Storage/PATH_TO_ENROLLED_DEV_WORKSPACE test --suite integration --provider installed-model --detach --json

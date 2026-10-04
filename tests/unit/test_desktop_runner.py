@@ -122,6 +122,22 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(exchange.call_args.args[0][-1], "/run/current-system/sw/bin/installed_model_lifecycle_smoke")
             stop.assert_not_called()
 
+    def test_pending_failure_observation_requires_live_outage_and_same_target(self):
+        config = VMConfig.from_data(self.config.root, {**EXAMPLE, "guest_build_target": "aios-model-test"})
+        for identity, active, qualifies in ((self.identity, "activating", True), (self.identity, "active", False),
+                                            (self.identity, None, False), ({"boot_id": "foreign"}, "activating", False)):
+            phase = {"identity": identity, "evidence_kind": "actual-fixed-model-failure-phase", "phase": "crash_outage",
+                     "current_model_unit": {"ActiveState": active, "MainPID": "0"}}
+            value = {"state": "pending", "identity": self.identity, "phase": phase}
+            with patch("aios_dev.guest.enrolled_identity", return_value=({"host_key_fingerprint": "fixture"}, self.identity)), \
+                    patch("aios_dev.guest.ssh_arguments", return_value=["ssh", "identity"]), \
+                    patch("aios_dev.sync.exchange", side_effect=[(0, json.dumps(self.response).encode(), b""), (3, json.dumps(value).encode(), b"")]):
+                with self.assertRaises(DevctlError) as caught:
+                    desktop.observe(config)
+                self.assertEqual("pending_observation" in caught.exception.details, qualifies)
+                if identity != self.identity:
+                    self.assertEqual(caught.exception.exit_code, ExitCode.INVALID_INPUT)
+
 
 
 if __name__ == "__main__":
