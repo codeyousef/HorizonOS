@@ -36,7 +36,7 @@ impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::Acq
 #[derive(Clone)]
 pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>>,processes:Arc<Mutex<HashMap<(String,String),ProcessConnection>>> }
 struct UiConnection { peer:Peer,expires:Instant,client:Arc<crate::graphical::Connection> }
-struct ProcessConnection { peer:Peer,expires:u64,client:crate::process_bridge::Client }
+struct ProcessConnection { peer:Peer,expires:u64,client:crate::process_selection::Connection }
 impl Agent {
     pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())),processes:Arc::new(Mutex::new(HashMap::new())) } }
     fn admit(&self) -> Result<Admission> {
@@ -67,6 +67,9 @@ impl Agent {
             let agent=self.clone();let original=peer.clone();
             blocking::unblock(move||agent.process_read(&original,&action)).await
         }else{match operation {
+            Operation::Submit{request} if request.selected_session_handle.is_none() && request.selected_app_handle.is_none() && !request.context_handles.is_empty()=>{
+                let agent=self.clone();let original=peer.clone();blocking::unblock(move||agent.submit_process(&original,request)).await
+            },
             Operation::ListUiWindows{session_handle}=>{
             let agent=self.clone();let original=peer.clone();
             blocking::unblock(move||agent.list_windows(&original,&session_handle)).await
@@ -88,16 +91,29 @@ impl Agent {
         if let Some(client)=clients.get(&key){if client.peer!=*peer{return Err(ErrorCode::TargetChanged);}}
         else{
             if clients.len()>=4{return Err(ErrorCode::ResourceExhausted);}
-            clients.insert(key.clone(),ProcessConnection{peer:peer.clone(),expires:now.checked_add(34_000).ok_or(ErrorCode::ResourceExhausted)?,client:crate::process_bridge::Client::connect(None,peer)?});
+            clients.insert(key.clone(),ProcessConnection{peer:peer.clone(),expires:now.checked_add(34_000).ok_or(ErrorCode::ResourceExhausted)?,client:Arc::new(Mutex::new(crate::process_bridge::Client::connect(None,peer)?))});
         }
         let client=clients.get_mut(&key).ok_or(ErrorCode::TargetChanged)?;
-        let result=client.client.call(action);
+        let result=client.client.lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(action);
         client.expires=aios_policy::boottime_ms()?.checked_add(34_000).ok_or(ErrorCode::ResourceExhausted)?;
         identity::verify_peer(peer)?;
         // Domain permission errors (e.g. another caller's process handle) do
         // not invalidate this caller's other retained handles or cursor.
         if matches!(result,Err(ErrorCode::TargetChanged)){clients.remove(&key);}
         result
+    }
+    fn submit_process(&self,peer:&Peer,request:crate::Submit)->std::result::Result<Value,ErrorCode>{
+        if let Some(value)=self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.existing_submission(peer,&request)?{return Ok(value);}
+        let ids=crate::process_context_ids(&self.state,peer,&request)?;
+        let selected=if ids.is_empty(){None}else{
+            let first=aios_protocol::contracts::parse_tool_call(serde_json::json!({"kind":"tool_call","action_id":"process.inspect","arguments":{"process_id":ids[0]}}).to_string().as_bytes())?;
+            self.process_read(peer,&first)?;
+            let key=(peer.bus_id.clone().ok_or(ErrorCode::PermissionDenied)?,peer.bus_sender.clone().ok_or(ErrorCode::PermissionDenied)?);
+            let connection=self.processes.lock().map_err(|_|ErrorCode::ResourceExhausted)?.get(&key).ok_or(ErrorCode::TargetChanged)?.client.clone();
+            Some(Arc::new(crate::process_selection::Selection::select(peer,connection,&ids)?))
+        };
+        identity::verify_peer(peer)?;
+        self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.submit_scoped(peer,request,None,selected)
     }
     fn list_windows(&self,peer:&Peer,handle:&str)->std::result::Result<Value,ErrorCode>{
         let session=crate::selected_ui_session(&self.state,peer,handle)?;

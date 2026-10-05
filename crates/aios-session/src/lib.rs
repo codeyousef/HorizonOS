@@ -12,6 +12,7 @@ pub mod native_startup;
 pub mod bus;
 pub mod inference;
 mod processes;
+mod process_selection;
 use aios_protocol::{MAX_TASK_BYTES, read_frame_with_limit, write_frame, contracts::{Action, ErrorCode, ProviderError, parse_tool_call, canonical_json}};
 use aios_system::services::{service_result, validate_service_name};
 use identity::Peer;
@@ -132,6 +133,7 @@ struct Task {
     owner: Peer, expires: Instant, nonce: String, digest: [u8; 32], status: TaskStatus,
     deadline: Instant, boottime_deadline: u64, control: Arc<AtomicU8>, text: Option<String>, events: Vec<Value>, grant: Option<aios_policy::ReadGrant>, service_handles: Vec<String>,
     retained_question:Option<inference::Secret>, history_refs:Vec<HistoryRef>,
+    process_selection:Option<Arc<process_selection::Selection>>,
     graphical:Option<graphical::Selection>,native_cancel:Option<Arc<ui_bridge::Cancellation>>,native_receipt:Option<graphical::Receipt>,
 }
 impl Task {
@@ -142,6 +144,7 @@ impl Task {
     fn finish(&mut self, result: Result<Value, ErrorCode>) {
         if self.terminal() { return; }
         if let Some(grant) = &self.grant { grant.revoke(); }
+        self.process_selection.take();
         if let Some(cancel)=self.native_cancel.take(){cancel.cancel();}self.native_receipt.take();
         let cause = self.control.load(Ordering::Acquire);
         let result = match result { Ok(_) if cause == 1 => Err(ErrorCode::Cancelled), Ok(_) if cause == 2 => Err(ErrorCode::DeadlineExceeded), other => other };
@@ -241,6 +244,9 @@ impl State {
             handle:id.into(),identity_sha256:aios_policy::digest(&handle.unit)?};
         Ok((handle.unit.clone(),resource))
     }
+    fn task_process_selection(&self,id:&str,peer:&Peer)->Result<Option<Arc<process_selection::Selection>>,ErrorCode>{
+        self.check_task_read(id,peer)?;Ok(self.task(id,peer)?.process_selection.clone())
+    }
     fn task_service_handles(&self,id:&str,peer:&Peer)->Result<Vec<String>,ErrorCode>{
         let task=self.task(id,peer)?;
         Ok(task.service_handles.clone())
@@ -249,6 +255,7 @@ impl State {
         self.check_task_read(id,peer)?;
         let mut tools=vec![aios_protocol::inference::ReadTool::SystemInfo];
         if !self.task(id,peer)?.service_handles.is_empty(){tools.push(aios_protocol::inference::ReadTool::SystemServiceStatus);}
+        if self.task(id,peer)?.process_selection.is_some(){tools.push(aios_protocol::inference::ReadTool::ProcessInspect);}
         Ok(tools)
     }
     fn task_read_target(&self,id:&str,peer:&Peer,action:&Action)->Result<Option<String>,ErrorCode>{
@@ -261,6 +268,7 @@ impl State {
                 let (unit,resource)=self.service_resource(peer,&args.service_id)?;
                 (Some(unit),ReadResources(vec![resource]))
             },
+            Action::ProcessInspect(args)=>(None,task.process_selection.as_ref().ok_or(ErrorCode::PermissionDenied)?.current(peer,&args.process_id)?),
             _=>return Err(ErrorCode::UnsupportedCapability),
         };
         // Check the original authenticated task grant, not a direct-read grant
@@ -326,6 +334,9 @@ impl State {
         Ok(None)
     }
     fn submit_owned(&mut self,peer:&Peer,request:Submit,selection:Option<graphical::Selection>)->Result<Value,ErrorCode>{
+        self.submit_scoped(peer,request,selection,None)
+    }
+    fn submit_scoped(&mut self,peer:&Peer,request:Submit,selection:Option<graphical::Selection>,process_selection:Option<Arc<process_selection::Selection>>)->Result<Value,ErrorCode>{
         self.prune();
         if request.text.trim().is_empty() || request.text.len() > 60000 || request.client_nonce.is_empty() || request.client_nonce.len() > 128 {
             return Err(ErrorCode::InvalidArgument);
@@ -348,8 +359,12 @@ impl State {
             if !uuid(id) || history_refs.iter().any(|r:&HistoryRef|r.id==*id){return Err(ErrorCode::InvalidArgument);}
             history_refs.push(HistoryRef{id:id.clone(),digest:self.history_digest(id,peer)?});
         }
-        let mut resources=Vec::new();
+        let selected_processes=process_selection.as_ref().map(|s|s.ids()).unwrap_or_default();
+        let mut resources=process_selection.as_ref().map(|s|s.resources()).unwrap_or_default();
+        let mut service_handles=Vec::new();
         for id in &request.context_handles {
+            if selected_processes.contains(id){continue;}
+            service_handles.push(id.clone());
             if resources.iter().any(|r:&aios_policy::Resource|&r.handle==id){return Err(ErrorCode::InvalidArgument);}
             resources.push(self.service_resource(peer,id)?.1);
         }
@@ -364,7 +379,8 @@ impl State {
         let id = Uuid::new_v4().to_string();
         let grant = if selection.is_none() && self.inference_configured && matches!(request.mode, Mode::Ask | Mode::Diagnose) {
             let mut actions=std::collections::BTreeSet::from(["system.info".into()]);
-            if !resources.is_empty(){actions.insert("system.service_status".into());}
+            if !service_handles.is_empty(){actions.insert("system.service_status".into());}
+            if process_selection.is_some(){actions.insert("process.inspect".into());}
             resources.extend(history_refs.iter().map(|r|aios_policy::Resource{field:"history_id".into(),kind:"session-history".into(),handle:r.id.clone(),identity_sha256:r.digest.clone()}));
             let scope = aios_policy::Scope { actions, resources:resources.into_iter().collect(), ..Default::default() };
             Some(self.read_grant(peer, id.clone(), &request.text, request.mode, scope, 90_000)?)
@@ -375,7 +391,7 @@ impl State {
         let status = TaskStatus { schema_version: 1, operation: "task_status".into(), request_id: id.clone(), mode: request.mode,
             state: "queued".into(), submitted_at, mutation_performed: false, error: None, output: None };
         let mut task = Task { owner: peer.clone(), expires: deadline + Duration::from_secs(300),
-            nonce: request.client_nonce, digest, status, deadline, boottime_deadline, control: Arc::new(AtomicU8::new(0)), retained_question:request.retain_for_history.then(||inference::Secret(request.text.clone())),history_refs, text: Some(request.text), events: vec![], grant,service_handles:request.context_handles,graphical:selection,native_cancel:None,native_receipt:None };
+            nonce: request.client_nonce, digest, status, deadline, boottime_deadline, control: Arc::new(AtomicU8::new(0)), retained_question:request.retain_for_history.then(||inference::Secret(request.text.clone())),history_refs, text: Some(request.text), events: vec![], grant,service_handles,process_selection,graphical:selection,native_cancel:None,native_receipt:None };
         task.event("accepted");
         if !self.inference_configured { task.finish(Err(ErrorCode::ModelUnavailable)); }
         else if matches!(request.mode, Mode::Act | Mode::Automate) { task.finish(Err(ErrorCode::UnsupportedCapability)); }
@@ -488,7 +504,7 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
     peer.connection_id = Some(Uuid::new_v4().to_string());
     let _owner = ConnectionOwner { state: state.clone(), peer: peer.clone() };
     let mut ui:Option<Arc<graphical::Connection>>=None;
-    let mut processes:Option<process_bridge::Client>=None;
+    let mut processes:Option<process_selection::Connection>=None;
     // A 90-second task must remain inspectable/cancellable on its original
     // authenticated connection; short polling cannot force a reconnect.
     for _ in 0..4096 {
@@ -505,7 +521,20 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
                 Ok(operation) => {
                     match process_bridge::action(&operation){
                         Ok(Some(action))=>process_dispatch(&stream,&peer,&mut processes,&action),
-                        Ok(None)=>graphical_dispatch(&stream,&state,&peer,&mut ui,operation),
+                        Ok(None)=>match operation{
+                            Operation::Submit{request} if request.selected_session_handle.is_none() && request.selected_app_handle.is_none() && !request.context_handles.is_empty()=>{
+                                (||->Result<Value,ErrorCode>{
+                                    if let Some(value)=state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.existing_submission(&peer,&request)?{return Ok(value);}
+                                    let ids=process_context_ids(&state,&peer,&request)?;
+                                    let selected=if ids.is_empty(){None}else{
+                                        if processes.is_none(){processes=Some(Arc::new(Mutex::new(process_bridge::Client::connect(Some(&stream),&peer)?)));}
+                                        Some(Arc::new(process_selection::Selection::select(&peer,processes.as_ref().ok_or(ErrorCode::TargetChanged)?.clone(),&ids)?))
+                                    };
+                                    state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.submit_scoped(&peer,request,None,selected)
+                                })()
+                            },
+                            operation=>graphical_dispatch(&stream,&state,&peer,&mut ui,operation),
+                        },
                         Err(error)=>Err(error),
                     }
                 },
@@ -523,10 +552,21 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
     Ok(())
 }
 
-fn process_dispatch(stream:&UnixStream,peer:&Peer,client:&mut Option<process_bridge::Client>,action:&Action)->Result<Value,ErrorCode>{
+fn process_context_ids(state:&SharedState,peer:&Peer,request:&Submit)->Result<Vec<String>,ErrorCode>{
+    if request.context_handles.len()>8 || !matches!(request.mode,Mode::Ask|Mode::Diagnose){return Err(ErrorCode::InvalidArgument);}
+    let state=state.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+    let mut processes=Vec::new();let mut seen=std::collections::BTreeSet::new();
+    for id in &request.context_handles{
+        if !uuid(id) || !seen.insert(id){return Err(ErrorCode::InvalidArgument);}
+        if state.handles.contains_key(id){state.service_resource(peer,id)?;}else{processes.push(id.clone());}
+    }
+    Ok(processes)
+}
+
+fn process_dispatch(stream:&UnixStream,peer:&Peer,client:&mut Option<process_selection::Connection>,action:&Action)->Result<Value,ErrorCode>{
     identity::verify(stream,peer)?;
-    if client.is_none(){*client=Some(process_bridge::Client::connect(Some(stream),peer)?);}
-    let result=client.as_mut().ok_or(ErrorCode::UnsupportedCapability)?.call(action);
+    if client.is_none(){*client=Some(Arc::new(Mutex::new(process_bridge::Client::connect(Some(stream),peer)?)));}
+    let result=client.as_ref().ok_or(ErrorCode::UnsupportedCapability)?.lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(action);
     identity::verify(stream,peer)?;
     if matches!(result,Err(ErrorCode::TargetChanged)){client.take();}
     result

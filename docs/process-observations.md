@@ -35,9 +35,24 @@ requests and fix their action identifiers on the server. They cannot dispatch
 other actions or accept a caller-selected UID, PID or privileged namespace.
 
 There is no signal method in the observation library and no termination route.
-The model-facing process capabilities remain unavailable until original task
-scope integration, consent-bound graceful effects and installed verification
-are complete. Broker unit tests use actual proc/pidfd observations and native
+Authenticated `Submit.context_handles` can select existing process handles as
+well as service handles. The broker resolves each selected process through the
+same original client connection before minting the task's opaque read grant.
+Its frozen resource includes PID, UID, start ticks, boot and executable identity.
+Only selected `process.inspect` calls can be offered to inference; the model
+cannot enumerate additional processes, create handles or change the selection.
+The original task grant is checked before and after native I/O without holding
+the task-state mutex across the call. Cancel, Forget, disconnect and expiry
+therefore prevent an in-flight result from being admitted as task evidence.
+The fixed helper's internal task read rechecks the original client and live
+native handle; it does not mint a new grant from model arguments. Task authority
+stays in the managed broker and is never exported as a serialized token.
+Selected processes require their own current evidence citations before a final
+answer. Process evidence does not substitute for selected service evidence.
+
+Global process capability availability and graceful effects remain unavailable
+until the corresponding installed/model and consent gates are qualified.
+Broker unit tests use actual proc/pidfd observations and native
 caller identity; the two-entry cursor corpus is controlled, not a claim of an
 installed inventory qualification.
 

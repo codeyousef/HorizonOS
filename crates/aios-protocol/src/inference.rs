@@ -17,7 +17,7 @@ pub enum ResponseMode { Decision, ReadDecision, FinalAnswer }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ReadTool { SystemInfo, SystemServiceStatus }
+pub enum ReadTool { SystemInfo, SystemServiceStatus, ProcessInspect }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -65,7 +65,7 @@ impl Generation {
         let mut root = "root ::= ws (clarification | abstain".to_owned();
         if self.response_mode!=ResponseMode::ReadDecision{root.push_str(" | answer");}
         for tool in &self.allowed_tools {
-            root.push_str(match tool { ReadTool::SystemInfo => " | system-info", ReadTool::SystemServiceStatus => " | service-status" });
+            root.push_str(match tool { ReadTool::SystemInfo => " | system-info", ReadTool::SystemServiceStatus => " | service-status", ReadTool::ProcessInspect => " | process-inspect" });
         }
         root.push_str(") ws\n");
         let ids = self.evidence_ids.iter().map(|id| {
@@ -78,6 +78,7 @@ clarification ::= "{" ws "\"kind\"" ws ":" ws "\"clarification\"" ws "," ws "\"q
 abstain ::= "{" ws "\"kind\"" ws ":" ws "\"abstain\"" ws "," ws "\"reason\"" ws ":" ws string ws "}"
 system-info ::= "{" ws "\"kind\"" ws ":" ws "\"tool_call\"" ws "," ws "\"action_id\"" ws ":" ws "\"system.info\"" ws "," ws "\"arguments\"" ws ":" ws "{" ws "}" ws "}"
 service-status ::= "{" ws "\"kind\"" ws ":" ws "\"tool_call\"" ws "," ws "\"action_id\"" ws ":" ws "\"system.service_status\"" ws "," ws "\"arguments\"" ws ":" ws "{" ws "\"service_id\"" ws ":" ws string ws "}" ws "}"
+process-inspect ::= "{" ws "\"kind\"" ws ":" ws "\"tool_call\"" ws "," ws "\"action_id\"" ws ":" ws "\"process.inspect\"" ws "," ws "\"arguments\"" ws ":" ws "{" ws "\"process_id\"" ws ":" ws string ws "}" ws "}"
 string ::= "\"" ([^"\\\x00-\x1F] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4}))* "\""
 ws ::= [ \t\n\r]*
 "#);
@@ -124,6 +125,7 @@ ws ::= [ \t\n\r]*
                 let tool=match proposal.action_id.as_str(){
                     "system.info"=>ReadTool::SystemInfo,
                     "system.service_status"=>ReadTool::SystemServiceStatus,
+                    "process.inspect"=>ReadTool::ProcessInspect,
                     _=>return Err(ErrorCode::PermissionDenied),
                 };
                 if !self.allowed_tools.contains(&tool){return Err(ErrorCode::PermissionDenied);}

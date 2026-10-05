@@ -39,7 +39,17 @@ pub fn serve(mut stream:UnixStream,state:SharedState)->Result<()>{
         broker.verify(&stream)?;origin.verify()?;
         let request:Request=serde_json::from_str(&raw).map_err(|_|ErrorCode::InvalidArgument)?;
         if !crate::uuid(&request.request_id){return Err(ErrorCode::InvalidArgument);}
-        let result=if request.schema_version!=1{Err(ErrorCode::UnsupportedSchema)}else{
+        #[derive(serde::Deserialize)] #[serde(deny_unknown_fields)]
+        struct SelectedRead{kind:String,task_id:String,process_id:String}
+        let selected=serde_json::from_str::<SelectedRead>(request.operation.get()).ok();
+        let result=if request.schema_version!=1{Err(ErrorCode::UnsupportedSchema)}else if let Some(selected)=selected{
+            if selected.kind!="task_process_inspect" || !crate::uuid(&selected.task_id) || !crate::uuid(&selected.process_id){Err(ErrorCode::InvalidArgument)}else{
+                // Only the fixed managed broker can enter this branch. It owns
+                // the opaque original task grant and checks it on both sides
+                // of this native read. No user intent/grant is minted here.
+                state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.process_observe_selected(&peer,&selected.process_id)
+            }
+        }else{
             crate::parse_operation(request.operation.get()).and_then(required_action).and_then(|action|{
                 let mut state=state.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
                 state.prune();state.process_read(&peer,&action)
@@ -55,6 +65,11 @@ pub fn serve(mut stream:UnixStream,state:SharedState)->Result<()>{
 }
 pub(crate) struct Client{inner:crate::ui_bridge::Client}
 impl Client{
+    pub(crate) fn observe_selected(&mut self,task:&str,id:&str)->Result<Value>{
+        if !crate::uuid(task) || !crate::uuid(id){return Err(ErrorCode::InvalidArgument);}
+        let value=self.inner.call(json!({"kind":"task_process_inspect","task_id":task,"process_id":id}))?;
+        aios_protocol::validation::validate_result("process.inspect",value.to_string().as_bytes())
+    }
     pub(crate) fn connect(origin:Option<&UnixStream>,peer:&Peer)->Result<Self>{
         Ok(Self{inner:crate::ui_bridge::Client::connect_process(origin,peer)?})
     }

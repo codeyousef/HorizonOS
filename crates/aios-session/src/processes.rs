@@ -102,6 +102,14 @@ fn result(data: Value, next_cursor: Option<String>, access_denied: bool) -> Valu
         "evidence_ids":[],"complete":complete,"next_cursor":next_cursor,"data":data,"error":error})
 }
 impl State {
+    pub(super) fn process_observe_selected(&self,peer:&Peer,id:&str)->Result<Value>{
+        identity::verify_peer(peer)?;
+        let value=self.processes.observe(peer,id)?;
+        identity::verify_peer(peer)?;
+        self.processes.process(peer,id)?;
+        Ok(result(json!({"process_id":id,"pid":value.identity.pid,"start_time_ticks":value.identity.start_time_ticks,
+            "executable_identity":value.identity.executable_identity,"metrics":value.metrics}),None,false))
+    }
     pub(super) fn process_read(&mut self, peer: &Peer, action: &Action) -> Result<Value> {
         identity::verify_peer(peer)?;
         let args = action.arguments_value();
