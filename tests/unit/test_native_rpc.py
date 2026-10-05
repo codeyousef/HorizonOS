@@ -35,6 +35,36 @@ class NativeRpcTests(unittest.TestCase):
         self.assertEqual(error.exception.exit_code,ExitCode.INVALID_INPUT)
         load.assert_not_called(); run.assert_not_called()
 
+    def test_journal_detach_cannot_lose_its_originating_login(self):
+        args = cli.parser().parse_args(["test","--suite","integration","--provider","journal-inspection","--detach"])
+        with patch.object(cli,"load_config") as load, patch.object(native_rpc,"run_journal") as run:
+            with self.assertRaises(DevctlError) as error:
+                cli.dispatch(args)
+        self.assertEqual(error.exception.exit_code,ExitCode.INVALID_INPUT)
+        load.assert_not_called();run.assert_not_called()
+
+    def test_journal_zero_exit_cannot_hide_skipped_or_wrong_boot_cases(self):
+        proof={"evidence_kind":"real-installed-native-journal-observer","uid":1000,"observer_uid":0,"observer_pid":50,
+            "boot_id":IDENTITY["boot_id"],"controlled_messages":3}
+        for key in ("own_uid_filter","system_unit_filter","kernel_source","time_filter","priority_filter","entry_limit",
+            "cursor_continuation","cross_connection_refused","query_drift_refused","missing_boot_refused","claimed_uid_refused",
+            "redaction_before_evidence","evidence_hash_verified"):proof[key]=True
+        incomplete={**proof,"redaction_before_evidence":False}
+        drifted={**proof,"boot_id":"another-boot"}
+        for output,expected in ((b"",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(incomplete).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(drifted).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(proof).encode()+b"\n",ExitCode.SUCCESS)):
+            with patch.object(native_rpc.acceptance,"STORAGE_ROOT",self.root), \
+                 patch.object(native_rpc.guest,"enrolled_identity",return_value=({"host_key_fingerprint":"fixture-pin"},IDENTITY)), \
+                 patch.object(native_rpc.sync,"synchronize",return_value=(0,self.publication)), \
+                 patch.object(native_rpc.guest,"ssh_arguments",return_value=["ssh","pinned-fixture","identity"]), \
+                 patch.object(native_rpc.sync,"exchange",return_value=(0,output,b"")) as exchange:
+                code,result=native_rpc.run_journal(self.config)
+            self.assertEqual(code,expected)
+            self.assertTrue(exchange.call_args.args[0][-1].endswith('/tools/guest/installed_journal_smoke.py'))
+            self.assertTrue(json.loads(Path(result['artifact_path']).read_text())['caller_session_held_open'])
+
     def test_target_drift_after_publication_stops_before_rpc(self):
         with patch.object(native_rpc.acceptance,"STORAGE_ROOT",self.root), \
              patch.object(native_rpc.guest,"enrolled_identity",side_effect=[({},IDENTITY),({}, {**IDENTITY,"boot_id":"changed"})]), \

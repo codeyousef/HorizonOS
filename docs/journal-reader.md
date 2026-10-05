@@ -87,6 +87,9 @@ an old installed service or missing native access must fail. Controlled
 writing fixtures are ignored by ordinary unit tests. The separate direct
 library test remains available as a diagnostic and is not installed observer
 evidence. Neither test alone qualifies model task grants or the complete OS.
+The probe retains its authenticated SSH/PAM session throughout compilation
+and native calls. `--detach` is rejected: a worker left in a closing login
+session must not be granted a replacement originating caller identity.
 
 The API signatures and descriptor ownership follow the pinned upstream
 [header](https://github.com/systemd/systemd/blob/v260/src/systemd/sd-journal.h)

@@ -18,7 +18,7 @@ import uuid
 import snapshot as source
 
 PACKAGES = ("aios-consent-ui", "aios-core", "aios-model", "aios-desktop", "aios-cli", "aios-dev-tools")
-KINDS = {"resolve-lock", "build-packages", "build-system", "build-desktop-test", "test-unit", "system-info-smoke", "service-inspection-smoke", "journal-inspection-smoke", "public-session-smoke", "installed-session-inference-smoke", "consent-ui-smoke", "accessibility-smoke", "ui-provider-smoke", "model-compatibility-smoke", "upstream-compatibility-smoke", "host-boundary-smoke", "protocol-conformance-smoke", "model-profile-low-smoke", "model-profile-high-smoke", "model-inference-smoke", "model-service-smoke", "session-inference-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "installed-model-smoke", "installed-model-idle-smoke", "installed-model-lifecycle-smoke", "supervision-probe"}
+KINDS = {"resolve-lock", "build-packages", "build-system", "build-desktop-test", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "installed-session-inference-smoke", "consent-ui-smoke", "accessibility-smoke", "ui-provider-smoke", "model-compatibility-smoke", "upstream-compatibility-smoke", "host-boundary-smoke", "protocol-conformance-smoke", "model-profile-low-smoke", "model-profile-high-smoke", "model-inference-smoke", "model-service-smoke", "session-inference-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "installed-model-smoke", "installed-model-idle-smoke", "installed-model-lifecycle-smoke", "supervision-probe"}
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 LIMIT = 4 * 1024**2
 cancelled = False
@@ -119,8 +119,6 @@ def commands(kind, release, package=None, job_directory=None):
         return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", package_name, "--test", test_name, "--", "--nocapture"]
                 for package_name, test_name in (("aios-cli", "service_inspect"), ("aios-session", "ipc"))] + [
                     ["python3", str(release / "tools/guest/service_inspection_smoke.py")]]
-    if kind == "journal-inspection-smoke":
-        return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-exec", "--test", "journal_observer", "--", "--ignored", "--nocapture"]]
     if kind == "public-session-smoke":
         return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-session", "--test", "dbus", "--", "--nocapture"],
                 ["python3", str(release / "tools/guest/public_session_smoke.py")]]

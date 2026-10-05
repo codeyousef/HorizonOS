@@ -136,10 +136,11 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         if args.provider is not None:
             if args.suite != "integration" or args.bootstrap_case is not None:
                 raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Provider smoke requires integration scope without a bootstrap case")
-            if args.provider == "installed-executor":
+            if args.provider in ("installed-executor", "journal-inspection"):
                 if args.detach:
-                    raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Installed Executor probe must retain its authenticated SSH session; --detach is unavailable")
-                return native_rpc.run(load_config(args.workspace))
+                    raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Installed native probe must retain its authenticated SSH session; --detach is unavailable")
+                config = load_config(args.workspace)
+                return native_rpc.run_journal(config) if args.provider == "journal-inspection" else native_rpc.run(config)
             return jobs.start(load_config(args.workspace), args.provider + "-smoke", detach=args.detach)
         if args.bootstrap_case is not None:
             if args.suite != "integration" or args.detach:
