@@ -48,11 +48,15 @@ class NativeRpcTests(unittest.TestCase):
             "boot_id":IDENTITY["boot_id"],"controlled_messages":3}
         for key in ("own_uid_filter","system_unit_filter","kernel_source","time_filter","priority_filter","entry_limit",
             "cursor_continuation","cross_connection_refused","query_drift_refused","missing_boot_refused","claimed_uid_refused",
-            "redaction_before_evidence","evidence_hash_verified"):proof[key]=True
+            "redaction_before_evidence","evidence_hash_verified","expiry_refused"):proof[key]=True
         incomplete={**proof,"redaction_before_evidence":False}
+        expired_unchecked={**proof,"expiry_refused":False}
+        expiry_missing={key:value for key,value in proof.items() if key!="expiry_refused"}
         drifted={**proof,"boot_id":"another-boot"}
         for output,expected in ((b"",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(incomplete).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(expired_unchecked).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(expiry_missing).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(drifted).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(proof).encode()+b"\n",ExitCode.SUCCESS)):
             with patch.object(native_rpc.acceptance,"STORAGE_ROOT",self.root), \

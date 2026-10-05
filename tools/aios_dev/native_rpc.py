@@ -54,7 +54,7 @@ def _run(config, *, journal):
                 and observation.get("boot_id")==identity["boot_id"] and observation.get("controlled_messages")==3
                 and all(observation.get(key) is True for key in ("own_uid_filter","system_unit_filter","kernel_source",
                     "time_filter","priority_filter","entry_limit","cursor_continuation","cross_connection_refused",
-                    "query_drift_refused","missing_boot_refused","claimed_uid_refused","redaction_before_evidence","evidence_hash_verified")))
+                    "query_drift_refused","missing_boot_refused","claimed_uid_refused","redaction_before_evidence","evidence_hash_verified","expiry_refused")))
         else:
             valid = (isinstance(observation,dict) and type(observation.get("uid")) is int and observation["uid"] >= 1000
             and type(observation.get("root_bus_owner_uid")) is int and observation["root_bus_owner_uid"] == 0 and type(observation.get("root_bus_owner_pid")) is int

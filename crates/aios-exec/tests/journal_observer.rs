@@ -90,6 +90,7 @@ fn installed_journal_filters_private_cursors_and_sanitized_evidence() {
     let other=Connection::system().unwrap();let foreign=Proxy::new(&other,"org.aios.System1","/org/aios/System1","org.aios.System1").unwrap();
     denied(&foreign,"Logs",(request(page.clone()),),"PERMISSION_DENIED");
     denied(&foreign,"GetJournalEvidence",(first["data"]["entries"][0]["evidence_id"].as_str().unwrap(),),"PERMISSION_DENIED");
+    let expiring_page=page.clone();
     page["priority_max"]=json!(4);denied(&proxy,"Logs",(request(page),),"STALE_EVIDENCE");
     let mut absent=arguments.clone();absent["boot_id"]=json!("11111111-1111-4111-8111-111111111111");
     denied(&proxy,"Logs",(request(absent),),"TARGET_NOT_FOUND");
@@ -103,9 +104,16 @@ fn installed_journal_filters_private_cursors_and_sanitized_evidence() {
     let kernel=logs(&proxy,json!({"source":"kernel","since":timestamp(0),"until":timestamp(now()),"max_entries":5}));
     assert!(!kernel["data"]["entries"].as_array().unwrap().is_empty());
     assert!(kernel["data"]["entries"].as_array().unwrap().iter().all(|r|r["source"]=="kernel"));
+    // Exercise the installed observer's real monotonic lifetime, preserving the
+    // original live connection and login. Missing handles must be explicit.
+    thread::sleep(Duration::from_millis(30_100));
+    denied(&proxy,"Logs",(request(expiring_page),),"TARGET_NOT_FOUND");
+    denied(&proxy,"GetJournalEvidence",(first["data"]["entries"][0]["evidence_id"].as_str().unwrap(),),"TARGET_NOT_FOUND");
+    denied(&proxy,"Logs",(request(json!({"service_id":id,"source":"system"})),),"TARGET_NOT_FOUND");
     println!("AIOS_INSTALLED_JOURNAL={}",json!({"evidence_kind":"real-installed-native-journal-observer","installed_executable":installed,
         "observer_uid":observer_uid,"observer_pid":observer_pid,"uid":uid,"boot_id":boot,"controlled_messages":3,
         "own_uid_filter":true,"system_unit_filter":true,"kernel_source":true,"time_filter":true,"priority_filter":true,
         "entry_limit":true,"cursor_continuation":true,"cross_connection_refused":true,"query_drift_refused":true,
-        "missing_boot_refused":true,"claimed_uid_refused":true,"redaction_before_evidence":true,"evidence_hash_verified":true}));
+        "missing_boot_refused":true,"claimed_uid_refused":true,"redaction_before_evidence":true,"evidence_hash_verified":true,
+        "expiry_refused":true}));
 }
