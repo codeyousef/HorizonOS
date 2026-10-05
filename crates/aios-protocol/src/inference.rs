@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 
+/// Transport allocation bound, independent of the runtime's tokenizer budget.
+pub const MAX_USER_PROMPT_BYTES: usize = 48000;
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Profile { Normal, Low, High }
@@ -32,7 +35,7 @@ impl Generation {
     pub fn validate(&self) -> Result<(), ErrorCode> {
         if self.profile != Profile::Normal { return Err(ErrorCode::ModelUnavailable); }
         if self.system_prompt.is_empty() || self.system_prompt.len() > 16384 ||
-            self.user_prompt.is_empty() || self.user_prompt.len() > 48000 ||
+            self.user_prompt.is_empty() || self.user_prompt.len() > MAX_USER_PROMPT_BYTES ||
             self.system_prompt.contains('\0') || self.user_prompt.contains('\0') ||
             self.deadline_ms == 0 || self.deadline_ms > 90000 ||
             self.allowed_tools.len() > 8 || self.evidence_ids.len() > 64 {
