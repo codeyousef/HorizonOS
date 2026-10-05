@@ -19,7 +19,10 @@
     "restart_count",
     "exec_main_code",
     "exec_main_status",
-    "job"
+    "job",
+    "invocation_id",
+    "ordering_after",
+    "ordering_is_not_causation"
   ],
   "properties": {
     "service_id": {
@@ -83,7 +86,9 @@
           "additionalProperties": false,
           "required": [
             "id",
-            "object_path"
+            "object_path",
+            "job_type",
+            "state"
           ],
           "properties": {
             "id": {
@@ -94,10 +99,37 @@
             "object_path": {
               "type": "string",
               "pattern": "^/org/freedesktop/systemd1/job/[0-9]+$"
+            },
+            "job_type": {
+              "$ref": "#/$defs/state"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "waiting",
+                "running"
+              ]
             }
           }
         }
       ]
+    },
+    "invocation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "ordering_after": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 255
+      },
+      "maxItems": 128,
+      "uniqueItems": true
+    },
+    "ordering_is_not_causation": {
+      "const": true
     }
   },
   "$defs": {

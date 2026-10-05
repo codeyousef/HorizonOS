@@ -1,5 +1,6 @@
 """Boundary fixtures only; installed public crash/hash failures run in the VM."""
 from pathlib import Path
+import copy
 import sys
 import unittest
 from unittest.mock import Mock, patch
@@ -10,6 +11,25 @@ import model_lifecycle_preflight as root_fixture
 
 
 class PublicFailureBoundaryTests(unittest.TestCase):
+    def test_recovery_accepts_brand_case_but_requires_current_native_citations(self):
+        boot = '00000000-0000-0000-0000-000000000001'
+        base = {'upstream_exit':0,'answer':{'state':'completed','error':None,'mutation_performed':False,
+                'output':{'local_cpu':True,'mutation_performed':False,'response':{'kind':'answer','text':'nixos','evidence_ids':['fresh']},
+                'evidence':[{'complete':True,'error':None,'source':{'provider':'aios-system'},
+                             'data':{'os_id':'nixos','boot_id':boot},'evidence_ids':['fresh']}]}}}
+        for text in ['nixos','NixOS','The OS is NIXOS.']:
+            value=copy.deepcopy(base);value['answer']['output']['response']['text']=text
+            fixture.require_system_answer(value,boot)
+        for field,value in [('local_cpu',False),('mutation_performed',True),('evidence',[])]:
+            failed=copy.deepcopy(base);failed['answer']['output'][field]=value
+            with self.assertRaises(RuntimeError):fixture.require_system_answer(failed,boot)
+        for field,value in [('kind','abstain'),('text','notnixos'),('evidence_ids',[]),('evidence_ids',['old'])]:
+            failed=copy.deepcopy(base);failed['answer']['output']['response'][field]=value
+            with self.assertRaises(RuntimeError):fixture.require_system_answer(failed,boot)
+        for field,value in [('complete',False),('source',{'provider':'fixture'}),('data',{'os_id':'nixos','boot_id':'another-boot'})]:
+            failed=copy.deepcopy(base);failed['answer']['output']['evidence'][0][field]=value
+            with self.assertRaises(RuntimeError):fixture.require_system_answer(failed,boot)
+
     def test_nonroot_cannot_enter_coordinator_or_corrupt_mount_control(self):
         for real, effective in ((1000, 1000), (0, 1000), (1000, 0)):
             target = Mock()

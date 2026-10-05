@@ -7,7 +7,7 @@ use zbus::{blocking::{Connection, Proxy}, zvariant::OwnedObjectPath};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ServiceJob { pub id: u32, pub object_path: String }
+pub struct ServiceJob { pub id: u32, pub object_path: String, pub job_type: String, pub state: String }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,6 +27,9 @@ pub struct ServiceStatus {
     pub exec_main_code: i32,
     pub exec_main_status: i32,
     pub job: Option<ServiceJob>,
+    pub invocation_id: String,
+    pub ordering_after: Vec<String>,
+    pub ordering_is_not_causation: bool,
 }
 
 pub fn validate_service_name(name: &str) -> Result<(), ErrorCode> {
@@ -77,6 +80,21 @@ fn small(value: String) -> Result<String, ErrorCode> {
     Ok(value)
 }
 
+fn ordering(mut names: Vec<String>) -> Result<Vec<String>, ErrorCode> {
+    if names.len() > 128 { return Err(ErrorCode::ResourceExhausted); }
+    if names.iter().any(|s| s.is_empty() || s.len() > 255 || !s.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:@-\\".contains(&b))) {
+        return Err(ErrorCode::PartialResult);
+    }
+    names.sort(); names.dedup(); Ok(names)
+}
+
+fn job_identity(id: u32, path: &str) -> Result<(), ErrorCode> {
+    if (id == 0 && path != "/") || (id != 0 && path != format!("/org/freedesktop/systemd1/job/{id}")) {
+        return Err(ErrorCode::PartialResult);
+    }
+    Ok(())
+}
+
 /// Read systemd's native observation without spawning a detector. The fixed
 /// root-owned manager connection is pinned and rechecked across the read.
 pub fn read_virtualization() -> Result<String, ErrorCode> {
@@ -116,10 +134,18 @@ pub fn read_service_status(name: &str, service_id: &str) -> Result<ServiceStatus
     let invocation: Vec<u8> = property!(unit, "InvocationID");
     if invocation.len() != 16 { return Err(ErrorCode::PartialResult); }
     let (job_id, job_path): (u32, OwnedObjectPath) = property!(unit, "Job");
-    if (job_id == 0 && job_path.as_str() != "/") ||
-        (job_id != 0 && job_path.as_str() != format!("/org/freedesktop/systemd1/job/{job_id}")) {
-        return Err(ErrorCode::PartialResult);
-    }
+    job_identity(job_id, job_path.as_str())?;
+    let job = if job_id == 0 { None } else {
+        let proxy = fresh_proxy(&connection, &owner, job_path.as_str(), "org.freedesktop.systemd1.Job")?;
+        let actual_id: u32 = property!(proxy, "Id");
+        let (job_unit, job_unit_path): (String, OwnedObjectPath) = property!(proxy, "Unit");
+        let job_type = small(property!(proxy, "JobType"))?;
+        let state = small(property!(proxy, "State"))?;
+        if actual_id != job_id || job_unit != id || job_unit_path != path { return Err(ErrorCode::StaleEvidence); }
+        if !matches!(state.as_str(), "waiting" | "running") { return Err(ErrorCode::PartialResult); }
+        Some(ServiceJob {id:job_id,object_path:job_path.to_string(),job_type,state})
+    };
+    let ordering_after = ordering(property!(unit, "After"))?;
     let result = small(property!(service, "Result"))?;
     let main_pid: u32 = property!(service, "MainPID");
     let restart_count = property!(service, "NRestarts");
@@ -128,14 +154,30 @@ pub fn read_service_status(name: &str, service_id: &str) -> Result<ServiceStatus
     let after = (small(property!(unit, "ActiveState"))?, small(property!(unit, "SubState"))?);
     let final_invocation: Vec<u8> = property!(unit, "InvocationID");
     let final_main_pid: u32 = property!(service, "MainPID");
-    if before != after || invocation != final_invocation || main_pid != final_main_pid || root_owner(&connection, "org.freedesktop.systemd1")? != owner {
+    let final_job: (u32, OwnedObjectPath) = property!(unit, "Job");
+    let final_ordering = ordering(property!(unit, "After"))?;
+    let final_result = small(property!(service, "Result"))?;
+    let final_restart_count: u32 = property!(service, "NRestarts");
+    let final_exec_code: i32 = property!(service, "ExecMainCode");
+    let final_exec_status: i32 = property!(service, "ExecMainStatus");
+    if before != after || invocation != final_invocation || main_pid != final_main_pid || final_job != (job_id,job_path.clone())
+        || ordering_after != final_ordering || result != final_result || restart_count != final_restart_count
+        || exec_main_code != final_exec_code || exec_main_status != final_exec_status
+        || root_owner(&connection, "org.freedesktop.systemd1")? != owner {
         return Err(ErrorCode::StaleEvidence);
     }
+    if let Some(job) = &job {
+        let proxy = fresh_proxy(&connection, &owner, job_path.as_str(), "org.freedesktop.systemd1.Job")?;
+        let final_state: String = property!(proxy, "State");
+        if final_state != job.state { return Err(ErrorCode::StaleEvidence); }
+    }
+    if root_owner(&connection, "org.freedesktop.systemd1")? != owner { return Err(ErrorCode::StaleEvidence); }
     let boot_id = crate::boot_id(&crate::bounded(std::path::Path::new("/proc/sys/kernel/random/boot_id"), 128)?)?;
     if started.elapsed() >= Duration::from_secs(5) { return Err(ErrorCode::DeadlineExceeded); }
     Ok(ServiceStatus { service_id: service_id.to_owned(), unit_name: id, scope: "system".into(), manager_owner: owner.clone(), manager_version,
         boot_id, load_state, active_state: before.0, sub_state: before.1, result, main_pid, restart_count,
-        exec_main_code, exec_main_status, job: if job_id == 0 { None } else { Some(ServiceJob { id: job_id, object_path: job_path.to_string() }) } })
+        exec_main_code, exec_main_status, job, invocation_id: invocation.iter().map(|b|format!("{b:02x}")).collect(),
+        ordering_after, ordering_is_not_causation:true })
 }
 
 pub fn service_result(name: &str, service_id: &str) -> ProviderResult<ServiceStatus> {
@@ -152,6 +194,20 @@ pub fn service_result(name: &str, service_id: &str) -> ProviderResult<ServiceSta
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ordering_is_bounded_and_canonical_without_implying_causation() {
+        assert_eq!(ordering(vec!["network.target".into(),"basic.target".into(),"network.target".into()]).unwrap(),vec!["basic.target","network.target"]);
+        assert_eq!(ordering(vec!["x.target".into();129]),Err(ErrorCode::ResourceExhausted));
+        for name in ["", "../unit", "unit\n.target"] { assert_eq!(ordering(vec![name.into()]),Err(ErrorCode::PartialResult)); }
+    }
+    #[test]
+    fn absent_or_active_job_cannot_substitute_another_job_path() {
+        assert_eq!(job_identity(0,"/"),Ok(()));
+        assert_eq!(job_identity(42,"/org/freedesktop/systemd1/job/42"),Ok(()));
+        for (id,path) in [(0,"/org/freedesktop/systemd1/job/1"),(42,"/"),(42,"/org/freedesktop/systemd1/job/43")] {
+            assert_eq!(job_identity(id,path),Err(ErrorCode::PartialResult));
+        }
+    }
     #[test]
     fn service_names_cannot_be_paths_commands_or_options() {
         for name in ["/etc/ssh/sshd.service", "--help.service", "sshd.service;id", "sshd.service\n", "sshd", "a/../sshd.service"] {

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 from service_inspection_smoke import products
+from model_public_fixture import require_system_answer
 
 UNIT = "aios-session-acceptance-" + uuid.uuid4().hex + ".service"
 
@@ -114,12 +115,13 @@ def main():
         print("AIOS_USER_MODEL_ANSWER=" + json.dumps({"installed_model": installed_model, "upstream_exit": question.returncode, "answer": answer}), flush=True)
         service_answer=None
         if installed_model:
+            require_system_answer({'upstream_exit':question.returncode,'answer':answer},Path('/proc/sys/kernel/random/boot_id').read_text().strip())
             if question.returncode != 0 or answer["state"] != "completed" or answer["error"] is not None or answer["mutation_performed"]:
                 raise RuntimeError("hardened user broker did not reach the actual installed model")
             output = answer["output"]
             fresh_ids={i for observation in output["evidence"] for i in observation["evidence_ids"]}
             cited=set(output["response"].get("evidence_ids",[]))
-            if (output["response"]["kind"] != "answer" or "NixOS" not in output["response"]["text"]
+            if (output["response"]["kind"] != "answer"
                     or not cited or not cited.issubset(fresh_ids)
                     or any(not observation["complete"] or observation["source"]["provider"]!="aios-system" or observation["data"]["os_id"]!="nixos" for observation in output["evidence"])
                     or not output["local_cpu"] or output["mutation_performed"]):

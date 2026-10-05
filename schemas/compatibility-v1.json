@@ -1556,7 +1556,10 @@
           "restart_count": 0,
           "exec_main_code": -2147483648,
           "exec_main_status": -2147483648,
-          "job": null
+          "job": null,
+          "invocation_id": "00000000000000000000000000000000",
+          "ordering_after": [],
+          "ordering_is_not_causation": true
         },
         "error": null
       }

@@ -18,7 +18,7 @@ import time
 
 from model_service_smoke import Client
 import model_queue_fixture
-from model_public_fixture import PublicProbe, require_failure
+from model_public_fixture import PublicProbe, require_failure, require_system_answer
 import desktop_probe
 import snapshot
 
@@ -336,10 +336,7 @@ def main():
         restored = public.call('result')
         # Retain the actual response even when the recovery gate fails.
         report['public_answer_after_corrupt_view_restored'] = restored
-        answer = restored['answer']
-        if (restored['upstream_exit'] != 0 or answer['state'] != 'completed' or answer['error'] is not None
-                or answer['mutation_performed'] or 'NixOS' not in answer['output']['response']['text']):
-            raise RuntimeError('public model did not recover after restoring the immutable view')
+        require_system_answer(restored, expected['boot_id'])
         report['desktop_after_failures'] = desktop(expected)
         if report['desktop_before_crashes']['processes'] != report['desktop_after_failures']['processes']:
             raise RuntimeError('desktop processes restarted during model failures')

@@ -2,6 +2,16 @@
 use aios_protocol::{MAX_TASK_BYTES, contracts::{Action,ErrorCode,parse_tool_call,canonical_json,schema_source},registry::{capabilities,capability,negotiate_version,ResourceResolver,validate_references},validation::{strict_json,validate,validate_result}};
 use serde_json::{json,Value};
 fn fixtures()->Value{serde_json::from_str(include_str!("../../../schemas/compatibility-v1.json")).unwrap()}
+#[test]
+fn service_ordering_and_job_evidence_are_strict_and_not_causal() {
+ let f=fixtures();let base=f["fixtures"].as_array().unwrap().iter().find(|v|v["action_id"]=="system.service_status").unwrap()["result"].clone();
+ for (key,value) in [("ordering_is_not_causation",json!(false)),("ordering_after",json!(["same.target","same.target"])),("invocation_id",json!("not-a-service-invocation"))] {
+  let mut v=base.clone();v["data"][key]=value;assert!(validate_result("system.service_status",&serde_json::to_vec(&v).unwrap()).is_err());
+ }
+ let mut v=base;v["data"]["job"]=json!({"id":1,"object_path":"/org/freedesktop/systemd1/job/1","job_type":"start","state":"waiting"});
+ validate_result("system.service_status",&serde_json::to_vec(&v).unwrap()).unwrap();
+ v["data"]["job"]["state"]=json!("completed");assert!(validate_result("system.service_status",&serde_json::to_vec(&v).unwrap()).is_err());
+}
 fn call(id:&str,args:Value)->Vec<u8>{serde_json::to_vec(&json!({"kind":"tool_call","action_id":id,"arguments":args})).unwrap()}
 #[test]
 fn every_normative_contract_generates_validated_types_and_round_trips(){

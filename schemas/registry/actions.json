@@ -1358,7 +1358,7 @@
       "requires_interactive_session": false,
       "supports_automation": false,
       "source_revision": "aios-protocol-contracts-v1",
-      "implementation_hash": "b56b9471582c451351f9ed477bdd9c9b9b927572c8c5cc66af38110a998de433",
+      "implementation_hash": "fe392efb98f0038d3c63c968c3e6bc456fb4769934fb4505305d1fdb845cdb34",
       "availability": "implemented"
     },
     {

@@ -9,12 +9,17 @@ D-Bus destination, method or privileged option.
 The provider uses native systemd D-Bus reads on the fixed system bus. It checks
 the manager's unique owner and root credentials, and returns the actual load,
 active and substate, result, main PID, restart counter, exit status and current
-job. It rechecks the owner, service invocation, state and PID before returning.
+job. A present job includes its native type and waiting/running state; its ID
+and attached unit must match the service's job reference. The invocation ID
+identifies the observed service run. The provider rechecks the owner, invocation,
+state, PID, job, failure fields and bounded ordering dependencies before returning.
 A changed observation fails with `STALE_EVIDENCE`; missing or denied data never
 becomes an inferred healthy state. The provider observes existing units with
 `GetUnit` and does not load, start, stop or restart services. Its result covers
-one system service; it supplies no journal, process diagnosis or dependency
-causality claims.
+one system service. `ordering_after` lists at most 128 canonical dependencies;
+`ordering_is_not_causation=true` explicitly prevents interpreting `After=` as a
+failure cause. No journal or process diagnosis is supplied. Job observations use
+the [native systemd Job interface](https://github.com/systemd/systemd/blob/main/man/org.freedesktop.systemd1.xml).
 
 The daemon runs as the user and binds `/run/user/UID/aios/session.sock` in an
 owned private directory. For an isolated deployment or test, both binaries

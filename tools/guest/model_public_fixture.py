@@ -223,3 +223,28 @@ def require_failure(value, code):
     if (value['upstream_exit'] != 1 or answer['state'] != 'failed' or answer['error'] != code
             or answer['output'] is not None or answer['mutation_performed']):
         raise RuntimeError('public request did not fail cleanly with ' + code)
+
+
+def require_system_answer(value, boot_id):
+    """Verify recovery from native evidence, independent of brand capitalization."""
+    answer = value['answer']
+    if (value['upstream_exit'] != 0 or answer['state'] != 'completed' or answer['error'] is not None
+            or answer['mutation_performed'] is not False):
+        raise RuntimeError('public model recovery did not complete without effects')
+    output = answer['output']
+    response = output['response']
+    observations = output['evidence']
+    if (output['local_cpu'] is not True or output['mutation_performed'] is not False
+            or response['kind'] != 'answer' or not re.search(r'\bnixos\b', response['text'].casefold())
+            or not observations):
+        raise RuntimeError('public recovery lacks a native CPU system answer')
+    ids = set()
+    for observation in observations:
+        if (observation['complete'] is not True or observation['error'] is not None
+                or observation['source']['provider'] != 'aios-system' or observation['data']['os_id'] != 'nixos'
+                or observation['data']['boot_id'] != boot_id):
+            raise RuntimeError('public recovery evidence is incomplete or from another boot')
+        ids.update(observation['evidence_ids'])
+    cited = response['evidence_ids']
+    if not cited or not set(cited).issubset(ids):
+        raise RuntimeError('public recovery citations do not reference its fresh native evidence')

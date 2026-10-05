@@ -49,6 +49,10 @@ def main():
             value = json.loads(result.stdout)
             if value["status"] != "ok" or value["data"]["boot_id"] != boot or value["data"]["unit_name"] != "sshd.service" or value["data"]["active_state"] != "active":
                 raise RuntimeError("packaged service result failed real guest verification")
+            data = value["data"]
+            if (data["ordering_is_not_causation"] is not True or not re.fullmatch(r"[0-9a-f]{32}",data["invocation_id"])
+                    or data["ordering_after"] != sorted(set(data["ordering_after"])) or len(data["ordering_after"]) > 128):
+                raise RuntimeError("service ordering/invocation observation is incomplete")
             print("AIOS_PACKAGED_SERVICE=" + json.dumps({"outputs": [str(p) for p in paths], "result": value}), flush=True)
         finally:
             if child.poll() is None:
