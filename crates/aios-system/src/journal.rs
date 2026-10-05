@@ -149,6 +149,9 @@ impl Input {
 }
 
 fn selected_file(name: &str, source: Source, uid: u32) -> bool {
+    // journald retains recoverable records from an unclean journal in
+    // .journal~ files. Native journalctl includes these archives as well.
+    let name=name.strip_suffix('~').unwrap_or(name);
     let system = name=="system.journal" || name.starts_with("system@") && name.ends_with(".journal");
     let user = format!("user-{uid}");
     system || source==Source::User && (name==format!("{user}.journal")
@@ -341,7 +344,13 @@ mod tests {
         assert!(selected_file("user-1000@abcd.journal",Source::User,1000));
         assert!(!selected_file("user-1001.journal",Source::User,1000));
         assert!(!selected_file("user-1000.journal",Source::System,1000));
-        assert!(!selected_file("system.journal~",Source::System,1000));
+        assert!(selected_file("system.journal~",Source::System,1000));
+        assert!(selected_file("system@abcd.journal~",Source::Kernel,1000));
+        assert!(selected_file("user-1000@abcd.journal~",Source::User,1000));
+        assert!(selected_file("user-1000.journal~",Source::User,1000));
+        assert!(!selected_file("user-1001@abcd.journal~",Source::User,1000));
+        assert!(!selected_file("user-1000.journal~",Source::System,1000));
+        assert!(!selected_file("system.journal~~",Source::System,1000));
         assert!(!selected_file("../../../secrets",Source::System,1000));
     }
 }

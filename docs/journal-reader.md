@@ -11,7 +11,9 @@ kernel records require the native kernel transport.
 
 Storage is limited to the current machine directory under `/run/log/journal`
 and `/var/log/journal`. No input selects paths, journal fields, namespaces or
-expressions. Required system and own-user files are opened without following
+expressions. File selection includes journald's recoverable `.journal~` archives after an
+unclean shutdown. Archive names remain restricted to system or the bound
+user's own files. Required journals are opened without following
 symlinks; directories/files must be root owned and not writable by other users.
 Each file must remain the same object with current DAC/ACL read access. An
 inaccessible required file returns an explicit permission error. Zero files
@@ -74,7 +76,15 @@ and its required scope/timeout qualification are complete.
 
 The development integration command exercises controlled public journal
 messages and an independent filtered upstream read. It covers source/unit/
-boot/time/priority/entry limits, native cursor continuation and redaction.
+boot/time/priority/entry limits, native cursor continuation and redaction. It
+also waits through the actual 30-second handle lifetime and requires explicit
+refusal of expired cursor, evidence and service references. Prior-boot cases
+require three controlled messages from a previous invocation in the same
+guest, followed by a verified reboot. Missing historical fixtures fail the
+gate; they are not silently skipped. Independent journalctl metadata binds
+each historical entry's cursor, UID, timestamp and boot. Both entry and batch
+evidence must retain the selected historical boot, and those messages must
+be absent from the corresponding current-boot time window.
 Required native cases fail instead of skipping missing access or data:
 
 ```fish

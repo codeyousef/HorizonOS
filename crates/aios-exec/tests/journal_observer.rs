@@ -24,6 +24,30 @@ fn logs(proxy:&Proxy<'_>,args:Value)->Value {
     assert_eq!(value["source"]["provider"],"aios-native-journal-observer");
     assert_eq!(value["complete"],true);value
 }
+fn verify_records(proxy:&Proxy<'_>,original:&[Value],result:&Value,boot:&str,uid:u32) {
+    let entries=result["data"]["entries"].as_array().unwrap();
+    for expected in original {
+        assert_eq!(expected["_UID"],uid.to_string());assert_eq!(expected["_BOOT_ID"],boot.replace('-',""));
+        let raw=expected["MESSAGE"].as_str().unwrap();
+        let row=entries.iter().find(|row|row["timestamp"].as_str().is_some_and(|s|OffsetDateTime::parse(s,&Rfc3339).unwrap().unix_timestamp_nanos()/1000==expected["__REALTIME_TIMESTAMP"].as_str().unwrap().parse::<i128>().unwrap()))
+            .unwrap_or_else(||panic!("controlled message missing: boot={boot}, native_timestamp={}, returned_timestamps={:?}",
+                expected["__REALTIME_TIMESTAMP"],entries.iter().map(|r|r["timestamp"].as_str()).collect::<Vec<_>>()));
+        assert_eq!(row["priority"],5);assert_eq!(row["source"],"user");
+        if raw.contains("PASSWORD") {assert_eq!(row["redacted"],true);assert!(!row.to_string().contains("fake-private-value"));}
+        else {assert_eq!(row["message"],raw);assert_eq!(row["redacted"],false);}
+        let evidence=call(proxy,"GetJournalEvidence",(row["evidence_id"].as_str().unwrap(),));
+        assert_eq!(evidence["data"]["source_locator"]["cursor"],expected["__CURSOR"]);
+        assert_eq!(evidence["data"]["source_locator"]["boot_id"],boot);
+        assert_eq!(evidence["data"]["payload"],*row);
+        assert_eq!(evidence["data"]["content_sha256"],aios_policy::digest(row).unwrap());
+    }
+    let batch=call(proxy,"GetJournalEvidence",(result["evidence_ids"][0].as_str().unwrap(),));
+    assert_eq!(batch["data"]["source_locator"]["boot_id"],boot);
+    assert_eq!(batch["data"]["source_locator"]["cursor"],"");
+    assert_eq!(batch["data"]["payload"],result["data"]);
+    assert_eq!(batch["data"]["content_sha256"],aios_policy::digest(&result["data"]).unwrap());
+    assert!(!result.to_string().contains("fake-private-value"));
+}
 
 #[test]
 #[ignore="requires the newly installed root System1 observer in an enrolled NixOS guest"]
@@ -59,22 +83,30 @@ fn installed_journal_filters_private_cursors_and_sanitized_evidence() {
         if rows.len()==3 {break rows;}assert!(Instant::now()<deadline);thread::sleep(Duration::from_millis(20));
     };
     let until=now();let arguments=json!({"source":"user","boot_id":"current","since":timestamp(since),"until":timestamp(until),"max_entries":200});
-    let all=logs(&proxy,arguments.clone());let entries=all["data"]["entries"].as_array().unwrap();
-    for expected in &original {
-        assert_eq!(expected["_UID"],uid.to_string());assert_eq!(expected["_BOOT_ID"],boot.replace('-',""));
-        let raw=expected["MESSAGE"].as_str().unwrap();
-        let row=entries.iter().find(|row|row["timestamp"].as_str().is_some_and(|s|OffsetDateTime::parse(s,&Rfc3339).unwrap().unix_timestamp_nanos()/1000==expected["__REALTIME_TIMESTAMP"].as_str().unwrap().parse::<i128>().unwrap()))
-            .expect("controlled own-user message missing from installed observer");
-        assert_eq!(row["priority"],5);assert_eq!(row["source"],"user");
-        if raw.contains("PASSWORD") {assert_eq!(row["redacted"],true);assert!(!row.to_string().contains("fake-private-value"));}
-        else {assert_eq!(row["message"],raw);assert_eq!(row["redacted"],false);}
-        let evidence=call(&proxy,"GetJournalEvidence",(row["evidence_id"].as_str().unwrap(),));
-        assert_eq!(evidence["data"]["source_locator"]["cursor"],expected["__CURSOR"]);
-        assert_eq!(evidence["data"]["source_locator"]["boot_id"].as_str().unwrap().replace('-',""),boot.replace('-',""));
-        assert_eq!(evidence["data"]["payload"],*row);
-        assert_eq!(evidence["data"]["content_sha256"],aios_policy::digest(row).unwrap());
+    let all=logs(&proxy,arguments.clone());verify_records(&proxy,&original,&all,&boot,uid);
+    // Required prior-boot qualification: run this probe once before rebooting
+    // the same enrolled guest. Only the fixed public fixture pattern is read.
+    let previous=Command::new("/run/current-system/sw/bin/journalctl").args(["--quiet","--no-pager","--output=json",
+        "--output-fields=MESSAGE,__CURSOR,__REALTIME_TIMESTAMP,_UID,_BOOT_ID,PRIORITY,SYSLOG_IDENTIFIER",
+        "--boot=-1","--case-sensitive=yes","--grep=^horizon-observer-check-[0-9a-f]{32} (startup failed[.]|PASSWORD=fake-private-value|retry scheduled[.])$",
+        "--lines=3",&format!("_UID={uid}")]).stdin(Stdio::null()).output().unwrap();
+    assert!(previous.status.success(),"prior-boot fixture access required");
+    assert!(previous.stdout.len()<131072 && previous.stderr.len()<4096);
+    let historical:Vec<Value>=String::from_utf8(previous.stdout).unwrap().lines().map(|row|serde_json::from_str(row).unwrap()).collect();
+    assert_eq!(historical.len(),3,"three controlled prior-boot messages required");
+    let historical_boot=uuid::Uuid::parse_str(historical[0]["_BOOT_ID"].as_str().unwrap()).unwrap().to_string();
+    assert_ne!(historical_boot,boot);
+    let old_tag=historical[0]["SYSLOG_IDENTIFIER"].as_str().unwrap();
+    assert!(historical.iter().all(|r|r["SYSLOG_IDENTIFIER"]==old_tag));
+    for suffix in ["startup failed.","PASSWORD=fake-private-value","retry scheduled."] {
+        assert!(historical.iter().any(|r|r["MESSAGE"]==format!("{old_tag} {suffix}")));
     }
-    assert!(!all.to_string().contains("fake-private-value"));
+    let times:Vec<u64>=historical.iter().map(|r|r["__REALTIME_TIMESTAMP"].as_str().unwrap().parse().unwrap()).collect();
+    let old_arguments=json!({"source":"user","boot_id":historical_boot,"since":timestamp(*times.iter().min().unwrap()),
+        "until":timestamp(*times.iter().max().unwrap()),"max_entries":200});
+    let old=logs(&proxy,old_arguments.clone());verify_records(&proxy,&historical,&old,&historical_boot,uid);
+    let mut wrong_boot=old_arguments;wrong_boot["boot_id"]=json!(boot);
+    assert!(logs(&proxy,wrong_boot)["data"]["entries"].as_array().unwrap().is_empty(),"historical records leaked into current boot");
     let mut priority=arguments.clone();priority["priority_max"]=json!(4);
     assert!(logs(&proxy,priority)["data"]["entries"].as_array().unwrap().iter().all(|r|!r["message"].as_str().unwrap().starts_with(&tag)));
     let mut narrow=arguments.clone();narrow["since"]=json!(timestamp(until));
@@ -115,5 +147,6 @@ fn installed_journal_filters_private_cursors_and_sanitized_evidence() {
         "own_uid_filter":true,"system_unit_filter":true,"kernel_source":true,"time_filter":true,"priority_filter":true,
         "entry_limit":true,"cursor_continuation":true,"cross_connection_refused":true,"query_drift_refused":true,
         "missing_boot_refused":true,"claimed_uid_refused":true,"redaction_before_evidence":true,"evidence_hash_verified":true,
-        "expiry_refused":true}));
+        "expiry_refused":true,"historical_boot_filter":true,"historical_boot_id":historical_boot,
+        "historical_controlled_messages":3,"batch_evidence_boot_verified":true}));
 }

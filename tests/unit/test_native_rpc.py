@@ -45,18 +45,27 @@ class NativeRpcTests(unittest.TestCase):
 
     def test_journal_zero_exit_cannot_hide_skipped_or_wrong_boot_cases(self):
         proof={"evidence_kind":"real-installed-native-journal-observer","uid":1000,"observer_uid":0,"observer_pid":50,
-            "boot_id":IDENTITY["boot_id"],"controlled_messages":3}
+            "boot_id":IDENTITY["boot_id"],"controlled_messages":3,
+            "historical_boot_id":"11111111-1111-4111-8111-111111111111","historical_controlled_messages":3}
         for key in ("own_uid_filter","system_unit_filter","kernel_source","time_filter","priority_filter","entry_limit",
             "cursor_continuation","cross_connection_refused","query_drift_refused","missing_boot_refused","claimed_uid_refused",
-            "redaction_before_evidence","evidence_hash_verified","expiry_refused"):proof[key]=True
+            "redaction_before_evidence","evidence_hash_verified","expiry_refused","historical_boot_filter","batch_evidence_boot_verified"):proof[key]=True
         incomplete={**proof,"redaction_before_evidence":False}
         expired_unchecked={**proof,"expiry_refused":False}
         expiry_missing={key:value for key,value in proof.items() if key!="expiry_refused"}
+        history_missing={key:value for key,value in proof.items() if key!="historical_boot_filter"}
+        history_current={**proof,"historical_boot_id":IDENTITY["boot_id"]}
+        history_malformed={**proof,"historical_boot_id":"not-a-boot"}
+        batch_unchecked={**proof,"batch_evidence_boot_verified":False}
         drifted={**proof,"boot_id":"another-boot"}
         for output,expected in ((b"",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(incomplete).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(expired_unchecked).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(expiry_missing).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(history_missing).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(history_current).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(history_malformed).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(batch_unchecked).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(drifted).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(proof).encode()+b"\n",ExitCode.SUCCESS)):
             with patch.object(native_rpc.acceptance,"STORAGE_ROOT",self.root), \

@@ -52,9 +52,14 @@ def _run(config, *, journal):
                 and type(observation.get("observer_uid")) is int and observation["observer_uid"]==0
                 and type(observation.get("observer_pid")) is int and observation["observer_pid"]>1
                 and observation.get("boot_id")==identity["boot_id"] and observation.get("controlled_messages")==3
+                and isinstance(observation.get("historical_boot_id"),str)
+                and str(uuid.UUID(observation["historical_boot_id"]))==observation["historical_boot_id"]
+                and observation["historical_boot_id"]!=identity["boot_id"]
+                and observation.get("historical_controlled_messages")==3
                 and all(observation.get(key) is True for key in ("own_uid_filter","system_unit_filter","kernel_source",
                     "time_filter","priority_filter","entry_limit","cursor_continuation","cross_connection_refused",
-                    "query_drift_refused","missing_boot_refused","claimed_uid_refused","redaction_before_evidence","evidence_hash_verified","expiry_refused")))
+                    "query_drift_refused","missing_boot_refused","claimed_uid_refused","redaction_before_evidence","evidence_hash_verified","expiry_refused",
+                    "historical_boot_filter","batch_evidence_boot_verified")))
         else:
             valid = (isinstance(observation,dict) and type(observation.get("uid")) is int and observation["uid"] >= 1000
             and type(observation.get("root_bus_owner_uid")) is int and observation["root_bus_owner_uid"] == 0 and type(observation.get("root_bus_owner_pid")) is int
@@ -71,7 +76,7 @@ def _run(config, *, journal):
         "started_at":started,"finished_at":datetime.now(timezone.utc).isoformat(),"upstream_exit":status,
         "exit_status":int(code),"caller_session_held_open":True,"probe_observation_valid":valid,"probe":observation,
         "limitations":(["Controlled public messages; actual installed native journal, root service and authenticated user.",
-            "Does not qualify model task grants, historical boots, rotation or hard native-call interruption."] if journal else
+            "Does not qualify model task grants, cross-UID reads, user-unit resolution, rotation or hard native-call interruption."] if journal else
             ["Typed fixture intent; actual native root service, user, bus and ledger.",
             "Does not grant trusted graphical consent or qualify activation."])}
     provision.write_new(directory / "log.txt", log.encode())
