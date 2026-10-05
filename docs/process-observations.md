@@ -43,3 +43,19 @@ installed inventory qualification.
 
 The native descriptor lifetime follows the Linux
 [pidfd documentation](https://man7.org/linux/man-pages/man2/pidfd_open.2.html).
+
+Installed qualification uses the fixed foreground command:
+
+```fish
+python3 tools/devctl.py test --suite integration --provider process-inspection --json
+```
+
+The probe retains the actual SSH/PAM caller, verifies the user broker against
+the root-associated native user manager and its installed ExecStart, and calls
+the public typed methods. A controlled child exits naturally; independent
+proc/pidfd observations check its identity and exit. Real cursor continuation,
+same-PID connection isolation, query drift, claimed-UID refusal and 30-second
+expiry are required. Missing or failed cases cannot yield a passing report.
+This gate does not establish approved termination, model task grants,
+cross-UID caller isolation or actual PID reuse. Its ignored Rust test is
+required by this native gate and does not count as an ordinary unit-test pass.

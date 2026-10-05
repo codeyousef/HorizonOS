@@ -89,6 +89,36 @@ class NativeRpcTests(unittest.TestCase):
         exchange.assert_not_called()
         self.assertFalse((self.root/".local/reports").exists())
 
+    def test_process_probe_cannot_detach_or_infer_success_from_zero_exit(self):
+        args=cli.parser().parse_args(["test","--suite","integration","--provider","process-inspection","--detach"])
+        with patch.object(cli,"load_config") as load, patch.object(native_rpc,"run_process") as run:
+            with self.assertRaises(DevctlError):cli.dispatch(args)
+        load.assert_not_called();run.assert_not_called()
+        proof={"evidence_kind":"real-installed-native-process-broker","uid":1000,"broker_uid":1000,"broker_pid":50,
+            "boot_id":IDENTITY["boot_id"],"installed_executable":"/nix/store/fixture-aios-core/bin/aios-sessiond","termination_performed":False}
+        flags=("managed_service_verified","own_uid_filter","native_child_identity_verified","metrics_schema_verified",
+            "natural_exit_refused","cursor_continuation","cross_connection_refused","query_drift_refused","claimed_uid_refused","app_filter_refused","expiry_refused")
+        proof.update(dict.fromkeys(flags,True))
+        cases=[(b"",ExitCode.VERIFICATION_FAILURE),(proof,ExitCode.SUCCESS),({**proof,"termination_performed":True},ExitCode.VERIFICATION_FAILURE),
+            ({**proof,"broker_uid":0},ExitCode.VERIFICATION_FAILURE),({**proof,"boot_id":"drifted"},ExitCode.VERIFICATION_FAILURE),
+            ({**proof,"installed_executable":"/tmp/aios-sessiond"},ExitCode.VERIFICATION_FAILURE)]
+        for flag in flags:
+            cases.append(({**proof,flag:False},ExitCode.VERIFICATION_FAILURE))
+            cases.append(({k:v for k,v in proof.items() if k!=flag},ExitCode.VERIFICATION_FAILURE))
+        for value,expected in cases:
+            output=b"AIOS_INSTALLED_PROCESS="+json.dumps(value).encode()+b"\n" if isinstance(value,dict) else value
+            with patch.object(native_rpc.acceptance,"STORAGE_ROOT",self.root), \
+                 patch.object(native_rpc.guest,"enrolled_identity",return_value=({"host_key_fingerprint":"fixture-pin"},IDENTITY)), \
+                 patch.object(native_rpc.sync,"synchronize",return_value=(0,self.publication)), \
+                 patch.object(native_rpc.guest,"ssh_arguments",return_value=["ssh","pinned-fixture","identity"]), \
+                 patch.object(native_rpc.sync,"exchange",return_value=(0,output,b"")) as exchange:
+                code,result=native_rpc.run_process(self.config)
+            self.assertEqual(code,expected)
+            self.assertTrue(exchange.call_args.args[0][-1].endswith('/tools/guest/installed_process_smoke.py'))
+            record=json.loads(Path(result['artifact_path']).read_text())
+            self.assertTrue(record['caller_session_held_open'])
+            self.assertEqual(record['evidence_kind'],'real-installed-process-live-SSH-caller')
+
     def test_zero_exit_requires_positive_native_observations_and_retains_sanitized_evidence(self):
         for output, expected in ((b"",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_EXECUTOR "+json.dumps(self.proof).encode()+b"\npassword=fixture-secret\n",ExitCode.SUCCESS)):
