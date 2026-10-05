@@ -153,6 +153,40 @@ mod tests {
         assert_eq!(owner("Uid: 1000 1000 1000",1000),Err(ErrorCode::PartialResult));
     }
     #[test]
+    #[ignore="fixed helper subprocess for native nondumpable inventory regression"]
+    fn native_nondumpable_child() {
+        use std::io::Write;
+        assert_eq!(std::env::var("AIOS_NATIVE_NONDUMPABLE_CHILD").as_deref(),Ok("1"));
+        assert_eq!(unsafe{libc::prctl(libc::PR_SET_DUMPABLE,0)},0);
+        println!("AIOS_NONDUMPABLE_READY"); std::io::stdout().flush().unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
+    #[test]
+    fn nondumpable_own_user_process_is_incomplete_not_silently_excluded() {
+        use std::io::{BufRead,BufReader};
+        let uid=unsafe{libc::geteuid()};assert_ne!(uid,0);
+        let mut child=std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored","--exact","processes::tests::native_nondumpable_child","--nocapture"])
+            .env("AIOS_NATIVE_NONDUMPABLE_CHILD","1").stdout(std::process::Stdio::piped()).spawn().unwrap();
+        let mut reader=BufReader::new(child.stdout.take().unwrap());
+        let mut ready=false;
+        for _ in 0..16 {
+            let mut line=String::new();if reader.read_line(&mut line).unwrap()==0 {break;}
+            if line.trim()=="AIOS_NONDUMPABLE_READY" {ready=true;break;}
+        }
+        assert!(ready,"controlled native helper did not become ready");
+        let proc=OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY|libc::O_NOFOLLOW|libc::O_CLOEXEC)
+            .open(format!("/proc/{}",child.id())).unwrap();
+        assert_eq!(proc.metadata().unwrap().uid(),uid);
+        assert_eq!(open_field(&proc,c"status",libc::O_RDONLY|libc::O_NOFOLLOW).unwrap().metadata().unwrap().uid(),0);
+        owner(&text(&proc,c"status").unwrap(),uid).unwrap();
+        assert!(matches!(OwnProcess::open(child.id()),Err(ErrorCode::PermissionDenied)));
+        let result=inventory().unwrap();assert!(result.access_denied);
+        assert!(!result.processes.iter().any(|p|p.identity.pid==child.id()));
+        assert!(result.processes.iter().all(|p|p.identity.uid==uid));
+        assert!(child.wait().unwrap().success());
+    }
+    #[test]
     fn native_identity_survives_only_the_original_process() {
         // Actual guest process and pidfd, not fixture identity. No signal sent.
         assert!(unsafe{libc::geteuid()}!=0);

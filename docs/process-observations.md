@@ -59,3 +59,8 @@ expiry are required. Missing or failed cases cannot yield a passing report.
 This gate does not establish approved termination, model task grants,
 cross-UID caller isolation or actual PID reuse. Its ignored Rust test is
 required by this native gate and does not count as an ordinary unit-test pass.
+
+A native regression test creates a controlled non-dumpable own-user child.
+It verifies actual process credentials and inaccessible executable identity,
+requires an explicitly incomplete inventory, and lets the child exit naturally.
+This is library verification in the guest, not installed broker qualification.
