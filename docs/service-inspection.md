@@ -176,14 +176,44 @@ Each generation owns a separate authenticated model connection, whose teardown
 removes its private retained record.
 
 Context contains explicitly labeled untrusted observations and the authenticated
-question. Older observations are dropped before the newest evidence if the
-bounded transport context cannot fit; `dropped_evidence_count` and
-`context_complete` report that loss. No private history is attached without its
-own grant. This transport byte bound is separate from the daemon's actual
-6144-token input check. Partial provider reads return `PARTIAL_RESULT`; answers
+question. A native Submit caller may explicitly set `retain_for_history: true`
+to retain that question and its completed response in volatile memory. Retention
+is off by default. A subsequent Submit must separately select up to four unique
+`history_handles` (completed task UUIDs). Both choices are bound to the full
+original authenticated client, including process, boot, session and connection
+or unique bus sender. Reconnects and other clients cannot reuse the history.
+Graphical submissions reject history retention and selection; their native read
+receipt cannot authorize later reuse of private window content.
+
+Selected historical questions and assistant text are labeled untrusted and
+carry no current evidence IDs, provider handles, grants or approval receipts.
+Only the new question is current intent, and only fresh observations can support
+current system facts. Each selected source digest is bound into the new read
+scope and rechecked throughout generation and before final result publication.
+Forget, expiry, changed source content or originating-client disconnect revoke
+reuse. Failed/cancelled tasks discard captured questions. Completed captures
+expire five minutes after completion; disconnect wipes owned captures (private
+socket teardown immediately, public bus/process loss during native housekeeping).
+Owned string buffers are wiped on drop; allocator/compiler copies cannot be
+promised erased. No conversation persistence or ordinary prompt logging is added.
+
+Newest history is preferred among explicitly selected entries, but every fresh
+observation precedes history. Oldest history is dropped first, then optional
+older observations, while preserving the newest observation and the complete
+current question. `history_attached`, `history_task_ids`, `dropped_history_count`,
+`dropped_evidence_count` and `context_complete` report retained context and loss.
+The transport byte bound is separate from the daemon's actual 6144-token input
+check. Only a native zero-output/zero-input `CONTEXT_BUDGET_EXCEEDED` rejection
+may trigger another bounded assembly after dropping optional context; it does
+not consume structural repair or broaden authority. If mandatory context alone
+cannot fit, the task fails without truncating current intent. All attempts share
+the original task deadline. Partial provider reads return `PARTIAL_RESULT`; answers
 must cite at least one retained evidence ID. These checks bind references, but do
 not yet qualify arbitrary factual claims or the immutable write orchestration.
 
+System information is freshly observed before inference. Once all required
+native observations are available, the broker selects the final-answer stage
+with no offered tools instead of asking the model to repeat completed reads.
 A selected-service task starts in a constrained read-decision stage that cannot
 emit an answer. It offers service inspection until every explicitly selected
 handle has a complete native observation. The final answer must cite that service

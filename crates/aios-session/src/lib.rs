@@ -28,6 +28,8 @@ pub enum Mode { Ask, Act, Diagnose, Automate }
 pub struct Submit {
     pub mode: Mode, pub text: String, pub client_nonce: String,
     #[serde(default)] pub context_handles: Vec<String>,
+    #[serde(default)] pub retain_for_history: bool,
+    #[serde(default)] pub history_handles: Vec<String>,
     pub selected_app_handle: Option<String>,
     pub selected_session_handle: Option<String>,
 }
@@ -118,9 +120,15 @@ pub struct TaskStatus {
     pub output: Option<Value>,
 }
 
+fn history_response_text(response:&Value)->Result<&str,ErrorCode>{
+    let field=match response["kind"].as_str(){Some("answer")=>"text",Some("clarification")=>"question",Some("abstain")=>"reason",_=>return Err(ErrorCode::PartialResult)};
+    response[field].as_str().ok_or(ErrorCode::PartialResult)
+}
+struct HistoryRef { id: String, digest: String }
 struct Task {
     owner: Peer, expires: Instant, nonce: String, digest: [u8; 32], status: TaskStatus,
     deadline: Instant, boottime_deadline: u64, control: Arc<AtomicU8>, text: Option<String>, events: Vec<Value>, grant: Option<aios_policy::ReadGrant>, service_handles: Vec<String>,
+    retained_question:Option<inference::Secret>, history_refs:Vec<HistoryRef>,
     graphical:Option<graphical::Selection>,native_cancel:Option<Arc<ui_bridge::Cancellation>>,native_receipt:Option<graphical::Receipt>,
 }
 impl Task {
@@ -136,7 +144,7 @@ impl Task {
         let result = match result { Ok(_) if cause == 1 => Err(ErrorCode::Cancelled), Ok(_) if cause == 2 => Err(ErrorCode::DeadlineExceeded), other => other };
         match result {
             Ok(output) => { self.status.output = Some(output); self.status.state = "completed".into(); }
-            Err(error) => { self.status.error = Some(error); self.status.state = if error == ErrorCode::Cancelled { "cancelled" } else { "failed" }.into(); }
+            Err(error) => { self.retained_question.take(); self.status.error = Some(error); self.status.state = if error == ErrorCode::Cancelled { "cancelled" } else { "failed" }.into(); }
         }
         if let Some(mut text) = self.text.take() { inference::wipe(&mut text); }
         self.expires = Instant::now() + Duration::from_secs(300);
@@ -183,9 +191,44 @@ impl State {
     }
     fn check_task_read(&self, id: &str, peer: &Peer) -> Result<(), ErrorCode> {
         let task = self.task(id, peer)?;
+        for reference in &task.history_refs {
+            if self.history_digest(&reference.id,peer)? != reference.digest { return Err(ErrorCode::TargetChanged); }
+        }
         if let Some(selection)=&task.graphical{return task.native_receipt.as_ref().ok_or(ErrorCode::AuthRequired)?.check(selection,peer,id,&task.digest);}
         self.policy.as_ref().ok_or(ErrorCode::PolicyChanged)?.check_read(task.grant.as_ref().ok_or(ErrorCode::AuthRequired)?,
             &peer.policy_subject()?, id, &Action::SystemInfo, &ReadResources::default(), aios_policy::boottime_ms()?)
+    }
+    fn history_source(&self,id:&str,peer:&Peer)->Result<&Task,ErrorCode>{
+        let source=self.task(id,peer)?;
+        if source.expires<=Instant::now(){return Err(ErrorCode::ApprovalExpired);}
+        if source.retained_question.is_none(){return Err(ErrorCode::AuthRequired);}
+        if source.status.state!="completed" || source.graphical.is_some() || source.status.mutation_performed {
+            return Err(ErrorCode::AuthRequired);
+        }
+        let response=&source.status.output.as_ref().ok_or(ErrorCode::PartialResult)?["response"];
+        history_response_text(response)?;
+        Ok(source)
+    }
+    fn history_digest(&self,id:&str,peer:&Peer)->Result<String,ErrorCode>{
+        let source=self.history_source(id,peer)?;
+        let response=&source.status.output.as_ref().ok_or(ErrorCode::PartialResult)?["response"];
+        aios_policy::digest(&json!({"request_digest":source.digest,"submitted_at":source.status.submitted_at,
+            "question":source.retained_question.as_ref().ok_or(ErrorCode::AuthRequired)?.0,
+            "kind":response["kind"],"text":history_response_text(response)?}))
+    }
+    fn task_history(&self,id:&str,peer:&Peer)->Result<Vec<inference::HistoryEntry>,ErrorCode>{
+        self.check_task_read(id,peer)?;
+        let mut entries=Vec::new();
+        for reference in &self.task(id,peer)?.history_refs {
+            let source=self.history_source(&reference.id,peer)?;
+            let response=&source.status.output.as_ref().ok_or(ErrorCode::PartialResult)?["response"];
+            entries.push(inference::HistoryEntry { id:reference.id.clone(),submitted_at:source.status.submitted_at.clone(),
+                question:inference::Secret(source.retained_question.as_ref().ok_or(ErrorCode::AuthRequired)?.0.clone()),
+                kind:response["kind"].as_str().ok_or(ErrorCode::PartialResult)?.into(),
+                text:inference::Secret(history_response_text(response)?.into()) });
+        }
+        entries.sort_by(|a,b|b.submitted_at.cmp(&a.submitted_at).then_with(||a.id.cmp(&b.id)));
+        Ok(entries)
     }
     fn service_resource(&self,peer:&Peer,id:&str)->Result<(String,aios_policy::Resource),ErrorCode>{
         let handle=self.handles.get(id).ok_or(ErrorCode::TargetNotFound)?;
@@ -250,7 +293,9 @@ impl State {
         self.ui_candidates.retain(|_, candidate| candidate.expires > time);
     }
     fn disconnect(&mut self, peer: &Peer) {
-        for task in self.tasks.values_mut().filter(|task| task.owner == *peer && !task.terminal()) {
+        for task in self.tasks.values_mut().filter(|task| task.owner == *peer) {
+            task.retained_question.take();
+            if task.terminal(){continue;}
             if let Some(grant) = &task.grant { grant.revoke(); }
             if let Some(cancel)=&task.native_cancel{cancel.cancel();}
             let _=task.control.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
@@ -292,7 +337,12 @@ impl State {
             return Err(ErrorCode::AuthRequired);
         }
         }
-        if request.context_handles.len()>8 || selection.is_some() && !request.context_handles.is_empty(){return Err(ErrorCode::InvalidArgument);}
+        if request.context_handles.len()>8 || request.history_handles.len()>4 || selection.is_some() && (!request.context_handles.is_empty() || request.retain_for_history || !request.history_handles.is_empty()){return Err(ErrorCode::InvalidArgument);}
+        let mut history_refs=Vec::new();
+        for id in &request.history_handles {
+            if !uuid(id) || history_refs.iter().any(|r:&HistoryRef|r.id==*id){return Err(ErrorCode::InvalidArgument);}
+            history_refs.push(HistoryRef{id:id.clone(),digest:self.history_digest(id,peer)?});
+        }
         let mut resources=Vec::new();
         for id in &request.context_handles {
             if resources.iter().any(|r:&aios_policy::Resource|&r.handle==id){return Err(ErrorCode::InvalidArgument);}
@@ -310,6 +360,7 @@ impl State {
         let grant = if selection.is_none() && self.inference_configured && matches!(request.mode, Mode::Ask | Mode::Diagnose) {
             let mut actions=std::collections::BTreeSet::from(["system.info".into()]);
             if !resources.is_empty(){actions.insert("system.service_status".into());}
+            resources.extend(history_refs.iter().map(|r|aios_policy::Resource{field:"history_id".into(),kind:"session-history".into(),handle:r.id.clone(),identity_sha256:r.digest.clone()}));
             let scope = aios_policy::Scope { actions, resources:resources.into_iter().collect(), ..Default::default() };
             Some(self.read_grant(peer, id.clone(), &request.text, request.mode, scope, 90_000)?)
         } else { None };
@@ -319,7 +370,7 @@ impl State {
         let status = TaskStatus { schema_version: 1, operation: "task_status".into(), request_id: id.clone(), mode: request.mode,
             state: "queued".into(), submitted_at, mutation_performed: false, error: None, output: None };
         let mut task = Task { owner: peer.clone(), expires: deadline + Duration::from_secs(300),
-            nonce: request.client_nonce, digest, status, deadline, boottime_deadline, control: Arc::new(AtomicU8::new(0)), text: Some(request.text), events: vec![], grant,service_handles:request.context_handles,graphical:selection,native_cancel:None,native_receipt:None };
+            nonce: request.client_nonce, digest, status, deadline, boottime_deadline, control: Arc::new(AtomicU8::new(0)), retained_question:request.retain_for_history.then(||inference::Secret(request.text.clone())),history_refs, text: Some(request.text), events: vec![], grant,service_handles:request.context_handles,graphical:selection,native_cancel:None,native_receipt:None };
         task.event("accepted");
         if !self.inference_configured { task.finish(Err(ErrorCode::ModelUnavailable)); }
         else if matches!(request.mode, Mode::Act | Mode::Automate) { task.finish(Err(ErrorCode::UnsupportedCapability)); }
@@ -332,7 +383,7 @@ impl State {
         match operation {
             Operation::GetCapabilities => Ok(json!({"schema_version":1,"request_id":Uuid::new_v4().to_string(),"operation":"capabilities","actions":["system.info","system.service_status"],
                 "read_only":true,"inference_available":self.inference_available,"inference_configured":self.inference_configured,"ui_enabled":false,"ui_session_selection_available":true,"transport":"private-unix",
-                "task_request_max_bytes":MAX_TASK_BYTES,"session_associated":peer.logind_session.is_some()})),
+                "session_history":{"opt_in_required":true,"max_selected":4,"retention_ms":300000,"owner":"authenticated_client","persistent":false},"task_request_max_bytes":MAX_TASK_BYTES,"session_associated":peer.logind_session.is_some()})),
             Operation::SelectUiSession { session_id } => {
                 if self.ui_candidates.len()>=64 || self.ui_candidates.values().filter(|c|c.owner==*peer).count()>=8 {return Err(ErrorCode::ResourceExhausted);}
                 let session=identity::observe_graphical_session(&session_id,peer.uid)?;
@@ -474,7 +525,7 @@ fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut O
         Operation::ForgetUiRead{task_id}=>json!({"kind":"forget","task_id":task_id}),
         Operation::Submit{request} if request.selected_session_handle.is_some() || request.selected_app_handle.is_some()=>{
             if let Some(value)=state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.existing_submission(peer,&request)?{return Ok(value);}
-            if !request.context_handles.is_empty() || request.text.len()>4096{return Err(ErrorCode::InvalidArgument);}
+            if !request.context_handles.is_empty() || request.retain_for_history || !request.history_handles.is_empty() || request.text.len()>4096{return Err(ErrorCode::InvalidArgument);}
             let session=selected_ui_session(state,peer,request.selected_session_handle.as_deref().ok_or(ErrorCode::AuthRequired)?)?;
             let selection=graphical::Connection::select(ui.as_ref().ok_or(ErrorCode::AuthRequired)?.clone(),peer,&session,
                 request.selected_app_handle.as_deref().ok_or(ErrorCode::AuthRequired)?)?;
@@ -531,7 +582,65 @@ mod tests {
     }
     fn submit_fixture(mode: Mode, nonce: &str, text: &str) -> Operation {
         Operation::Submit { request: Submit { mode, text: text.into(), client_nonce: nonce.into(),
-            context_handles: vec![], selected_app_handle: None, selected_session_handle: None } }
+            context_handles: vec![],retain_for_history:false,history_handles:vec![], selected_app_handle: None, selected_session_handle: None } }
+    }
+    pub(super) fn history_request(retain:bool,history:Vec<String>)->Submit{
+        Submit{mode:Mode::Ask,text:"Original private question".into(),client_nonce:Uuid::new_v4().to_string(),
+            context_handles:vec![],retain_for_history:retain,history_handles:history,selected_app_handle:None,selected_session_handle:None}
+    }
+    fn retained_fixture(state:&mut State,peer:&Peer,retain:bool)->String{
+        let id=state.submit_owned(peer,history_request(retain,vec![]),None).unwrap()["request_id"].as_str().unwrap().to_string();
+        state.tasks.get_mut(&id).unwrap().finish(Ok(json!({"response":{"kind":"answer","text":"Old answer: not current evidence","evidence_ids":["old-citation"]},"mutation_performed":false})));
+        id
+    }
+    #[test]
+    fn history_requires_two_explicit_choices_and_same_entire_peer(){
+        let peer=peer_fixture();let mut state=State::with_inference();
+        let omitted=retained_fixture(&mut state,&peer,false);
+        assert!(state.tasks[&omitted].retained_question.is_none());
+        assert_eq!(state.history_digest(&omitted,&peer),Err(ErrorCode::AuthRequired));
+        let retained=retained_fixture(&mut state,&peer,true);
+        for changed in ["uid","pid","start","boot","connection","bus","session"]{
+            let mut foreign=peer.clone();match changed{
+                "uid"=>foreign.uid+=1,"pid"=>foreign.pid+=1,"start"=>foreign.start_ticks+=1,
+                "boot"=>foreign.boot_id=Uuid::new_v4().to_string(),"connection"=>foreign.connection_id=Some(Uuid::new_v4().to_string()),
+                "bus"=>foreign.bus_sender=Some(":1.9".into()),_=>foreign.logind_session=Some("other".into())}
+            assert_eq!(state.history_digest(&retained,&foreign),Err(ErrorCode::PermissionDenied));
+        }
+        let follow=state.submit_owned(&peer,history_request(false,vec![retained.clone()]),None).unwrap()["request_id"].as_str().unwrap().to_string();
+        let history=state.task_history(&follow,&peer).unwrap();assert_eq!(history.len(),1);
+        assert_eq!(history[0].question.0,"Original private question");
+        assert_eq!(state.task_tools(&follow,&peer).unwrap(),vec![aios_protocol::inference::ReadTool::SystemInfo]);
+        assert!(state.tasks[&follow].retained_question.is_none());
+        state.tasks.get_mut(&retained).unwrap().status.output.as_mut().unwrap()["response"]["text"]=json!("changed");
+        assert_eq!(state.check_task_read(&follow,&peer),Err(ErrorCode::TargetChanged));
+    }
+    #[test]
+    fn forget_expiry_and_disconnect_revoke_selected_history(){
+        for operation in ["forget","expiry","disconnect"]{
+            let peer=peer_fixture();let mut state=State::with_inference();let retained=retained_fixture(&mut state,&peer,true);
+            let follow=state.submit_owned(&peer,history_request(false,vec![retained.clone()]),None).unwrap()["request_id"].as_str().unwrap().to_string();
+            assert!(state.check_task_read(&follow,&peer).is_ok());
+            match operation{
+                "forget"=>{state.dispatch(&peer,Operation::Forget{task_id:retained.clone()}).unwrap();},
+                "expiry"=>state.tasks.get_mut(&retained).unwrap().expires=Instant::now()-Duration::from_millis(1),
+                _=>state.disconnect(&peer)}
+            assert!(state.check_task_read(&follow,&peer).is_err());
+            if operation=="disconnect"{assert!(state.tasks[&retained].retained_question.is_none());}
+        }
+    }
+    #[test]
+    fn history_rejects_uncompleted_duplicate_overfull_and_cancelled_sources(){
+        let peer=peer_fixture();let mut state=State::with_inference();let source=state.submit_owned(&peer,history_request(true,vec![]),None).unwrap()["request_id"].as_str().unwrap().to_string();
+        assert_eq!(state.history_digest(&source,&peer),Err(ErrorCode::AuthRequired));
+        state.tasks.get_mut(&source).unwrap().finish(Ok(json!({"response":{"kind":"clarification","question":"Which one?"}})));
+        assert!(state.history_digest(&source,&peer).is_ok());
+        assert_eq!(state.submit_owned(&peer,history_request(false,vec![source.clone(),source.clone()]),None),Err(ErrorCode::InvalidArgument));
+        assert_eq!(state.submit_owned(&peer,history_request(false,vec![source.clone();5]),None),Err(ErrorCode::InvalidArgument));
+        assert_eq!(state.submit_owned(&peer,history_request(false,vec!["malformed".into()]),None),Err(ErrorCode::InvalidArgument));
+        let failed=state.submit_owned(&peer,history_request(true,vec![]),None).unwrap()["request_id"].as_str().unwrap().to_string();
+        state.tasks.get_mut(&failed).unwrap().finish(Err(ErrorCode::Cancelled));
+        assert!(state.tasks[&failed].retained_question.is_none());
     }
     #[test]
     fn raw_calls_preserve_duplicates_for_strict_action_parser() {
@@ -581,7 +690,7 @@ mod tests {
         let own=Uuid::new_v4().to_string();let other=Uuid::new_v4().to_string();
         state.handles.insert(own.clone(),Handle{owner:peer.clone(),expires:Instant::now()+Duration::from_secs(30),unit:"sshd.service".into()});
         state.handles.insert(other.clone(),Handle{owner:foreign,expires:Instant::now()+Duration::from_secs(30),unit:"must-not-be-accessed.service".into()});
-        let request=|handles:Vec<String>|Submit{mode:Mode::Ask,text:"Inspect selected service".into(),client_nonce:Uuid::new_v4().to_string(),context_handles:handles,selected_app_handle:None,selected_session_handle:None};
+        let request=|handles:Vec<String>|Submit{mode:Mode::Ask,text:"Inspect selected service".into(),client_nonce:Uuid::new_v4().to_string(),context_handles:handles,retain_for_history:false,history_handles:vec![],selected_app_handle:None,selected_session_handle:None};
         assert_eq!(state.submit_owned(&peer,request(vec![other.clone()]),None).unwrap_err(),ErrorCode::PermissionDenied);
         let id=state.submit_owned(&peer,request(vec![own.clone()]),None).unwrap()["request_id"].as_str().unwrap().to_string();
         let action=|handle:&str|parse_tool_call(json!({"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":handle}}).to_string().as_bytes()).unwrap();

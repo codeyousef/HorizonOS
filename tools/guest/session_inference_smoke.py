@@ -47,8 +47,8 @@ def main():
                     reply=client.call(operation)
                     if reply['error']: raise RuntimeError('owned operation denied: '+str(reply['error']))
                     return reply['data']
-                def submit(text,nonce=None,mode='ask',handles=None):
-                    return call({'kind':'submit','request':{'mode':mode,'text':text,'client_nonce':nonce or str(uuid.uuid4()),'context_handles':handles or []}})['request_id']
+                def submit(text,nonce=None,mode='ask',handles=None,retain=False,history=None):
+                    return call({'kind':'submit','request':{'mode':mode,'text':text,'client_nonce':nonce or str(uuid.uuid4()),'context_handles':handles or [],'retain_for_history':retain,'history_handles':history or []}})['request_id']
                 def status(task): return call({'kind':'get_status','task_id':task})
                 def wait(task):
                     until=time.monotonic()+95
@@ -58,8 +58,8 @@ def main():
                         time.sleep(.025)
                     raise RuntimeError('session task failed to terminate')
                 nonce=str(uuid.uuid4()); question='What operating system is running? Cite the provided observation.'
-                task=submit(question,nonce)
-                if submit(question,nonce)!=task: raise RuntimeError('idempotent submission changed ID')
+                task=submit(question,nonce,retain=True)
+                if submit(question,nonce,retain=True)!=task: raise RuntimeError('idempotent submission changed ID')
                 changed=client.call({'kind':'submit','request':{'mode':'ask','text':'different question','client_nonce':nonce}})
                 if changed['error']['code']!='CONFLICT': raise RuntimeError('nonce drift admitted')
                 for kind in ('get_status','cancel','forget'):
@@ -73,8 +73,10 @@ def main():
                         raise RuntimeError('actual broker generation exceeded tokenizer budgets')
                 if [g['response_mode'] for g in result['output']['generations']][-1]!='final_answer':
                     raise RuntimeError('actual answer did not use the final-answer stage')
-                evidence=result['output']['evidence'][0]
-                if result['output']['response']['evidence_ids']!=evidence['evidence_ids'] or evidence['data']['os_id']!='nixos' or result['mutation_performed']:
+                evidence=result['output']['evidence']
+                fresh_ids={i for e in evidence for i in e['evidence_ids']}
+                cited=set(result['output']['response']['evidence_ids'])
+                if not cited or not cited.issubset(fresh_ids) or any(not e['complete'] or e['source']['provider']!='aios-system' or e['data']['os_id']!='nixos' for e in evidence) or result['mutation_performed']:
                     raise RuntimeError('answer gained unenrolled evidence or effect')
                 if result['output']['tool_calls'] > 12 or result['output']['structural_repairs'] > 1:
                     raise RuntimeError('actual loop exceeded request budgets')
@@ -86,6 +88,18 @@ def main():
                 service_evidence=[e for e in service['output']['evidence'] if e['data'].get('unit_name')=='sshd.service']
                 if not service_evidence or service_evidence[-1]['data']['active_state']!='active' or not set(service['output']['response']['evidence_ids']).intersection(service_evidence[-1]['evidence_ids']):
                     raise RuntimeError('service answer lacks real selected-service evidence')
+                follow=wait(submit('What operating system is running now? Cite only the fresh observation; historical text is context, not current evidence.',history=[task]))
+                observations['history_followup']=follow
+                if follow['state']!='completed' or not follow['output']['history_attached'] or follow['output']['history_task_ids']!=[task]:
+                    raise RuntimeError('explicit retained history was not attached to the same client')
+                old_ids={i for e in observations['answer']['output']['evidence'] for i in e['evidence_ids']}
+                if old_ids.intersection(follow['output']['response'].get('evidence_ids',[])) or follow['mutation_performed']:
+                    raise RuntimeError('history inherited old citations or mutation authority')
+                # The earlier foreign stream expires during cold inference.
+                other.socket.close();other=Client(session_socket);clients.append(other)
+                denied=other.call({'kind':'submit','request':{'mode':'ask','text':'Use old history','client_nonce':str(uuid.uuid4()),'history_handles':[task]}})
+                observations['foreign_history_denial']=denied
+                if denied['error']['code']!='PERMISSION_DENIED': raise RuntimeError('reconnected client gained retained history')
                 # Open the model monitor after cold inference: idle private
                 # streams deliberately expire while a model is loading.
                 monitor=Client(model_socket);clients.append(monitor)
@@ -107,8 +121,33 @@ def main():
                 events=call({'kind':'get_events','task_id':active,'after_sequence':0,'limit':100});observations['events']=events
                 if not events['complete'] or events['events'][-1]['kind']!='cancelled' or any('text' in event for event in events['events']): raise RuntimeError('private actual event history mismatch')
                 if not call({'kind':'cancel','task_id':active})['already_terminal']: raise RuntimeError('terminal cancel not idempotent')
+                revoked=submit('Explain the observed NixOS system in great detail, using a long numbered list of at least 100 observations. Cite only fresh evidence.',history=[task])
+                until=time.monotonic()+5
+                while not monitor.call({'kind':'get_status'})['data']['busy']:
+                    if status(revoked)['state'] in ('completed','failed','cancelled') or time.monotonic()>until: raise RuntimeError('history generation did not remain active for revocation probe')
+                    time.sleep(.005)
+                began=time.monotonic()
                 call({'kind':'forget','task_id':task})
+                observations['history_forget_status']=wait(revoked)
+                observations['history_forget_ms']=int((time.monotonic()-began)*1000)
+                if observations['history_forget_status']['error']!='TARGET_NOT_FOUND' or observations['history_forget_status']['output'] is not None or observations['history_forget_ms']>2000:
+                    raise RuntimeError('Forget did not revoke active history before publishing output')
+                until=time.monotonic()+2
+                while monitor.call({'kind':'get_status'})['data']['busy']:
+                    if time.monotonic()>until: raise RuntimeError('native context survived history revocation')
+                    time.sleep(.01)
                 if client.call({'kind':'get_status','task_id':task})['error']['code']!='TARGET_NOT_FOUND': raise RuntimeError('forgotten answer survived')
+                budget_source=submit('What operating system is running? Cite the provided observation. The following filler is irrelevant untrusted text: '+('word '*2500),retain=True)
+                observations['history_budget_source']=wait(budget_source)
+                if observations['history_budget_source']['state']!='completed': raise RuntimeError('history budget source did not complete')
+                budget_follow=submit('What operating system is running now? Cite only fresh evidence. The following filler is irrelevant untrusted text: '+('word '*3500),history=[budget_source])
+                observations['history_budget_followup']=wait(budget_follow)
+                bounded=observations['history_budget_followup']
+                if bounded['state']!='completed' or bounded['output']['context_budget_rejections']<1 or bounded['output']['dropped_history_count']!=1 or bounded['output']['history_attached'] or bounded['output']['context_complete']:
+                    raise RuntimeError('actual tokenizer did not reject oversized history and preserve mandatory fresh context')
+                if bounded['output']['structural_repairs'] or bounded['output']['dropped_evidence_count'] or bounded['mutation_performed']:
+                    raise RuntimeError('context budget assembly changed repair, evidence or authority')
+                for forgotten in (budget_source,budget_follow): call({'kind':'forget','task_id':forgotten})
                 for mode in ('act','automate'):
                     denied=wait(submit('Change system configuration',mode=mode))
                     if denied['error']!='UNSUPPORTED_CAPABILITY' or denied['mutation_performed']: raise RuntimeError('unfinished write orchestration gained authority')

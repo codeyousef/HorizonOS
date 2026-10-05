@@ -81,7 +81,7 @@ fn handle_and_task_ownership_do_not_follow_a_supplied_identity() {
     // This state fixture is separate from real peer-credential acceptance above.
     let mut state=State::default();
     let peer=aios_session::identity::Peer{uid:1000,pid:200,start_ticks:3,boot_id:"boot-fixture".into(),logind_session:None,remote:true,session_type:None,ui_enabled:false,bus_sender:None,bus_id:None,connection_id:None};
-    let task=state.dispatch(&peer,aios_session::Operation::Submit{request:aios_session::Submit{mode:aios_session::Mode::Ask,text:"private".into(),client_nonce:"fixture".into(),context_handles:vec![],selected_app_handle:None,selected_session_handle:None}}).unwrap()["request_id"].as_str().unwrap().to_owned();
+    let task=state.dispatch(&peer,aios_session::Operation::Submit{request:aios_session::Submit{mode:aios_session::Mode::Ask,text:"private".into(),client_nonce:"fixture".into(),context_handles:vec![],retain_for_history:false,history_handles:vec![],selected_app_handle:None,selected_session_handle:None}}).unwrap()["request_id"].as_str().unwrap().to_owned();
     for other in [aios_session::identity::Peer{uid:1001,..peer.clone()},aios_session::identity::Peer{start_ticks:4,..peer.clone()},aios_session::identity::Peer{pid:201,..peer.clone()}] {
         assert_eq!(state.dispatch(&other,aios_session::Operation::GetStatus{task_id:task.clone()}).unwrap_err(),aios_protocol::contracts::ErrorCode::PermissionDenied);
     }

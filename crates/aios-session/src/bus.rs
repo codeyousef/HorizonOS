@@ -102,7 +102,7 @@ impl Agent {
     }
     fn submit_graphical(&self,peer:&Peer,request:crate::Submit)->std::result::Result<Value,ErrorCode>{
         if let Some(value)=self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.existing_submission(peer,&request)?{return Ok(value);}
-        if !request.context_handles.is_empty() || request.text.len()>4096{return Err(ErrorCode::InvalidArgument);}
+        if !request.context_handles.is_empty() || request.retain_for_history || !request.history_handles.is_empty() || request.text.len()>4096{return Err(ErrorCode::InvalidArgument);}
         let session=crate::selected_ui_session(&self.state,peer,request.selected_session_handle.as_deref().ok_or(ErrorCode::AuthRequired)?)?;
         let key=(peer.bus_id.clone().ok_or(ErrorCode::PermissionDenied)?,peer.bus_sender.clone().ok_or(ErrorCode::PermissionDenied)?);
         let connection=self.ui.try_lock().map_err(|_|ErrorCode::ResourceExhausted)?.get(&key).ok_or(ErrorCode::AuthRequired)?.client.clone();

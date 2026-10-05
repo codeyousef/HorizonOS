@@ -251,7 +251,7 @@ fn qualify_broker_bridge(display:&DisplayBinding,window:&WindowBinding){
 
 fn qualify_public_task(bus:&aios_session::bus::Client,reconnect:&aios_session::bus::Client,session_handle:&str,window:&Value,display:&DisplayBinding){
     let mut request=aios_session::Submit{mode:aios_session::Mode::Ask,text:format!("Native permission fixture {}",uuid::Uuid::new_v4()),
-        client_nonce:uuid::Uuid::new_v4().to_string(),context_handles:vec![],selected_session_handle:Some(session_handle.into()),
+        client_nonce:uuid::Uuid::new_v4().to_string(),context_handles:vec![],retain_for_history:false,history_handles:vec![],selected_session_handle:Some(session_handle.into()),
         selected_app_handle:Some(window["window_handle"].as_str().unwrap().into())};
     let task=bus.submit(&request).expect("selected public task admission");assert_eq!(bus.submit(&request).unwrap(),task);
     request.text.push_str(" changed");assert_eq!(bus.submit(&request),Err(ErrorCode::Conflict));request.text.truncate(request.text.len()-8);

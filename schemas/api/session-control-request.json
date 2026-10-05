@@ -342,6 +342,22 @@
             "string",
             "null"
           ]
+        },
+        "retain_for_history": {
+          "type": "boolean",
+          "default": false,
+          "description": "Explicit opt-in to retain this question and response in volatile memory for at most five minutes after completion; Forget, expiry or authenticated-client disconnect revokes reuse."
+        },
+        "history_handles": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "default": [],
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "description": "Explicitly selected completed retained task IDs owned by this same authenticated client. Historical text carries no evidence or action authority. Unsupported on graphical submissions."
         }
       }
     }

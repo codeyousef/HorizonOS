@@ -35,7 +35,7 @@ fn main() {
             let outcome = (|| {
                 let client = aios_session::bus::Client::connect_user_bus()?;
                 let task = client.submit(&aios_session::Submit { mode: aios_session::Mode::Ask, text: text.clone(),
-                    client_nonce: new_nonce(), context_handles: vec![], selected_app_handle: None, selected_session_handle: None })?;
+                    client_nonce: new_nonce(), context_handles: vec![],retain_for_history:false,history_handles:vec![], selected_app_handle: None, selected_session_handle: None })?;
                 let deadline=std::time::Instant::now()+std::time::Duration::from_secs(95);
                 loop {
                     let status=client.status(&task)?;

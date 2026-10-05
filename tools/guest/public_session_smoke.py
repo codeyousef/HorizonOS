@@ -117,9 +117,12 @@ def main():
             if question.returncode != 0 or answer["state"] != "completed" or answer["error"] is not None or answer["mutation_performed"]:
                 raise RuntimeError("hardened user broker did not reach the actual installed model")
             output = answer["output"]
+            fresh_ids={i for observation in output["evidence"] for i in observation["evidence_ids"]}
+            cited=set(output["response"].get("evidence_ids",[]))
             if (output["response"]["kind"] != "answer" or "NixOS" not in output["response"]["text"]
-                    or len(output["evidence"]) != 1 or output["response"]["evidence_ids"] != output["evidence"][0]["evidence_ids"]
-                    or output["evidence"][0]["data"]["os_id"] != "nixos" or not output["local_cpu"] or output["mutation_performed"]):
+                    or not cited or not cited.issubset(fresh_ids)
+                    or any(not observation["complete"] or observation["source"]["provider"]!="aios-system" or observation["data"]["os_id"]!="nixos" for observation in output["evidence"])
+                    or not output["local_cpu"] or output["mutation_performed"]):
                 raise RuntimeError("installed inference did not return independently enrolled system evidence")
             selected=cli("ask","Is the selected sshd service running? Inspect its native status and cite the resulting service evidence.","--json","--service","sshd.service",timeout=100)
             service_answer=json.loads(selected.stdout)
