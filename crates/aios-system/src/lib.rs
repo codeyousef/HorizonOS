@@ -131,3 +131,4 @@ mod tests {
 }
 
 pub mod services;
+pub mod journal;

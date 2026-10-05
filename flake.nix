@@ -31,6 +31,7 @@
         src = productSource;
         cargoLock.lockFile = ./Cargo.lock;
         cargoBuildFlags = [ "--package" package ];
+        buildInputs = [ pkgs.systemd ];
         # Real OS integration runs separately in the verified KVM guest.
         doCheck = false;
         meta.mainProgram = program;
@@ -134,7 +135,7 @@
       devShells.${system} = {
       lock-resolution = pkgs.mkShell { packages = [ pkgs.cargo pkgs.rustc ]; };
       default = pkgs.mkShell {
-        packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy pkg-config sqlite ];
+        packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy pkg-config sqlite systemd ];
         AIOS_CONSENT_UI = "${consentUi}/bin/aios-scope-dialog";
         AIOS_CONSENT_NATIVE = "${consentUi}/bin/.aios-scope-dialog-wrapped";
         AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";
