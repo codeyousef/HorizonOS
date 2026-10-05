@@ -28,6 +28,8 @@ let
       modelEnabled = config.services.aios.model.enable;
       sessionWantedBy = if config.services.aios.session.enable then config.systemd.user.services.aios-sessiond.wantedBy else [];
       sessionOverride = if config.services.aios.session.enable then config.systemd.user.services.aios-sessiond.overrideStrategy else null;
+      processWantedBy = if config.services.aios.session.enable then config.systemd.user.services.aios-processd.wantedBy else [];
+      processOverride = if config.services.aios.session.enable then config.systemd.user.services.aios-processd.overrideStrategy else null;
       unitPackages = map toString config.systemd.packages;
       modelAccess = config.users.groups.aios-inference.members or [];
       desktopEnabled = config.services.desktopManager.plasma6.enable;

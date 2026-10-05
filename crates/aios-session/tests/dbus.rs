@@ -95,7 +95,9 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let wrong_process_action=action_request("system.info",json!({}));
     code(api.call::<_,_,String>("ListProcesses",&(wrong_process_action.as_str(),)).unwrap_err(),"INVALID_ARGUMENT");
     let unknown_process=action_request("process.inspect",json!({"process_id":uuid::Uuid::new_v4().to_string()}));
-    code(api.call::<_,_,String>("InspectProcess",&(unknown_process.as_str(),)).unwrap_err(),"TARGET_NOT_FOUND");
+    // This replacement server has no installed managed process component;
+    // it must never fall back to local unsandboxed process access.
+    code(api.call::<_,_,String>("InspectProcess",&(unknown_process.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
     let unsupported_process_app=action_request("process.list",json!({"app_id":"not-enrolled"}));
     code(api.call::<_,_,String>("ListProcesses",&(unsupported_process_app.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
     let search=action_request("files.search",json!({"query":"synthetic fixture","root_handles":["not-enrolled"]}));

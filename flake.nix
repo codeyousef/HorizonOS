@@ -64,6 +64,8 @@
           substituteInPlace "$out/share/systemd/user/aios-sessiond.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-sessiond"
           install -Dm644 ${./nix/packages/aios-ui-agent.service} "$out/share/systemd/user/aios-ui-agent.service"
           substituteInPlace "$out/share/systemd/user/aios-ui-agent.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-ui-agent"
+          install -Dm644 ${./nix/packages/aios-processd.service} "$out/share/systemd/user/aios-processd.service"
+          substituteInPlace "$out/share/systemd/user/aios-processd.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-processd"
         '';
       });
       guard = (productPackage "aios-guard" "aios-guard" "aios-guard").overrideAttrs (old: {

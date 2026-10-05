@@ -32,6 +32,7 @@ fn cookie(stream:&UnixStream)->Result<u64>{
     Ok(value)
 }
 impl OriginatingClient {
+    pub(crate) fn peer(&self)->Result<Peer>{self.verify()?;Ok(self.peer.clone())}
     pub fn authenticate(proof:UnixStream)->Result<Self>{
         let mut peer=identity::authenticate(&proof)?;
         peer.connection_id=Some(uuid::Uuid::new_v4().to_string());

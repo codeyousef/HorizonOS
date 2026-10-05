@@ -2,7 +2,7 @@
 use aios_session::bus::{NAME, PATH, INTERFACE};
 use aios_system::processes::OwnProcess;
 use serde_json::{json, Value};
-use std::{fs, process::Command, thread, time::{Duration, Instant}};
+use std::{fs,io::{Read,Write},process::Command, thread, time::{Duration, Instant}};
 use zbus::blocking::{Connection, Proxy};
 
 fn connect(uid: u32) -> Connection {
@@ -62,6 +62,38 @@ fn installed_process_handles_pages_native_identity_and_refusals() {
     let installed = fs::canonicalize("/run/current-system/sw/bin/aios-sessiond").unwrap(); assert!(installed.starts_with("/nix/store"));
     let installed = installed.to_str().unwrap();
     assert_eq!(commands.len(),1); assert_eq!(commands[0].0,installed); assert_eq!(commands[0].1,vec![installed]); assert!(!commands[0].2);
+    let helper_pid=unit_pid(&connection,&manager.0,"aios-processd.service");assert!(helper_pid>1);
+    let helper_path: zbus::zvariant::OwnedObjectPath=m.call("GetUnit",&("aios-processd.service",)).unwrap();
+    let helper=Proxy::new(&connection,manager.0.as_str(),helper_path.as_str(),"org.freedesktop.systemd1.Service").unwrap();
+    let helper_commands:Commands=helper.get_property("ExecStart").unwrap();
+    let helper_executable=fs::canonicalize("/run/current-system/sw/bin/aios-processd").unwrap();assert!(helper_executable.starts_with("/nix/store"));
+    let helper_executable=helper_executable.to_str().unwrap();
+    assert_eq!(helper_commands.len(),1);assert_eq!(helper_commands[0].0,helper_executable);assert_eq!(helper_commands[0].1,vec![helper_executable]);assert!(!helper_commands[0].2);
+    let mut socket=std::os::unix::net::UnixStream::connect(format!("/run/user/{uid}/aios-process/provider.sock")).unwrap();
+    let credentials=nix::sys::socket::getsockopt(&socket,nix::sys::socket::sockopt::PeerCredentials).unwrap();
+    assert_eq!(credentials.uid(),uid);assert_eq!(u32::try_from(credentials.pid()).unwrap(),helper_pid);
+    socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let bus_id:String=bus(&connection).call("GetId",&()).unwrap();
+    let attempted=socket.write_all(&[0xa8]).and_then(|_|aios_protocol::write_frame(&mut socket,&json!({"schema_version":1,"sender":connection.unique_name().unwrap().as_str(),"bus_id":bus_id}).to_string()));
+    let refusal=match attempted{Ok(())=>socket.read(&mut [0u8]),Err(error)=>Err(error)};
+    assert!(matches!(refusal,Ok(0)) || matches!(refusal,Err(ref error) if matches!(error.kind(),std::io::ErrorKind::BrokenPipe|std::io::ErrorKind::ConnectionReset)));
+    drop(socket); // A normal same-UID caller cannot use even real bus references.
+    assert_eq!(fs::read_link(format!("/proc/{helper_pid}/ns/user")).unwrap(),fs::read_link("/proc/self/ns/user").unwrap());
+    assert_ne!(fs::read_link(format!("/proc/{}/ns/user",broker.1)).unwrap(),fs::read_link("/proc/self/ns/user").unwrap());
+    let status=fs::read_to_string(format!("/proc/{helper_pid}/status")).unwrap();
+    for key in ["CapEff","CapPrm","CapInh","CapAmb"]{assert!(status.lines().any(|l|l.strip_prefix(&format!("{key}:")).is_some_and(|v|u64::from_str_radix(v.trim(),16)==Ok(0))));}
+    assert!(status.lines().any(|l|l.strip_prefix("NoNewPrivs:").is_some_and(|v|v.trim()=="1")));
+    for (key,value) in [("ProtectHome","no"),("ProtectSystem","no")]{
+        assert_eq!(helper.get_property::<String>(key).unwrap(),value);
+    }
+    for (key,value) in [("PrivateUsers",false),("PrivateNetwork",false),("NoNewPrivileges",true)]{
+        assert_eq!(helper.get_property::<bool>(key).unwrap(),value);
+    }
+    assert_eq!(helper.get_property::<(bool,Vec<String>)>("RestrictAddressFamilies").unwrap(),(true,vec!["AF_UNIX".into()]));
+    for key in ["PrivateUsers","PrivateNetwork","PrivateDevices"]{assert!(service.get_property::<bool>(key).unwrap());}
+    for (key,value) in [("ProtectHome","tmpfs"),("ProtectSystem","strict"),("ProtectProc","invisible")]{
+        assert_eq!(service.get_property::<String>(key).unwrap(),value);
+    }
     let api = Proxy::new(&connection,NAME,PATH,INTERFACE).unwrap();
     let reconnect = connect(uid); assert_ne!(connection.unique_name(),reconnect.unique_name());
     let other = Proxy::new(&reconnect,NAME,PATH,INTERFACE).unwrap();
@@ -88,6 +120,25 @@ fn installed_process_handles_pages_native_identity_and_refusals() {
     assert!(!native.exited().unwrap()); // The rejected action did not signal it.
     child.wait().unwrap(); assert!(native.exited().unwrap());
     denied(&api,"InspectProcess","process.inspect",json!({"process_id":id}),"TARGET_NOT_FOUND");
+    let private_path=std::path::PathBuf::from(format!("/run/user/{uid}/aios/session.sock"));
+    let mut private=aios_session::Client::connect(&private_path).unwrap();
+    let mut private_other=aios_session::Client::connect(&private_path).unwrap();
+    let mut private_child=Command::new("/run/current-system/sw/bin/sleep").arg("10").spawn().unwrap();
+    let private_native=OwnProcess::open(private_child.id()).unwrap();let private_identity=private_native.inspect().unwrap().identity;
+    let invoke=|action:&str,args:Value|json!({"kind":"invoke","tool_call":{"kind":"tool_call","action_id":action,"arguments":args}});
+    let listing=private.call(invoke("process.list",json!({"limit":100}))).unwrap();assert!(listing.error.is_none());
+    let data=listing.data.unwrap();let selected=data["data"]["processes"].as_array().unwrap().iter().find(|row|row["pid"]==private_child.id()).expect("Unix caller's native child must be listed");
+    let private_id=selected["process_id"].as_str().unwrap().to_owned();
+    let view=private.call(invoke("process.inspect",json!({"process_id":private_id}))).unwrap();assert!(view.error.is_none());
+    let view=view.data.unwrap();assert_eq!(view["data"]["start_time_ticks"],private_identity.start_time_ticks);assert_eq!(view["data"]["executable_identity"],private_identity.executable_identity);
+    assert_eq!(private_other.call(invoke("process.inspect",json!({"process_id":private_id}))).unwrap().error.unwrap().code,aios_protocol::contracts::ErrorCode::PermissionDenied);
+    // Keep the authenticated Unix connection alive while the child exits.
+    while private_child.try_wait().unwrap().is_none(){
+        thread::sleep(Duration::from_millis(100));let view=private.call(json!({"kind":"get_capabilities"})).unwrap();assert!(view.error.is_none());
+    }
+    assert!(private_native.exited().unwrap());
+    assert_eq!(private.call(invoke("process.inspect",json!({"process_id":private_id}))).unwrap().error.unwrap().code,aios_protocol::contracts::ErrorCode::TargetNotFound);
+    drop(private);drop(private_other);
     let first = call(&api,"ListProcesses","process.list",json!({"limit":1}));
     let start = Instant::now();
     assert_eq!(first["complete"],false); assert_eq!(first["status"],"partial");
@@ -104,9 +155,12 @@ fn installed_process_handles_pages_native_identity_and_refusals() {
     denied(&api,"InspectProcess","process.inspect",json!({"process_id":handle}),"TARGET_NOT_FOUND");
     assert_eq!(owner(&connection,NAME,uid),broker); assert_eq!(owner(&connection,"org.freedesktop.systemd1",uid),manager);
     assert_eq!(unit_pid(&connection,&manager.0,"aios-sessiond.service"),broker.1);
+    assert_eq!(unit_pid(&connection,&manager.0,"aios-processd.service"),helper_pid);
     assert_eq!(fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim(),boot);
     println!("AIOS_INSTALLED_PROCESS={}",json!({"evidence_kind":"real-installed-native-process-broker","uid":uid,"broker_uid":uid,
         "broker_pid":broker.1,"boot_id":boot,"installed_executable":installed,"managed_service_verified":true,
+        "process_component_verified":true,"process_provider_pid":helper_pid,"process_provider_uid":uid,"process_provider_executable":helper_executable,
+        "unmanaged_native_caller_refused":true,"unix_origin_forwarding_verified":true,
         "own_uid_filter":true,"native_child_identity_verified":true,"metrics_schema_verified":true,
         "natural_exit_refused":true,"cursor_continuation":true,"cross_connection_refused":true,"query_drift_refused":true,
         "claimed_uid_refused":true,"app_filter_refused":true,"expiry_refused":true,"termination_performed":false}));

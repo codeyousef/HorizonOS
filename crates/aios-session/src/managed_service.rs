@@ -13,11 +13,11 @@ fn live(stream:&UnixStream)->Result<()>{
     if unsafe{nix::libc::poll(&mut status,1,0)}<0 || status.revents&(nix::libc::POLLRDHUP|nix::libc::POLLHUP|nix::libc::POLLERR|nix::libc::POLLNVAL)!=0{return Err(ErrorCode::TargetChanged);}Ok(())
 }
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize)]
-pub enum Role { Broker, UiProvider }
+pub enum Role { Broker, UiProvider, ProcessProvider }
 impl Role {
-    fn unit(self)->&'static str{match self {Self::Broker=>"aios-sessiond.service",Self::UiProvider=>"aios-ui-agent.service"}}
-    fn program(self)->&'static str{match self {Self::Broker=>"aios-sessiond",Self::UiProvider=>"aios-ui-agent"}}
-    fn service_type(self)->&'static str{match self {Self::Broker=>"dbus",Self::UiProvider=>"exec"}}
+    fn unit(self)->&'static str{match self {Self::Broker=>"aios-sessiond.service",Self::UiProvider=>"aios-ui-agent.service",Self::ProcessProvider=>"aios-processd.service"}}
+    fn program(self)->&'static str{match self {Self::Broker=>"aios-sessiond",Self::UiProvider=>"aios-ui-agent",Self::ProcessProvider=>"aios-processd"}}
+    fn service_type(self)->&'static str{match self {Self::Broker=>"dbus",Self::UiProvider|Self::ProcessProvider=>"exec"}}
 }
 #[derive(Clone,Debug,PartialEq,Eq,Serialize)]
 pub struct ManagedService {
@@ -34,7 +34,7 @@ impl ManagedService {
         if !meta.is_dir() || meta.uid()!=peer.uid || meta.mode()&0o077!=0
             || fs::canonicalize(&runtime).map_err(|_|ErrorCode::TargetChanged)?!=runtime{return Err(ErrorCode::PermissionDenied);}
         let own=fs::read_link("/proc/self/exe").map_err(|_|ErrorCode::TargetChanged)?;
-        if !own.starts_with("/nix/store") || !matches!(own.file_name().and_then(|p|p.to_str()),Some("aios-sessiond"|"aios-ui-agent")) {return Err(ErrorCode::PermissionDenied);}
+        if !own.starts_with("/nix/store") || !matches!(own.file_name().and_then(|p|p.to_str()),Some("aios-sessiond"|"aios-ui-agent"|"aios-processd")) {return Err(ErrorCode::PermissionDenied);}
         let expected=own.with_file_name(role.program());
         if fs::canonicalize(&expected).map_err(|_|ErrorCode::TargetChanged)?!=expected{return Err(ErrorCode::PermissionDenied);}
         let program=expected.to_str().ok_or(ErrorCode::TargetChanged)?.to_owned();

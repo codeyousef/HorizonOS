@@ -7,6 +7,8 @@ mod user_bus;
 mod graphical;
 pub mod managed_service;
 pub mod ui_bridge;
+pub mod process_bridge;
+pub mod native_startup;
 pub mod bus;
 pub mod inference;
 mod processes;
@@ -486,6 +488,7 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
     peer.connection_id = Some(Uuid::new_v4().to_string());
     let _owner = ConnectionOwner { state: state.clone(), peer: peer.clone() };
     let mut ui:Option<Arc<graphical::Connection>>=None;
+    let mut processes:Option<process_bridge::Client>=None;
     // A 90-second task must remain inspectable/cancellable on its original
     // authenticated connection; short polling cannot force a reconnect.
     for _ in 0..4096 {
@@ -499,7 +502,13 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
             Err(ErrorCode::UnsupportedSchema)
         } else {
             match parse_operation(request.operation.get()) {
-                Ok(operation) => graphical_dispatch(&stream,&state,&peer,&mut ui,operation),
+                Ok(operation) => {
+                    match process_bridge::action(&operation){
+                        Ok(Some(action))=>process_dispatch(&stream,&peer,&mut processes,&action),
+                        Ok(None)=>graphical_dispatch(&stream,&state,&peer,&mut ui,operation),
+                        Err(error)=>Err(error),
+                    }
+                },
                 Err(error) => Err(error),
             }
         };
@@ -514,6 +523,14 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
     Ok(())
 }
 
+fn process_dispatch(stream:&UnixStream,peer:&Peer,client:&mut Option<process_bridge::Client>,action:&Action)->Result<Value,ErrorCode>{
+    identity::verify(stream,peer)?;
+    if client.is_none(){*client=Some(process_bridge::Client::connect(Some(stream),peer)?);}
+    let result=client.as_mut().ok_or(ErrorCode::UnsupportedCapability)?.call(action);
+    identity::verify(stream,peer)?;
+    if matches!(result,Err(ErrorCode::TargetChanged)){client.take();}
+    result
+}
 fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut Option<Arc<graphical::Connection>>,operation:Operation)->Result<Value,ErrorCode>{
     let native=match operation {
         Operation::ListUiWindows{session_handle}=>{

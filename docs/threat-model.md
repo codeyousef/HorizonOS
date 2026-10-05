@@ -65,3 +65,20 @@ Its exact managed service and original client descriptor are reauthenticated
 per request. The orchestration broker keeps its complete mount/user/network
 sandbox. A compromised native provider would have ordinary same-UID filesystem
 access; this exception is part of the trusted native component boundary.
+
+The fixed headless `aios-processd` component uses the same original-user-namespace
+exception for native own-user proc/pidfd observations. Its user unit retains the
+native filesystem view, restricts address families to Unix sockets, and drops
+and verifies all usable capability sets and NoNewPrivileges before admission.
+Only the exact installed `aios-sessiond` managed peer may connect. The peer
+transfers an originating Unix descriptor or a unique bus sender resolved against
+the kernel-authenticated root-associated user bus. No serialized UID/PID/session
+can confer authority. Embedded user policy checks bracket native observations;
+the original caller is reauthenticated before and after each operation. The
+fixed bridge accepts only process.list and process.inspect, with bounded
+owner/expiry handles and cursor state. It has no signal, shell, arbitrary file,
+model or graphical route. Four admitted connections bound native descriptor
+retention; disconnect removes their caller state. Its potential compromise has
+ordinary same-UID filesystem access, explicitly within this native component
+boundary. The orchestration broker's full sandbox remains intact. The component
+starts in the user manager independently of a graphical session and inference.

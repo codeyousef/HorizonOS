@@ -95,13 +95,18 @@ class NativeRpcTests(unittest.TestCase):
             with self.assertRaises(DevctlError):cli.dispatch(args)
         load.assert_not_called();run.assert_not_called()
         proof={"evidence_kind":"real-installed-native-process-broker","uid":1000,"broker_uid":1000,"broker_pid":50,
-            "boot_id":IDENTITY["boot_id"],"installed_executable":"/nix/store/fixture-aios-core/bin/aios-sessiond","termination_performed":False}
+            "boot_id":IDENTITY["boot_id"],"installed_executable":"/nix/store/fixture-aios-core/bin/aios-sessiond","termination_performed":False,
+            "process_provider_uid":1000,"process_provider_pid":51,"process_provider_executable":"/nix/store/fixture-aios-core/bin/aios-processd"}
         flags=("managed_service_verified","own_uid_filter","native_child_identity_verified","metrics_schema_verified",
-            "natural_exit_refused","cursor_continuation","cross_connection_refused","query_drift_refused","claimed_uid_refused","app_filter_refused","expiry_refused")
+            "natural_exit_refused","cursor_continuation","cross_connection_refused","query_drift_refused","claimed_uid_refused","app_filter_refused","expiry_refused","process_component_verified",
+            "unmanaged_native_caller_refused","unix_origin_forwarding_verified")
         proof.update(dict.fromkeys(flags,True))
         cases=[(b"",ExitCode.VERIFICATION_FAILURE),(proof,ExitCode.SUCCESS),({**proof,"termination_performed":True},ExitCode.VERIFICATION_FAILURE),
             ({**proof,"broker_uid":0},ExitCode.VERIFICATION_FAILURE),({**proof,"boot_id":"drifted"},ExitCode.VERIFICATION_FAILURE),
-            ({**proof,"installed_executable":"/tmp/aios-sessiond"},ExitCode.VERIFICATION_FAILURE)]
+            ({**proof,"installed_executable":"/tmp/aios-sessiond"},ExitCode.VERIFICATION_FAILURE),
+            ({**proof,"process_provider_uid":0},ExitCode.VERIFICATION_FAILURE),
+            ({**proof,"process_provider_executable":"/tmp/aios-processd"},ExitCode.VERIFICATION_FAILURE),
+            ({k:v for k,v in proof.items() if k!="process_provider_pid"},ExitCode.VERIFICATION_FAILURE)]
         for flag in flags:
             cases.append(({**proof,flag:False},ExitCode.VERIFICATION_FAILURE))
             cases.append(({k:v for k,v in proof.items() if k!=flag},ExitCode.VERIFICATION_FAILURE))

@@ -1,0 +1,42 @@
+[Unit]
+Description=Horizon OS authenticated native own-user process provider
+After=dbus.socket
+Requires=dbus.socket
+ConditionUser=!root
+
+[Service]
+Type=exec
+ExecStart=@EXECUTABLE@
+RuntimeDirectory=aios-process
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX
+# Native /proc/exe verification needs the original user namespace. User-unit
+# mount/network isolation and bounding-set changes create another namespace.
+# This fixed component drops and verifies all usable capability sets itself.
+# It has no model, signal, shell or arbitrary-file route. See threat-model.md.
+PrivateUsers=no
+PrivateNetwork=no
+PrivateTmp=no
+PrivateDevices=no
+ProtectHome=no
+ProtectSystem=no
+ProtectProc=default
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=capset
+MemoryMax=256M
+TasksMax=64
+LimitNOFILE=4096
+TimeoutStartSec=10
+TimeoutStopSec=5
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

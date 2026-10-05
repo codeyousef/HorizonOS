@@ -12,6 +12,10 @@ path = "src/main.rs"
 name = "aios-ui-agent"
 path = "src/ui_main.rs"
 
+[[bin]]
+name = "aios-processd"
+path = "src/process_main.rs"
+
 [dependencies]
 aios-protocol = { path = "../aios-protocol" }
 aios-policy = { path = "../aios-policy" }

@@ -59,10 +59,16 @@ def _run(config, *, journal, process=False):
                 and isinstance(observation.get("installed_executable"),str)
                 and observation["installed_executable"].startswith("/nix/store/")
                 and observation["installed_executable"].endswith("/bin/aios-sessiond")
+                and type(observation.get("process_provider_uid")) is int and observation["process_provider_uid"]==observation["uid"]
+                and type(observation.get("process_provider_pid")) is int and observation["process_provider_pid"]>1
+                and isinstance(observation.get("process_provider_executable"),str)
+                and observation["process_provider_executable"].startswith("/nix/store/")
+                and observation["process_provider_executable"].endswith("/bin/aios-processd")
                 and observation.get("termination_performed") is False
                 and all(observation.get(key) is True for key in ("managed_service_verified","own_uid_filter",
                     "native_child_identity_verified","metrics_schema_verified","natural_exit_refused","cursor_continuation",
-                    "cross_connection_refused","query_drift_refused","claimed_uid_refused","app_filter_refused","expiry_refused")))
+                    "cross_connection_refused","query_drift_refused","claimed_uid_refused","app_filter_refused","expiry_refused","process_component_verified",
+                    "unmanaged_native_caller_refused","unix_origin_forwarding_verified")))
         elif journal:
             valid = (isinstance(observation,dict) and observation.get("evidence_kind")=="real-installed-native-journal-observer"
                 and type(observation.get("uid")) is int and observation["uid"] >= 1000

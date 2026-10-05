@@ -182,19 +182,22 @@ fn run_read(work:Arc<Mutex<ReadWork>>,origin:OriginatingClient,window:WindowBind
             Err(error)=>{work.status.state=if error==ErrorCode::Cancelled{"cancelled"}else{"failed"}.into();work.status.error=Some(error);}}
     }
 }
-pub fn serve(mut stream:UnixStream)->Result<()>{
-    stream.set_read_timeout(Some(Duration::from_secs(2))).map_err(|_|ErrorCode::TargetChanged)?;
-    stream.set_write_timeout(Some(Duration::from_secs(2))).map_err(|_|ErrorCode::TargetChanged)?;
-    let broker=ManagedService::authenticate(&stream,Role::Broker)?;
-    let origin=match receive_proof(&stream)? {
+pub(crate) fn receive_origin(stream:&mut UnixStream)->Result<OriginatingClient>{
+    Ok(match receive_proof(stream)? {
         TransferredProof::Unix(proof)=>OriginatingClient::authenticate(proof)?,
         TransferredProof::Bus=>{
-            let raw=read_frame_with_limit(&mut stream,MAX_TASK_BYTES).map_err(|_|ErrorCode::InvalidArgument)?.ok_or(ErrorCode::InvalidArgument)?;
+            let raw=read_frame_with_limit(stream,MAX_TASK_BYTES).map_err(|_|ErrorCode::InvalidArgument)?.ok_or(ErrorCode::InvalidArgument)?;
             let reference:BusReference=serde_json::from_str(&raw).map_err(|_|ErrorCode::InvalidArgument)?;
             if reference.schema_version!=1{return Err(ErrorCode::UnsupportedSchema);}
             OriginatingClient::authenticate_bus(&reference.sender,&reference.bus_id)?
         },
-    };
+    })
+}
+pub fn serve(mut stream:UnixStream)->Result<()>{
+    stream.set_read_timeout(Some(Duration::from_secs(2))).map_err(|_|ErrorCode::TargetChanged)?;
+    stream.set_write_timeout(Some(Duration::from_secs(2))).map_err(|_|ErrorCode::TargetChanged)?;
+    let broker=ManagedService::authenticate(&stream,Role::Broker)?;
+    let origin=receive_origin(&mut stream)?;
     broker.verify(&stream)?;
     let mut context=Context{origin,windows:HashMap::new(),tasks:HashMap::new()};
     let bound=Bound{schema_version:2,request_id:uuid::Uuid::new_v4().to_string(),operation:"bound".into(),origin_sha256:context.origin.identity_sha256()?};
@@ -231,13 +234,18 @@ impl Drop for Cancellation{fn drop(&mut self){self.cancel();}}
 impl Client {
     pub(crate) fn connect(origin:&UnixStream)->Result<Self>{
         let peer=crate::identity::authenticate(origin)?;
-        Self::connect_with(Some(origin),&peer)
+        Self::connect_with(Some(origin),&peer,Role::UiProvider)
     }
     pub(crate) fn connect_bus(peer:&crate::identity::Peer)->Result<Self>{
-        crate::identity::verify_peer(peer)?;Self::connect_with(None,peer)
+        crate::identity::verify_peer(peer)?;Self::connect_with(None,peer,Role::UiProvider)
     }
-    fn connect_with(origin:Option<&UnixStream>,peer:&crate::identity::Peer)->Result<Self>{
-        let uid=nix::unistd::geteuid().as_raw();let directory=PathBuf::from(format!("/run/user/{uid}/aios-ui"));
+    pub(crate) fn connect_process(origin:Option<&UnixStream>,peer:&crate::identity::Peer)->Result<Self>{
+        if let Some(origin)=origin{crate::identity::verify(origin,peer)?;}else{crate::identity::verify_peer(peer)?;}
+        Self::connect_with(origin,peer,Role::ProcessProvider)
+    }
+    fn connect_with(origin:Option<&UnixStream>,peer:&crate::identity::Peer,role:Role)->Result<Self>{
+        let suffix=match role{Role::UiProvider=>"aios-ui",Role::ProcessProvider=>"aios-process",Role::Broker=>return Err(ErrorCode::PermissionDenied)};
+        let uid=nix::unistd::geteuid().as_raw();let directory=PathBuf::from(format!("/run/user/{uid}/{suffix}"));
         let meta=fs::symlink_metadata(&directory).map_err(|_|ErrorCode::UnsupportedCapability)?;
         if !meta.is_dir() || meta.uid()!=uid || meta.mode()&0o077!=0 || directory.canonicalize().map_err(|_|ErrorCode::TargetChanged)?!=directory{return Err(ErrorCode::PermissionDenied);}
         let path=directory.join("provider.sock");let before=fs::symlink_metadata(&path).map_err(|_|ErrorCode::UnsupportedCapability)?;
@@ -245,7 +253,7 @@ impl Client {
         let mut stream=UnixStream::connect(&path).map_err(|_|ErrorCode::UnsupportedCapability)?;
         stream.set_read_timeout(Some(Duration::from_secs(3))).map_err(|_|ErrorCode::TargetChanged)?;
         stream.set_write_timeout(Some(Duration::from_secs(2))).map_err(|_|ErrorCode::TargetChanged)?;
-        let provider=ManagedService::authenticate(&stream,Role::UiProvider)?;
+        let provider=ManagedService::authenticate(&stream,role)?;
         let after=fs::symlink_metadata(&path).map_err(|_|ErrorCode::TargetChanged)?;
         if (before.dev(),before.ino(),before.uid(),before.mode())!=(after.dev(),after.ino(),after.uid(),after.mode()){return Err(ErrorCode::TargetChanged);}
         if let Some(origin)=origin {send_proof(&stream,origin)?;} else {
@@ -260,7 +268,8 @@ impl Client {
         }
         let bound=read_frame_with_limit(&mut stream,MAX_TASK_BYTES).map_err(|_|ErrorCode::TargetChanged)?.ok_or(ErrorCode::TargetChanged)?;
         let bound:Bound=serde_json::from_str(&bound).map_err(|_|ErrorCode::InvalidArgument)?;
-        if bound.schema_version!=2 || bound.operation!="bound" || !crate::uuid(&bound.request_id)
+        let operation=if role==Role::ProcessProvider{"process_bound"}else{"bound"};
+        if bound.schema_version!=2 || bound.operation!=operation || !crate::uuid(&bound.request_id)
             || bound.origin_sha256!=crate::ui_read::origin_digest(peer)?{return Err(ErrorCode::PermissionDenied);}
         if let Some(origin)=origin {crate::identity::verify(origin,peer)?;}else{crate::identity::verify_peer(peer)?;}
         provider.verify(&stream)?;Ok(Self{stream,provider})

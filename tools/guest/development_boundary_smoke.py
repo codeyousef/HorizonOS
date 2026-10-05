@@ -53,12 +53,13 @@ def main():
     for name in ("disabled", "production"):
         if cases[name]["helperPresent"] or cases[name]["developerRules"] or cases[name]["developmentEnabled"]:
             raise RuntimeError("developer authority leaked to nondevelopment case")
-        if cases[name]["sessionEnabled"] or cases[name]["sessionWantedBy"]:
+        if cases[name]["sessionEnabled"] or cases[name]["sessionWantedBy"] or cases[name]["processWantedBy"]:
             raise RuntimeError("disabled broker was registered for startup")
     for name in ("sessionHeadless", "sessionDesktop"):
         case = cases[name]
         if (not case["sessionEnabled"] or case["sessionWantedBy"] != ["default.target"]
                 or case["sessionOverride"] != "asDropin" or set(case["trustedUsers"]) != {"root"}
+                or case["processWantedBy"] != ["default.target"] or case["processOverride"] != "asDropin"
                 or case["modelEnabled"] or case["modelAccess"] or case["helperPresent"]
                 or case["developmentEnabled"] or case["developerRules"]
                 or not any(path.endswith("-aios-core-0.1.0") for path in case["unitPackages"])):

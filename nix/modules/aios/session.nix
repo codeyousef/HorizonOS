@@ -20,5 +20,9 @@ in {
       wantedBy = [ "default.target" ];
       overrideStrategy = "asDropin";
     };
+    systemd.user.services.aios-processd = {
+      wantedBy = [ "default.target" ];
+      overrideStrategy = "asDropin";
+    };
   };
 }

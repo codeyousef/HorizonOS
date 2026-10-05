@@ -71,3 +71,18 @@ The development image enables this independently of the incomplete global
 control-plane switch and model activation. Missing reviewed broker packages
 fail NixOS assertions. This wiring preserves the packaged sandbox and requires
 installed qualification; package presence alone does not establish a bus owner.
+
+Installed broker transports forward native process reads to `aios-processd`, a
+fixed headless same-UID component in the original user namespace. The broker's
+private user namespace prevents kernel executable checks against normal user
+processes. The process component has an explicit namespace/filesystem exception
+documented in the threat model; it drops usable capabilities at startup and
+provides no signal, shell or arbitrary-file API. Its mode-0600 fixed socket is
+accessible only to the exact managed broker. Native bus references or the actual
+originating Unix descriptor bind each retained connection and its process
+handles. Shared owner-aware state retains cross-connection permission denials;
+the same embedded policy checks bracket native work and original caller proof
+is rechecked before results leave the component. Four active connections and
+the existing global handle/cursor quotas bound resource retention. Idle bridges
+close after 35 seconds; handles still expire at 30 seconds without renewal.
+The user-manager module starts this component without a graphical dependency.

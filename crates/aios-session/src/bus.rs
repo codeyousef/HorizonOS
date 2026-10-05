@@ -34,10 +34,11 @@ struct Admission(Arc<AtomicUsize>);
 impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); } }
 
 #[derive(Clone)]
-pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>> }
+pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>>,processes:Arc<Mutex<HashMap<(String,String),ProcessConnection>>> }
 struct UiConnection { peer:Peer,expires:Instant,client:Arc<crate::graphical::Connection> }
+struct ProcessConnection { peer:Peer,expires:u64,client:crate::process_bridge::Client }
 impl Agent {
-    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())) } }
+    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())),processes:Arc::new(Mutex::new(HashMap::new())) } }
     fn admit(&self) -> Result<Admission> {
         if self.active.fetch_add(1, Ordering::AcqRel) >= 16 {
             self.active.fetch_sub(1, Ordering::AcqRel);
@@ -62,7 +63,10 @@ impl Agent {
     async fn dispatch(&self, connection: &Connection, header: Header<'_>, operation: Operation) -> Result<Value> {
         let _admission = self.admit()?;
         let peer = Self::peer(connection, &header).await?;
-        let outcome=match operation {
+        let outcome=if let Some(action)=crate::process_bridge::action(&operation)?{
+            let agent=self.clone();let original=peer.clone();
+            blocking::unblock(move||agent.process_read(&original,&action)).await
+        }else{match operation {
             Operation::ListUiWindows{session_handle}=>{
             let agent=self.clone();let original=peer.clone();
             blocking::unblock(move||agent.list_windows(&original,&session_handle)).await
@@ -71,9 +75,29 @@ impl Agent {
                 let agent=self.clone();let original=peer.clone();blocking::unblock(move||agent.submit_graphical(&original,request)).await
             },
             operation=>self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.dispatch(&peer,operation),
-        };
+        }};
         if Self::peer(connection, &header).await? != peer { return Err(ErrorCode::TargetChanged.into()); }
         outcome.map_err(Into::into)
+    }
+    fn process_read(&self,peer:&Peer,action:&aios_protocol::contracts::Action)->std::result::Result<Value,ErrorCode>{
+        identity::verify_peer(peer)?;
+        let now=aios_policy::boottime_ms()?;
+        let key=(peer.bus_id.clone().ok_or(ErrorCode::PermissionDenied)?,peer.bus_sender.clone().ok_or(ErrorCode::PermissionDenied)?);
+        let mut clients=self.processes.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+        clients.retain(|_,client|client.expires>now);
+        if let Some(client)=clients.get(&key){if client.peer!=*peer{return Err(ErrorCode::TargetChanged);}}
+        else{
+            if clients.len()>=4{return Err(ErrorCode::ResourceExhausted);}
+            clients.insert(key.clone(),ProcessConnection{peer:peer.clone(),expires:now.checked_add(34_000).ok_or(ErrorCode::ResourceExhausted)?,client:crate::process_bridge::Client::connect(None,peer)?});
+        }
+        let client=clients.get_mut(&key).ok_or(ErrorCode::TargetChanged)?;
+        let result=client.client.call(action);
+        client.expires=aios_policy::boottime_ms()?.checked_add(34_000).ok_or(ErrorCode::ResourceExhausted)?;
+        identity::verify_peer(peer)?;
+        // Domain permission errors (e.g. another caller's process handle) do
+        // not invalidate this caller's other retained handles or cursor.
+        if matches!(result,Err(ErrorCode::TargetChanged)){clients.remove(&key);}
+        result
     }
     fn list_windows(&self,peer:&Peer,handle:&str)->std::result::Result<Value,ErrorCode>{
         let session=crate::selected_ui_session(&self.state,peer,handle)?;
@@ -130,7 +154,7 @@ impl Agent {
     async fn action(&self, connection: &Connection, header: Header<'_>, request_json: &str, expected: &str) -> Result<String> {
         let _admission = self.admit()?;
         let peer = Self::peer(connection, &header).await?;
-        let outcome = (|| -> std::result::Result<Value, ErrorCode> {
+        let prepared = (|| -> std::result::Result<(_,aios_protocol::contracts::Action), ErrorCode> {
             if request_json.len() > MAX_TASK_BYTES { return Err(ErrorCode::ResourceExhausted); }
             let request: Request = serde_json::from_str(request_json).map_err(|_| ErrorCode::InvalidArgument)?;
             if request.schema_version != 1 { return Err(ErrorCode::UnsupportedSchema); }
@@ -138,8 +162,15 @@ impl Agent {
             let Operation::Invoke { tool_call } = parse_operation(request.operation.get())? else { return Err(ErrorCode::InvalidArgument); };
             let action = aios_protocol::contracts::parse_tool_call(tool_call.get().as_bytes())?;
             if action.action_id() != expected { return Err(ErrorCode::InvalidArgument); }
-            self.state.lock().map_err(|_| ErrorCode::ResourceExhausted)?.dispatch(&peer, Operation::Invoke { tool_call })
+            Ok((tool_call,action))
         })();
+        let outcome=match prepared{
+            Ok((_tool_call,action)) if matches!(action.action_id(),"process.list"|"process.inspect")=>{
+                let agent=self.clone();let original=peer.clone();blocking::unblock(move||agent.process_read(&original,&action)).await
+            },
+            Ok((tool_call,_))=>self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.dispatch(&peer,Operation::Invoke{tool_call}),
+            Err(error)=>Err(error),
+        };
         if Self::peer(connection, &header).await? != peer { return Err(ErrorCode::TargetChanged.into()); }
         let value = outcome?;
         let json = serde_json::to_string(&value).map_err(|_| ErrorCode::InvalidArgument)?;
