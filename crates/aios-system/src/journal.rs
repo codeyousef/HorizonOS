@@ -4,6 +4,7 @@
 //! reader, and keep Continuation behind an expiring, peer/query-bound handle.
 //! This library does not mint policy authority or advertise a runtime capability.
 pub mod redaction;
+pub mod user;
 
 use aios_protocol::contracts::ErrorCode;
 use serde::Serialize;
@@ -81,12 +82,24 @@ impl Target {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Query {
     target: Target, source: Source, unit: Option<Unit>, boot: String,
-    since: u64, until: u64, priority: u8, limit: usize,
+    since: u64, until: u64, priority: u8, limit: usize, user: Option<user::NativeUser>,
 }
 impl Query {
     pub fn new(source: Source, unit: Option<Unit>, boot: &str, since_usec: u64, until_usec: u64,
                priority_max: u8, max_entries: usize) -> Result<Self, ErrorCode> {
         Self::with_target(Target::current()?, source, unit, boot, since_usec, until_usec, priority_max, max_entries)
+    }
+    pub fn for_native_user(user: &user::NativeUser, source: Source, unit: Option<Unit>, boot: &str,
+        since: u64, until: u64, priority: u8, limit: usize) -> Result<Self, ErrorCode> {
+        user.verify()?;
+        let mut query=Self::new(source,unit,boot,since,until,priority,limit)?;
+        query.user=Some(user.clone()); Ok(query)
+    }
+    pub fn boot_id(&self) -> &str { &self.boot }
+    fn user_uid(&self) -> u32 { self.user.as_ref().map_or(self.target.uid, user::NativeUser::uid) }
+    fn verify(&self) -> Result<(),ErrorCode> {
+        self.target.check()?;
+        if let Some(user)=&self.user { user.verify()?; } Ok(())
     }
     fn with_target(target: Target, source: Source, unit: Option<Unit>, boot: &str, since: u64, until: u64,
                    priority: u8, limit: usize) -> Result<Self, ErrorCode> {
@@ -100,7 +113,7 @@ impl Query {
             _ => (),
         }
         let boot = if boot=="current" { target.boot.clone() } else { super::boot_id(boot)? };
-        Ok(Self { target, source, unit, boot, since, until, priority, limit })
+        Ok(Self { target, source, unit, boot, since, until, priority, limit, user:None })
     }
 }
 
@@ -161,7 +174,7 @@ fn inputs(query: &Query) -> Result<Vec<Input>, ErrorCode> {
             scanned+=1;if scanned>1024 { return Err(ErrorCode::ResourceExhausted); }
             let entry=entry.map_err(io_error)?;
             let name=entry.file_name();let name=name.to_str().ok_or(ErrorCode::PartialResult)?;
-            if selected_file(name,query.source,query.target.uid) { paths.push(entry.path()); }
+            if selected_file(name,query.source,query.user_uid()) { paths.push(entry.path()); }
         }
         paths.sort();
         for path in paths {
@@ -250,14 +263,14 @@ fn is_system(unit: Option<&str>, user_unit: Option<&str>, owner: Option<&str>, u
 }
 
 pub fn read(query: &Query, resume: Option<&Continuation>) -> Result<Read, ErrorCode> {
-    query.target.check()?;
+    query.verify()?;
     if resume.is_some_and(|c|c.query!=*query) { return Err(ErrorCode::PermissionDenied); }
     let journal=Journal::open(query)?;
     let boot=query.boot.replace('-',"");journal.boot_exists(&boot)?;
     journal.add("_MACHINE_ID",&query.target.machine)?;journal.add("_BOOT_ID",&boot)?;
     for priority in 0..=query.priority { journal.add("PRIORITY",&priority.to_string())?; }
     if query.source==Source::Kernel { journal.add("_TRANSPORT","kernel")?; }
-    if query.source==Source::User { journal.add("_UID",&query.target.uid.to_string())?; }
+    if query.source==Source::User { journal.add("_UID",&query.user_uid().to_string())?; }
     if let Some(unit)=&query.unit { match unit {
         Unit::System(name) => journal.add("_SYSTEMD_UNIT",name)?, Unit::User(name) => journal.add("_SYSTEMD_USER_UNIT",name)?,
     } }
@@ -278,7 +291,7 @@ pub fn read(query: &Query, resume: Option<&Continuation>) -> Result<Read, ErrorC
         let unit=journal.text(c"_SYSTEMD_UNIT")?;let user_unit=journal.text(c"_SYSTEMD_USER_UNIT")?;
         if query.source==Source::System && (transport.as_deref()==Some("kernel")
             || !is_system(unit.as_deref(),user_unit.as_deref(),journal.text(c"_SYSTEMD_OWNER_UID")?.as_deref(),uid.as_deref())) { continue; }
-        if query.source==Source::User && uid.as_deref()!=Some(query.target.uid.to_string().as_str()) { return Err(ErrorCode::PermissionDenied); }
+        if query.source==Source::User && uid.as_deref()!=Some(query.user_uid().to_string().as_str()) { return Err(ErrorCode::PermissionDenied); }
         if query.source==Source::Kernel && transport.as_deref()!=Some("kernel") { return Err(ErrorCode::TargetChanged); }
         match &query.unit {
             Some(Unit::System(name)) if unit.as_ref()!=Some(name) => return Err(ErrorCode::TargetChanged),
@@ -295,7 +308,7 @@ pub fn read(query: &Query, resume: Option<&Continuation>) -> Result<Read, ErrorC
             priority,source:query.source,message,locator });
     }
     if !finished && !more { return Err(ErrorCode::ResourceExhausted); }
-    for file in &journal.inputs { file.check()?; }query.target.check()?;journal.budget()?;
+    for file in &journal.inputs { file.check()?; }query.verify()?;journal.budget()?;
     Ok(Read { entries,continuation:if more { Some(Continuation { query:query.clone(),native_cursor:last.ok_or(ErrorCode::PartialResult)? }) } else { None } })
 }
 

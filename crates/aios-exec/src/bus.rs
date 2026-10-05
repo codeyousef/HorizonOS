@@ -22,6 +22,7 @@ use std::{
 };
 use zbus::{DBusError, Message, message::Header, names::ErrorName};
 mod system;
+mod journal;
 
 pub const NAME: &str = "org.aios.Executor1";
 pub const PATH: &str = "/org/aios/Executor1";
@@ -367,6 +368,8 @@ impl Runtime {
         match operation {
             Operation::SystemCapabilities(scope) => system::capabilities(scope),
             Operation::SystemAction(scope, expected, request) => self.reads.dispatch(caller, scope, expected, &request),
+            Operation::JournalEvidence(id) => self.reads.journal.evidence(caller,&id),
+            Operation::JournalResolveService(unit) => self.reads.journal.resolve_service(caller,&unit),
             Operation::Capabilities => Ok(envelope(
                 "capabilities",
                 json!({"interface":NAME,"prepare":true,"private_plans":true,
@@ -426,6 +429,8 @@ impl Runtime {
 }
 
 enum Operation {
+    JournalEvidence(String),
+    JournalResolveService(String),
     SystemCapabilities(system::Scope),
     SystemAction(system::Scope, &'static str, String),
     Capabilities,

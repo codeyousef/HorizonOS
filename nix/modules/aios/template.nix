@@ -5,6 +5,14 @@
     mode = "0444";
     text = builtins.toJSON (aiosTemplate.authority // { template_path = "${aiosTemplate}"; });
   };
+  environment.etc."aios/journal-readers.json" = {
+    mode = "0444";
+    text = builtins.toJSON {
+      schema_version = 1;
+      users = builtins.filter (name: config.users.users.${name}.isNormalUser)
+        (builtins.attrNames config.users.users);
+    };
+  };
   security.polkit.enable = true;
   environment.systemPackages = [ aiosExecutor ];
   services.dbus.packages = [ aiosExecutor ];

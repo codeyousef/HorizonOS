@@ -120,7 +120,7 @@ def commands(kind, release, package=None, job_directory=None):
                 for package_name, test_name in (("aios-cli", "service_inspect"), ("aios-session", "ipc"))] + [
                     ["python3", str(release / "tools/guest/service_inspection_smoke.py")]]
     if kind == "journal-inspection-smoke":
-        return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-cli", "--test", "journal_native", "--", "--ignored", "--nocapture"]]
+        return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-exec", "--test", "journal_observer", "--", "--ignored", "--nocapture"]]
     if kind == "public-session-smoke":
         return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-session", "--test", "dbus", "--", "--nocapture"],
                 ["python3", str(release / "tools/guest/public_session_smoke.py")]]

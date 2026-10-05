@@ -3,8 +3,10 @@
 `aios-system::journal` reads the local default journal namespace through the
 pinned libsystemd API. It accepts a normalized source, optional system/user
 unit, boot identity, absolute microsecond time window, priority and entry limit.
-The reader captures its effective UID and current machine/boot. User records
-must match that UID. System records exclude user-manager/session records;
+The reader captures its effective UID and current machine/boot. Direct user
+records must match that UID. The privileged observer can instead bind the
+query to a sealed native system-bus user observation; callers cannot construct
+that observation from a claimed UID. System records exclude user-manager/session records;
 kernel records require the native kernel transport.
 
 Storage is limited to the current machine directory under `/run/log/journal`
@@ -39,9 +41,36 @@ query and native cursor. It is not serializable and cannot be constructed from
 request bytes. Changed queries are refused, and resumption must find the exact
 cursor; seeking to a nearest entry is not accepted after rotation/vacuum. The
 broker must separately bind an opaque wire cursor to its authenticated peer,
-policy grant, expiry and query. It must check authorization both before and
-after provider I/O and resolve unit/boot scopes and journal namespaces live.
+policy grant, expiry and query. It checks authorization both before and
+after provider I/O and resolves unit/boot scopes and journal namespaces live.
 The library does not issue grants or change `system.logs` runtime availability.
+
+The installed root `org.aios.System1` observer checks its authenticated unique
+sender, UID, PID, process start, originating logind association and bus/boot
+identity. Only normal users listed in the immutable installed
+`/etc/aios/journal-readers.json` are eligible; inference system accounts are
+excluded. The native journal query independently observes and rechecks the
+same bus sender and process. The service does not accept a raw UID, path,
+journal expression or caller-created native cursor.
+
+`ResolveLogService` resolves an existing system service into a private,
+30-second handle. `Logs` takes the reviewed `system.logs` request schema.
+Its scope checks run before and after native I/O. Wire cursors preserve the
+original normalized query and are bound to the complete authenticated peer,
+argument hash and 30-second expiry. A changed query, reconnect, expired
+reference or disappeared native cursor fails explicitly. There are at most
+4,096 live service/cursor handles each, with 256 per UID. User-unit handle
+resolution is not exposed by this system-service resolver.
+
+`GetJournalEvidence` accepts an observer-issued evidence ID. It returns only
+sanitized payloads, their content hash and native boot/cursor locators to the
+same authenticated peer. Evidence expires after 30 seconds, with at most
+8,192 live records and 1,024 per UID. Batch records link the selected sanitized
+entries; their cursor is empty and must not be treated as an individual
+journal entry. Neither these direct normal-user reads nor their temporary
+read grants authorize a model task or a mutation. The model-facing
+`system.logs` capability remains unadvertised until installed orchestration
+and its required scope/timeout qualification are complete.
 
 The development integration command exercises controlled public journal
 messages and an independent filtered upstream read. It covers source/unit/
@@ -52,9 +81,12 @@ Required native cases fail instead of skipping missing access or data:
 python3 tools/devctl.py test --suite integration --provider journal-inspection --json
 ```
 
-This is native library qualification, distinct from installed broker and
-caller-grant qualification. The native writing fixture is ignored by ordinary
-unit tests and executed explicitly by that registered integration command.
+The registered command invokes the installed System1 observer test. It
+requires the corresponding service from the same source in a verified guest;
+an old installed service or missing native access must fail. Controlled
+writing fixtures are ignored by ordinary unit tests. The separate direct
+library test remains available as a diagnostic and is not installed observer
+evidence. Neither test alone qualifies model task grants or the complete OS.
 
 The API signatures and descriptor ownership follow the pinned upstream
 [header](https://github.com/systemd/systemd/blob/v260/src/systemd/sd-journal.h)

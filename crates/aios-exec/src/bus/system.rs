@@ -69,7 +69,7 @@ fn parse(request: &str, expected: &str, scope: Scope) -> Result<Action> {
 
 struct Cursor { owner: CallerIdentity, query: String, limit: usize, revision: String, offset: usize, expires_ms: u64 }
 #[derive(Default)]
-pub(super) struct ReadState { cursors: BTreeMap<String, Cursor> }
+pub(super) struct ReadState { pub(super) journal:super::journal::JournalState, cursors: BTreeMap<String, Cursor> }
 impl ReadState {
     pub(super) fn cleanup(&mut self) -> crate::Result<()> {
         let now = boottime_ms()?;
@@ -105,6 +105,7 @@ impl ReadState {
         let action = parse(request, expected, scope)?;
         if !aios_protocol::registry::capability(expected)?.read_only { return Err(ErrorCode::AuthRequired.into()); }
         let value = match action {
+            Action::SystemLogs(_) => self.journal.logs(caller,&action)?,
             Action::SystemInfo => serde_json::to_value(aios_system::observe_system_info_native()).map_err(|_|ErrorCode::InvalidArgument)?,
             Action::PackagesInfo(args) => {
                 let template = InstalledTemplate::from_installed()?;
@@ -160,7 +161,7 @@ fn package_result(data: Value, cursor: Option<String>) -> Value {
 // Each exported member fixes one reviewed action. No generic bus method,
 // path, command, administrator assertion or caller-provided UID is accepted.
 macro_rules! surface {
-    ($name:ident,$scope:expr,$interface:literal,[$(($method:ident,$action:literal)),+ $(,)?]) => {
+    ($name:ident,$scope:expr,$interface:literal,[$(($method:ident,$action:literal)),+ $(,)?], $($extra:item)*) => {
         pub(super) struct $name { pub(super) executor: Executor }
         #[zbus::interface(name=$interface)]
         impl $name {
@@ -171,14 +172,24 @@ macro_rules! surface {
                 if request_json.len()>MAX_TASK_BYTES {return Err(ErrorCode::ResourceExhausted.into());}
                 self.executor.call(header,Operation::SystemAction($scope,$action,request_json.into())).await
             })+
+            $($extra)*
         }
     }
 }
 surface!(System,Scope::System,"org.aios.System1",[(info,"system.info"),(services,"system.services"),
     (service_status,"system.service_status"),(service_restart,"system.service_restart"),(hardware,"system.hardware"),
-    (boots,"system.boots"),(boot_diagnostics,"system.boot_diagnostics"),(logs,"system.logs")]);
+    (boots,"system.boots"),(boot_diagnostics,"system.boot_diagnostics"),(logs,"system.logs")],
+    async fn resolve_log_service(&self,unit_name:&str,#[zbus(header)]header:Header<'_>)->Result<String> {
+        if unit_name.len()>255 {return Err(ErrorCode::InvalidArgument.into());}
+        self.executor.call(header,Operation::JournalResolveService(unit_name.into())).await
+    }
+    async fn get_journal_evidence(&self,evidence_id:&str,#[zbus(header)]header:Header<'_>)->Result<String> {
+        if !crate::uuid(evidence_id) {return Err(ErrorCode::InvalidArgument.into());}
+        self.executor.call(header,Operation::JournalEvidence(evidence_id.into())).await
+    }
+);
 surface!(Packages,Scope::Packages,"org.aios.Packages1",[(search,"packages.search"),(info,"packages.info"),
-    (installed,"packages.installed"),(install,"packages.install"),(remove,"packages.remove"),(upgrade_plan,"packages.upgrade_plan")]);
+    (installed,"packages.installed"),(install,"packages.install"),(remove,"packages.remove"),(upgrade_plan,"packages.upgrade_plan")],);
 
 #[cfg(test)]
 mod tests {
