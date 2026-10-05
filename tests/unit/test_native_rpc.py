@@ -1,4 +1,5 @@
 import json
+import copy
 from pathlib import Path
 import tempfile
 import unittest
@@ -88,6 +89,48 @@ class NativeRpcTests(unittest.TestCase):
         self.assertEqual(error.exception.exit_code,ExitCode.TARGET_MISMATCH)
         exchange.assert_not_called()
         self.assertFalse((self.root/".local/reports").exists())
+
+    def test_process_task_requires_real_native_citation_and_retained_origin(self):
+        args = cli.parser().parse_args(['test','--suite','integration','--provider','process-task','--detach'])
+        with patch.object(cli,'load_config') as load:
+            with self.assertRaises(DevctlError): cli.dispatch(args)
+        load.assert_not_called()
+        native = {'pid':52,'uid':1000,'boot_id':IDENTITY['boot_id'],'start_time_ticks':123,'executable_identity':'dev=1;ino=2'}
+        handle = '11111111-1111-4111-8111-111111111111'
+        evidence = {'complete':True,'error':None,'source':{'provider':'linux-own-user-processes'},
+                    'data':{**native,'process_id':handle},'evidence_ids':['current']}
+        proof = {'evidence_kind':'real-installed-process-task','uid':1000,'boot_id':IDENTITY['boot_id'],
+                 'installed_executable':'/nix/store/fixture-aios-core/bin/aios-sessiond','termination_performed':False,
+                 'model_lock_sha256':'a'*64,'model_sha256':'b'*64,'native_identity':native,'selection':evidence,
+                 'unix_answer':{'state':'completed','error':None,'mutation_performed':False,'output':{
+                     'local_cpu':True,'mutation_performed':False,'response':{'kind':'answer','text':'PID 52','evidence_ids':['current']},
+                     'evidence':[evidence]}}}
+        flags = ('original_unix_task_verified','native_citation_verified','foreign_handle_refused','foreign_task_refused',
+                 'unknown_handle_refused','forgotten_task_refused','expired_handle_refused')
+        proof.update(dict.fromkeys(flags, True))
+        cases = [(proof, ExitCode.SUCCESS), ({}, ExitCode.VERIFICATION_FAILURE)]
+        for flag in flags:
+            cases.append(({**proof,flag:False}, ExitCode.VERIFICATION_FAILURE))
+        for change in ('wrong_identity','wrong_domain','stale_citation','no_model','no_native','bad_hash'):
+            bad = copy.deepcopy(proof)
+            if change == 'wrong_identity': bad['unix_answer']['output']['evidence'][0]['data']['pid'] = 99
+            if change == 'wrong_domain': bad['unix_answer']['output']['evidence'][0]['source']['provider'] = 'fixture'
+            if change == 'stale_citation': bad['unix_answer']['output']['response']['evidence_ids'] = ['old']
+            if change == 'no_model': bad['unix_answer']['output']['local_cpu'] = False
+            if change == 'no_native': bad['native_identity'] = {}
+            if change == 'bad_hash': bad['model_sha256'] = 'unverified'
+            cases.append((bad, ExitCode.VERIFICATION_FAILURE))
+        for value, expected in cases:
+            output = b'AIOS_INSTALLED_PROCESS_TASK=' + json.dumps(value).encode() + b'\n'
+            with patch.object(native_rpc.acceptance,'STORAGE_ROOT',self.root), \
+                 patch.object(native_rpc.guest,'enrolled_identity',return_value=({'host_key_fingerprint':'fixture-pin'},IDENTITY)), \
+                 patch.object(native_rpc.sync,'synchronize',return_value=(0,self.publication)), \
+                 patch.object(native_rpc.guest,'ssh_arguments',return_value=['ssh','pinned-fixture','identity']), \
+                 patch.object(native_rpc.sync,'exchange',return_value=(0,output,b'')) as exchange:
+                code, result = native_rpc.run_process_task(self.config)
+            self.assertEqual(code, expected)
+            self.assertTrue(exchange.call_args.args[0][-1].endswith('/tools/guest/installed_process_task_smoke.py'))
+            self.assertTrue(json.loads(Path(result['artifact_path']).read_text())['caller_session_held_open'])
 
     def test_process_probe_cannot_detach_or_infer_success_from_zero_exit(self):
         args=cli.parser().parse_args(["test","--suite","integration","--provider","process-inspection","--detach"])

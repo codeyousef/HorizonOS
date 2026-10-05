@@ -71,7 +71,7 @@ def parser() -> Parser:
     test.add_argument("--with-model", action="store_true", help="create a disposable desktop with the locked installed CPU model")
     test.add_argument("--desktop-run", metavar="RUN_UUID", help="resume only the registered disposable desktop workspace")
     test.add_argument("--bootstrap-case", choices=("all", *acceptance.CASES), help="run only the named disposable installer guard qualification")
-    test.add_argument("--provider", choices=("system-info", "service-inspection", "journal-inspection", "process-inspection", "public-session", "installed-session-inference", "consent-ui", "accessibility", "ui-provider", "model-compatibility", "upstream-compatibility", "host-boundary", "protocol-conformance", "model-profile-low", "model-profile-high", "model-inference", "model-service", "session-inference", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime", "installed-policy", "installed-development", "installed-guard", "installed-model", "installed-model-idle", "installed-model-lifecycle", "installed-model-users", "installed-executor"), help="run the named real product provider smoke in the verified guest")
+    test.add_argument("--provider", choices=("system-info", "service-inspection", "journal-inspection", "process-inspection", "process-task", "public-session", "installed-session-inference", "consent-ui", "accessibility", "ui-provider", "model-compatibility", "upstream-compatibility", "host-boundary", "protocol-conformance", "model-profile-low", "model-profile-high", "model-inference", "model-service", "session-inference", "development-boundary", "guard-state", "managed-state", "broker-preparation", "installed-runtime", "installed-policy", "installed-development", "installed-guard", "installed-model", "installed-model-idle", "installed-model-lifecycle", "installed-model-users", "installed-executor"), help="run the named real product provider smoke in the verified guest")
     controls = commands.add_parser("jobs").add_subparsers(dest="operation", required=True)
     for action in ("status", "cancel"):
         controls.add_parser(action).add_argument("--job", required=True)
@@ -136,11 +136,11 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         if args.provider is not None:
             if args.suite != "integration" or args.bootstrap_case is not None:
                 raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Provider smoke requires integration scope without a bootstrap case")
-            if args.provider in ("installed-executor", "journal-inspection", "process-inspection"):
+            if args.provider in ("installed-executor", "journal-inspection", "process-inspection", "process-task"):
                 if args.detach:
                     raise DevctlError(ExitCode.INVALID_INPUT, "INVALID_ARGUMENT", "Installed native probe must retain its authenticated SSH session; --detach is unavailable")
                 config = load_config(args.workspace)
-                return native_rpc.run_process(config) if args.provider == "process-inspection" else native_rpc.run_journal(config) if args.provider == "journal-inspection" else native_rpc.run(config)
+                return native_rpc.run_process_task(config) if args.provider == "process-task" else native_rpc.run_process(config) if args.provider == "process-inspection" else native_rpc.run_journal(config) if args.provider == "journal-inspection" else native_rpc.run(config)
             return jobs.start(load_config(args.workspace), args.provider + "-smoke", detach=args.detach)
         if args.bootstrap_case is not None:
             if args.suite != "integration" or args.detach:

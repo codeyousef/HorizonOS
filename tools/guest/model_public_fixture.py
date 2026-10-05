@@ -20,17 +20,18 @@ from model_queue_fixture import attest, cleanup, drop_ids, receive, send
 
 
 class Broker:
-    def __init__(self):
-        if os.getuid() != 1001 or os.geteuid() != 1001:
+    def __init__(self, uid=1001):
+        if uid not in (1000, 1001) or os.getuid() != uid or os.geteuid() != uid:
             raise PermissionError('public fixture must first drop to tester')
-        self.runtime = Path('/run/user/1001')
+        self.uid = uid
+        self.runtime = Path('/run/user') / str(uid)
         info = self.runtime.lstat()
         if (self.runtime.resolve() != self.runtime or not stat.S_ISDIR(info.st_mode)
-                or info.st_uid != 1001 or info.st_mode & 0o077):
+                or info.st_uid != self.uid or info.st_mode & 0o077):
             raise RuntimeError('public fixture runtime identity failed')
-        self.env = {**os.environ, 'HOME': '/home/tester', 'PATH': '/run/current-system/sw/bin',
+        self.env = {**os.environ, 'HOME': pwd.getpwuid(uid).pw_dir, 'PATH': '/run/current-system/sw/bin',
                     'XDG_RUNTIME_DIR': str(self.runtime), 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=' + str(self.runtime / 'bus')}
-        self.unit = 'aios-model-failure-' + uuid.uuid4().hex + '.service'
+        self.unit = 'aios-sessiond.service'
         self.binaries = {}
         for name, package in (('aios-sessiond', 'aios-core'), ('aiosctl', 'aios-cli')):
             binary = Path('/run/current-system/sw/bin', name).resolve(strict=True)
@@ -40,26 +41,67 @@ class Broker:
                 raise RuntimeError('public fixture requires exact protected installed binaries')
             self.binaries[name] = binary
         self.bytes = (self.binaries['aios-sessiond'].parents[1] / 'share/systemd/user/aios-sessiond.service').read_bytes()
-        if not 0 < len(self.bytes) <= 65536 or self.ctl('show', self.unit, '--property=LoadState').stdout.strip() != b'LoadState=not-found':
-            raise RuntimeError('public fixture must not replace a unit')
-        if self.bus('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus', 'NameHasOwner', 's', 'org.aios.Session1').strip() != b'b false':
-            raise RuntimeError('public fixture must not replace a broker owner')
-        self.path = self.runtime / 'systemd/user' / self.unit
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.path.parent.resolve() != self.path.parent or self.path.parent.stat().st_uid != 1001:
-            raise RuntimeError('unsafe public fixture unit directory')
-        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, 'wb') as output:
-            output.write(self.bytes)
+        if not 0 < len(self.bytes) <= 65536:
+            raise RuntimeError('installed broker unit exceeds bound')
         self.cli = None
-        self.ctl('daemon-reload')
-        self.ctl('start', self.unit)
         self.proof = self.show()
+        self.identity = self.verify()
+
+    @staticmethod
+    def protected_file(path):
+        resolved = Path(path).resolve(strict=True)
+        info = resolved.stat()
+        if (not re.fullmatch(r'/nix/store/[a-z0-9]{32}-[^/]+/.+', str(resolved))
+                or not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o222):
+            raise RuntimeError('broker unit is not protected installed store content')
+        return resolved
+
+    def verify(self):
+        current = self.show()
         expected = {'NoNewPrivileges': 'yes', 'PrivateNetwork': 'yes', 'ProtectHome': 'tmpfs', 'ProtectSystem': 'strict',
                     'MemoryMax': '268435456', 'TasksMax': '64', 'RuntimeDirectoryMode': '0700', 'ActiveState': 'active'}
-        if (any(self.proof[k] != v for k, v in expected.items()) or self.proof['FragmentPath'] != str(self.path)
-                or not self.owns() or int(self.proof['MainPID']) <= 1):
+        if any(current.get(k) != v for k, v in expected.items()):
             raise RuntimeError('original installed broker hardening failed')
+        fragment = self.protected_file(current['FragmentPath'])
+        if fragment.read_bytes() != self.bytes:
+            raise RuntimeError('original installed broker unit changed')
+        for path in current['DropInPaths'].split():
+            self.protected_file(path)
+        executable = str(self.binaries['aios-sessiond'])
+        # systemctl's fixed single-command representation; arguments or a
+        # replacement executable are rejected even if FragmentPath is genuine.
+        prefix = '{ path=' + executable + ' ; argv[]=' + executable + ' ; ignore_errors=no ; '
+        if not current['ExecStart'].startswith(prefix) or current['ExecStart'].count('{ path=') != 1:
+            raise RuntimeError('original broker ExecStart changed')
+        pid = int(current['MainPID'])
+        if pid <= 1 or self.bus('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
+                                'GetConnectionUnixProcessID', 's', 'org.aios.Session1').strip() != f'u {pid}'.encode():
+            raise RuntimeError('installed broker bus owner changed')
+        def bus_identity(name, method):
+            value = self.bus('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus', method, 's', name)
+            if not re.fullmatch(rb'u [0-9]+\n?', value):
+                raise RuntimeError('invalid native bus credential response')
+            return int(value.split()[1])
+        if bus_identity('org.aios.Session1', 'GetConnectionUnixUser') != self.uid:
+            raise RuntimeError('original broker UID changed')
+        manager = bus_identity('org.freedesktop.systemd1', 'GetConnectionUnixProcessID')
+        if bus_identity('org.freedesktop.systemd1', 'GetConnectionUnixUser') != self.uid:
+            raise RuntimeError('user manager UID changed')
+        system_env = {**self.env, 'DBUS_SYSTEM_BUS_ADDRESS': 'unix:path=/run/dbus/system_bus_socket'}
+        root_view = subprocess.run(['/run/current-system/sw/bin/systemctl', '--system', 'show', f'user@{self.uid}.service',
+                                    '--property=MainPID', '--value'], env=system_env, check=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+        if root_view.stdout.strip() != str(manager).encode():
+            raise RuntimeError('user manager is not associated with root manager')
+        ticks = (Path('/proc') / str(pid) / 'stat').read_text().rsplit(') ', 1)[1].split()[19]
+        identity = {'pid': pid, 'start_ticks': ticks, 'manager_pid': manager,
+                    'invocation_id': current['InvocationID'],
+                    'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
+        if not re.fullmatch(r'[0-9a-f]{32}', identity['invocation_id']):
+            raise RuntimeError('broker invocation identity missing')
+        if hasattr(self, 'identity') and identity != self.identity:
+            raise RuntimeError('original broker process identity changed')
+        return identity
 
     def ctl(self, *arguments):
         return subprocess.run(['/run/current-system/sw/bin/systemctl', '--user', *arguments], env=self.env,
@@ -74,16 +116,12 @@ class Broker:
 
     def show(self):
         names = ('ActiveState', 'MainPID', 'FragmentPath', 'NoNewPrivileges', 'PrivateNetwork', 'ProtectHome',
-                 'ProtectSystem', 'MemoryMax', 'TasksMax', 'RuntimeDirectoryMode')
+                 'ProtectSystem', 'MemoryMax', 'TasksMax', 'RuntimeDirectoryMode', 'DropInPaths', 'ExecStart', 'InvocationID')
         value = self.ctl('show', self.unit, *['--property=' + name for name in names]).stdout.decode()
         return dict(line.split('=', 1) for line in value.splitlines() if '=' in line)
 
-    def owns(self):
-        info = self.path.lstat()
-        return (stat.S_ISREG(info.st_mode) and info.st_uid == 1001 and info.st_nlink == 1
-                and stat.S_IMODE(info.st_mode) == 0o600 and self.path.read_bytes() == self.bytes)
-
     def start(self, long):
+        self.verify()
         if self.cli is not None:
             raise RuntimeError('public fixture already has a CLI')
         question = ('word ' * 4500 if long else '') + 'What operating system is running? Cite only the attached observation.'
@@ -92,6 +130,7 @@ class Broker:
         return {'cli_pid': self.cli.pid, 'uid': os.getuid()}
 
     def result(self):
+        self.verify()
         if self.cli is None:
             raise RuntimeError('public fixture has no CLI')
         out, err = self.cli.communicate(timeout=15)
@@ -102,6 +141,7 @@ class Broker:
         return value
 
     def health(self):
+        self.verify()
         observed = subprocess.run([str(self.binaries['aiosctl']), 'inspect', 'service', 'sshd.service', '--json'],
                                   env=self.env, capture_output=True, check=True, timeout=5)
         service = json.loads(observed.stdout)
@@ -117,6 +157,7 @@ class Broker:
                 'kwin_uid': 1001, 'mutation_performed': False}
 
     def fixture_service(self, restarting=False):
+        self.verify()
         name = 'aios-service-restart-fixture.service' if restarting else 'aios-service-failure-fixture.service'
         result = subprocess.run([str(self.binaries['aiosctl']),'inspect','service',name,'--json'],env=self.env,
                                 capture_output=True,timeout=10)
@@ -124,12 +165,13 @@ class Broker:
         return {'upstream_exit':result.returncode,'result':json.loads(result.stdout)}
 
     def fixture_scope(self):
+        self.verify()
         # Two real kernel-authenticated streams, neither with supplied identity.
         def connect():
             stream=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);stream.settimeout(5)
             stream.connect(str(self.runtime/'aios/session.sock'))
             pid,uid,_=struct.unpack('3i',stream.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
-            if uid!=1001 or pid!=int(self.show()['MainPID']):
+            if uid!=self.uid or pid!=int(self.show()['MainPID']):
                 stream.close();raise RuntimeError('fixture stream does not belong to installed broker')
             return stream
         def call(stream,operation):
@@ -151,13 +193,10 @@ class Broker:
             if self.cli.poll() is None:
                 self.cli.kill()
             self.cli.communicate(timeout=5)
-        if not self.owns() or self.show()['FragmentPath'] != str(self.path):
-            raise RuntimeError('public fixture unit changed; cleanup refused')
-        self.ctl('stop', self.unit)
-        if self.show()['MainPID'] != '0':
-            raise RuntimeError('owned broker did not stop')
-        self.path.unlink()
-        self.ctl('daemon-reload')
+        self.cli = None
+        # This fixture borrows the original product service. It owns only its
+        # CLI child, and must never stop, replace or unlink the shared broker.
+        self.verify()
 
 
 def participant(channel, account, inference_gid):
@@ -165,7 +204,7 @@ def participant(channel, account, inference_gid):
     try:
         drop_ids(channel, account, inference_gid)
         broker = Broker()
-        send(channel, {'ready': True, 'uid': os.getuid(), 'pid': os.getpid(), 'unit': broker.proof,
+        send(channel, {'ready': True, 'uid': os.getuid(), 'pid': os.getpid(), 'unit': broker.proof, 'broker_identity': broker.identity,
                        'original_unit_sha256': hashlib.sha256(broker.bytes).hexdigest(),
                        'executables': {k: {'path': str(v), 'sha256': hashlib.sha256(v.read_bytes()).hexdigest()} for k, v in broker.binaries.items()}})
         while True:

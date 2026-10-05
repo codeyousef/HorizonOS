@@ -75,6 +75,23 @@ This gate does not establish approved termination, model task grants,
 cross-UID caller isolation or actual PID reuse. Its ignored Rust test is
 required by this native gate and does not count as an ordinary unit-test pass.
 
+The separate selected-process task gate requires the installed normal CPU-model
+development image:
+
+```fish
+python3 tools/devctl.py test --suite integration --provider process-task --json
+```
+
+It retains the original authenticated Unix client, selects that client's own
+process, and compares native PID/start/boot/executable identity with the cited
+process evidence in the actual model answer. Foreign handles, foreign task
+access, unknown selections, forgotten tasks and expired selections must fail.
+The original managed broker is attested and reused; cleanup never stops or
+replaces it. This gate does not establish persistent bus task behavior,
+in-flight revocation/disconnection/expiry, cross-UID callers, signal effects or
+actual PID reuse. Missing completion, native citations or required refusal
+cases cannot pass merely because the probe exited successfully.
+
 A native regression test creates a controlled non-dumpable own-user child.
 It verifies actual process credentials and inaccessible executable identity,
 requires an explicitly incomplete inventory, and lets the child exit naturally.
