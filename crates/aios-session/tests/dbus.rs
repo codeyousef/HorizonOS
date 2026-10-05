@@ -58,7 +58,7 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let conn = connect(); let api = proxy(&conn);
     let introspection = Proxy::new(&conn, NAME, PATH, "org.freedesktop.DBus.Introspectable").unwrap();
     let xml: String = introspection.call("Introspect", &()).unwrap();
-    for method in ["GetCapabilities", "Submit", "GetStatus", "GetEvents", "Cancel", "Forget"] {
+    for method in ["GetCapabilities", "Submit", "GetStatus", "GetEvents", "Cancel", "Forget", "ListProcesses", "InspectProcess"] {
         assert!(xml.contains(&format!("name=\"{method}\"")));
     }
     let agent_xml = xml.split("<interface name=\"org.aios.Agent1\">").nth(1).unwrap().split("</interface>").next().unwrap();
@@ -92,6 +92,12 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let settings=Proxy::new(&conn,NAME,"/org/aios/Settings1","org.aios.Settings1").unwrap();
     let action_request=|id:&str,args:Value|json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),
         "operation":{"kind":"invoke","tool_call":{"kind":"tool_call","action_id":id,"arguments":args}}}).to_string();
+    let wrong_process_action=action_request("system.info",json!({}));
+    code(api.call::<_,_,String>("ListProcesses",&(wrong_process_action.as_str(),)).unwrap_err(),"INVALID_ARGUMENT");
+    let unknown_process=action_request("process.inspect",json!({"process_id":uuid::Uuid::new_v4().to_string()}));
+    code(api.call::<_,_,String>("InspectProcess",&(unknown_process.as_str(),)).unwrap_err(),"TARGET_NOT_FOUND");
+    let unsupported_process_app=action_request("process.list",json!({"app_id":"not-enrolled"}));
+    code(api.call::<_,_,String>("ListProcesses",&(unsupported_process_app.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
     let search=action_request("files.search",json!({"query":"synthetic fixture","root_handles":["not-enrolled"]}));
     code(files.call::<_,_,String>("Search",&(search.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
     let listing=action_request("apps.list",json!({}));

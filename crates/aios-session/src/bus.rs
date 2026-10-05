@@ -150,6 +150,12 @@ impl Agent {
 
 #[zbus::interface(name = "org.aios.Agent1")]
 impl Agent {
+    async fn list_processes(&self, request_json: &str, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        self.action(connection, header, request_json, "process.list").await
+    }
+    async fn inspect_process(&self, request_json: &str, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        self.action(connection, header, request_json, "process.inspect").await
+    }
     async fn get_capabilities(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
         let value = self.dispatch(connection, header, Operation::GetCapabilities).await?;
         let mut value = value;

@@ -79,6 +79,38 @@ fn observe(directory:&File,pid:u32,uid:u32)->Result<Observation> {
 /// Private native identity, never deserialized or constructed from a claimed
 /// UID, boot or start time. The session broker separately owns grants/expiry.
 pub struct OwnProcess { directory:File,pidfd:OwnedFd,identity:Identity }
+/// A bounded native snapshot. Never return a truncated inventory as complete.
+/// Processes that disappear during enumeration are absent from the snapshot;
+/// unreadable own-user entries make the inventory explicitly incomplete.
+pub struct Inventory { pub processes: Vec<OwnProcess>, pub access_denied: bool }
+pub fn inventory() -> Result<Inventory> {
+    let uid = unsafe { libc::geteuid() };
+    if uid == 0 { return Err(ErrorCode::PermissionDenied); }
+    let started = std::time::Instant::now();
+    let mut result = Vec::new();
+    let mut access_denied = false;
+    for (index, entry) in std::fs::read_dir("/proc").map_err(error)?.enumerate() {
+        if index >= 32768 { return Err(ErrorCode::ResourceExhausted); }
+        if started.elapsed() >= std::time::Duration::from_secs(2) { return Err(ErrorCode::DeadlineExceeded); }
+        let entry = entry.map_err(error)?;
+        let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue; };
+        let metadata = match std::fs::symlink_metadata(entry.path()) {
+            Ok(value) => value,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(error(e)),
+        };
+        if pid <= 1 || metadata.uid() != uid { continue; }
+        match OwnProcess::open(pid) {
+            Ok(value) => result.push(value),
+            Err(ErrorCode::TargetNotFound) => continue,
+            Err(ErrorCode::PermissionDenied) => access_denied = true,
+            Err(code) => return Err(code),
+        }
+        if result.len() > 256 { return Err(ErrorCode::ResourceExhausted); }
+    }
+    result.sort_by_key(|p| p.identity.pid);
+    Ok(Inventory { processes: result, access_denied })
+}
 impl OwnProcess {
     pub fn open(pid:u32)->Result<Self> {
         let uid=unsafe{libc::geteuid()};

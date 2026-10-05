@@ -9,6 +9,7 @@ pub mod managed_service;
 pub mod ui_bridge;
 pub mod bus;
 pub mod inference;
+mod processes;
 use aios_protocol::{MAX_TASK_BYTES, read_frame_with_limit, write_frame, contracts::{Action, ErrorCode, ProviderError, parse_tool_call, canonical_json}};
 use aios_system::services::{service_result, validate_service_name};
 use identity::Peer;
@@ -169,7 +170,7 @@ impl aios_policy::CurrentResources for ReadResources {
     fn dynamic_arguments(&self, _: &str, _: &Value, _: &aios_policy::Scope) -> Result<(), ErrorCode> { Err(ErrorCode::UnsupportedCapability) }
 }
 #[derive(Default)]
-pub struct State { tasks: HashMap<String, Task>, handles: HashMap<String, Handle>, ui_candidates: HashMap<String, UiCandidate>, queue: VecDeque<String>, inference_configured: bool, inference_available: bool, policy: Option<aios_policy::Policy> }
+pub struct State { tasks: HashMap<String, Task>, handles: HashMap<String, Handle>, ui_candidates: HashMap<String, UiCandidate>, queue: VecDeque<String>, inference_configured: bool, inference_available: bool, policy: Option<aios_policy::Policy>, processes: processes::Handles }
 pub type SharedState = Arc<Mutex<State>>;
 
 fn now() -> String { OffsetDateTime::now_utc().format(&Rfc3339).expect("valid timestamp") }
@@ -291,8 +292,10 @@ impl State {
         self.queue.retain(|id| self.tasks.get(id).is_some_and(|task| !task.terminal()));
         self.handles.retain(|_, handle| handle.expires > time);
         self.ui_candidates.retain(|_, candidate| candidate.expires > time);
+        self.processes.prune();
     }
     fn disconnect(&mut self, peer: &Peer) {
+        self.processes.disconnect(peer);
         for task in self.tasks.values_mut().filter(|task| task.owner == *peer) {
             task.retained_question.take();
             if task.terminal(){continue;}
@@ -437,6 +440,7 @@ impl State {
                     self.check_direct_read(peer, &action, ReadResources(vec![resource]))?;
                     provider(service_result(&unit, &args.service_id))
                 },
+                _ if matches!(action.action_id(), "process.list" | "process.inspect") => self.process_read(peer, &action),
                 _ => Err(ErrorCode::UnsupportedCapability),
                 }
             },
