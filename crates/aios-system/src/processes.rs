@@ -147,6 +147,42 @@ impl OwnProcess {
 mod tests {
     use super::*;
     #[test]
+    #[ignore="fixed subprocess for native user-namespace process access regression"]
+    fn native_namespace_process_child() {
+        assert_eq!(std::env::var("AIOS_NATIVE_NAMESPACE_CHILD").as_deref(),Ok("1"));
+        let pid=std::env::var("AIOS_NATIVE_NAMESPACE_PID").unwrap().parse::<u32>().unwrap();
+        let uid=unsafe{libc::getuid()};assert_ne!(uid,0);
+        let target_namespace=std::env::var("AIOS_NATIVE_NAMESPACE_ORIGINAL").unwrap();
+        // The fixed unshare executable creates the test-only namespace before
+        // the Rust test harness starts threads; unshare in a test thread fails.
+        #[repr(C)]struct Header{version:u32,pid:i32}
+        #[repr(C)]#[derive(Clone,Copy)]struct Caps{effective:u32,permitted:u32,inheritable:u32}
+        let header=Header{version:0x20080522,pid:0};let caps=[Caps{effective:0,permitted:0,inheritable:0};2];
+        assert_eq!(unsafe{libc::syscall(libc::SYS_capset,&header as *const Header,caps.as_ptr())},0);
+        assert_eq!(unsafe{libc::geteuid()},uid);
+        assert_eq!(std::fs::metadata(format!("/proc/{pid}")).unwrap().uid(),uid);
+        assert_ne!(std::fs::read_link("/proc/self/ns/user").unwrap().to_str().unwrap(),target_namespace);
+        assert!(matches!(OwnProcess::open(pid),Err(ErrorCode::PermissionDenied)));
+        println!("AIOS_NATIVE_NAMESPACE_ACCESS_DENIED");
+    }
+    #[test]
+    fn own_uid_does_not_authorize_executable_access_across_user_namespaces() {
+        let mut target=std::process::Command::new("/run/current-system/sw/bin/sleep").arg("5").spawn().unwrap();
+        let native=OwnProcess::open(target.id()).unwrap();
+        let initial=native.inspect().unwrap();
+        let namespace=std::fs::read_link(format!("/proc/{}/ns/user",target.id())).unwrap();
+        let output=std::process::Command::new("/run/current-system/sw/bin/unshare")
+            .args(["--user","--map-current-user","--"]).arg(std::env::current_exe().unwrap())
+            .args(["--ignored","--exact","processes::tests::native_namespace_process_child","--nocapture"])
+            .env("AIOS_NATIVE_NAMESPACE_CHILD","1").env("AIOS_NATIVE_NAMESPACE_PID",target.id().to_string())
+            .env("AIOS_NATIVE_NAMESPACE_ORIGINAL",namespace.to_str().unwrap())
+            .output().unwrap();
+        assert!(output.status.success(),"native namespace child failed: {}",String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stdout).lines().any(|line|line=="AIOS_NATIVE_NAMESPACE_ACCESS_DENIED"));
+        assert_eq!(native.inspect().unwrap().identity,initial.identity);
+        target.wait().unwrap();assert!(native.exited().unwrap());
+    }
+    #[test]
     fn mixed_privileged_credentials_are_refused() {
         assert_eq!(owner("Uid:\t1000 0 0 1000\n",1000),Err(ErrorCode::PermissionDenied));
         assert_eq!(owner("Uid: 1000 1000 1000 1000\nUid: 1000 1000 1000 1000",1000),Err(ErrorCode::PartialResult));
