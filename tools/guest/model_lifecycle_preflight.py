@@ -18,6 +18,7 @@ import time
 
 from model_service_smoke import Client
 import model_queue_fixture
+import service_failure_fixture
 from model_public_fixture import PublicProbe, require_failure, require_system_answer
 import desktop_probe
 import snapshot
@@ -337,6 +338,8 @@ def main():
         # Retain the actual response even when the recovery gate fails.
         report['public_answer_after_corrupt_view_restored'] = restored
         require_system_answer(restored, expected['boot_id'])
+        report['service_failures'] = {}
+        service_failure_fixture.run(expected, recheck, public, report['service_failures'])
         report['desktop_after_failures'] = desktop(expected)
         if report['desktop_before_crashes']['processes'] != report['desktop_after_failures']['processes']:
             raise RuntimeError('desktop processes restarted during model failures')

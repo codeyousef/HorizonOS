@@ -11,6 +11,7 @@ from pathlib import Path
 import pwd
 import re
 import socket
+import struct
 import stat
 import subprocess
 import uuid
@@ -115,6 +116,36 @@ class Broker:
         return {'service': service, 'kwin_response_bytes': len(response), 'kwin_response_sha256': hashlib.sha256(response).hexdigest(),
                 'kwin_uid': 1001, 'mutation_performed': False}
 
+    def fixture_service(self, restarting=False):
+        name = 'aios-service-restart-fixture.service' if restarting else 'aios-service-failure-fixture.service'
+        result = subprocess.run([str(self.binaries['aiosctl']),'inspect','service',name,'--json'],env=self.env,
+                                capture_output=True,timeout=10)
+        if len(result.stdout)+len(result.stderr)>65536: raise RuntimeError('fixture service observation exceeds bound')
+        return {'upstream_exit':result.returncode,'result':json.loads(result.stdout)}
+
+    def fixture_scope(self):
+        # Two real kernel-authenticated streams, neither with supplied identity.
+        def connect():
+            stream=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);stream.settimeout(5)
+            stream.connect(str(self.runtime/'aios/session.sock'))
+            pid,uid,_=struct.unpack('3i',stream.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+            if uid!=1001 or pid!=int(self.show()['MainPID']):
+                stream.close();raise RuntimeError('fixture stream does not belong to installed broker')
+            return stream
+        def call(stream,operation):
+            request={'schema_version':1,'request_id':str(uuid.uuid4()),'operation':operation}
+            send(stream,request);reply=receive(stream)
+            if reply.get('schema_version')!=1 or reply.get('request_id')!=request['request_id'] or reply.get('operation')!='response': raise RuntimeError('uncorrelated fixture reply')
+            return reply
+        with connect() as original,connect() as foreign:
+            resolved=call(original,{'kind':'resolve_service','unit_name':'aios-service-failure-fixture.service'})
+            handle=resolved['data']['service_id']
+            denied=call(foreign,{'kind':'invoke','tool_call':{'kind':'tool_call','action_id':'system.service_status','arguments':{'service_id':handle}}})
+            if denied['error']['code']!='PERMISSION_DENIED' or denied['data'] is not None: raise RuntimeError('foreign stream borrowed service scope')
+            missing=call(original,{'kind':'resolve_service','unit_name':'aios-no-such-service-acceptance.service'})
+            if missing['error']['code']!='TARGET_NOT_FOUND' or missing['data'] is not None: raise RuntimeError('missing service reported healthy data')
+            return {'foreign_stream':denied,'missing_service':missing,'mutation_performed':False}
+
     def close(self):
         if self.cli is not None:
             if self.cli.poll() is None:
@@ -147,6 +178,12 @@ def participant(channel, account, inference_gid):
                 send(channel, broker.result())
             elif command == {'kind': 'health'}:
                 send(channel, broker.health())
+            elif command == {'kind': 'fixture_service'}:
+                send(channel, broker.fixture_service())
+            elif command == {'kind': 'fixture_restart_service'}:
+                send(channel, broker.fixture_service(True))
+            elif command == {'kind': 'fixture_scope'}:
+                send(channel, broker.fixture_scope())
             elif command == {'kind': 'stop'}:
                 broker.close(); broker = None
                 send(channel, {'closed': True})

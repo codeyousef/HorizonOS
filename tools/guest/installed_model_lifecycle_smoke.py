@@ -7,6 +7,7 @@ import stat
 import subprocess
 
 import snapshot
+import service_failure_fixture
 
 REPORT = Path('/run/aios-model-acceptance/result.json')
 PHASE = REPORT.parent / 'phase.json'
@@ -74,6 +75,7 @@ def observe():
                and type(queue.get('cancel_elapsed_ms')) is int and 0 <= queue['cancel_elapsed_ms'] < 2000
                and report.get('public_crash_failure', {}).get('answer', {}).get('error') == 'MODEL_CRASHED'
                and report.get('corrupt_model', {}).get('verified') is True
+               and service_failure_fixture.qualified(report.get('service_failures', {}), identity)
                and report.get('corrupt_model', {}).get('public_failure', {}).get('answer', {}).get('error') == 'TARGET_CHANGED'
                and unit == {'ActiveState': 'inactive', 'SubState': 'dead', 'Result': 'success', 'ExecMainStatus': '0'})
     return (0 if success else 8), {'schema_version': 1, 'state': 'verified' if success else 'failed', 'unit': unit, 'proof': report}
