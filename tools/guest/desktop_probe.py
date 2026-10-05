@@ -17,7 +17,16 @@ def main():
     uid = pwd.getpwnam("tester").pw_uid
     sessions = []
     for line in command(["/run/current-system/sw/bin/loginctl", "list-sessions", "--no-legend", "--no-pager"]).splitlines():
-        session = line.split()[0]
+        fields = line.split()
+        if len(fields) < 3:
+            raise ValueError("Malformed session listing")
+        # Pinned SSH observations create short-lived sessions for other UIDs.
+        # Inspect only the target user's sessions; an unrelated SSH logout
+        # between listing and inspection cannot invalidate the desktop probe.
+        # All target session properties below remain mandatory and fresh.
+        if fields[1] != str(uid):
+            continue
+        session = fields[0]
         properties = command(["/run/current-system/sw/bin/loginctl", "show-session", session, "--no-pager",
                               "-p", "User", "-p", "Name", "-p", "Type", "-p", "Class", "-p", "Active", "-p", "Remote", "-p", "State"]).splitlines()
         value = dict(item.split("=", 1) for item in properties)
