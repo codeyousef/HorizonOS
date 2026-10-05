@@ -334,11 +334,12 @@ def main():
         report['corrupt_model'] = corrupt_model(expected, public)
         public.call('start_short')
         restored = public.call('result')
+        # Retain the actual response even when the recovery gate fails.
+        report['public_answer_after_corrupt_view_restored'] = restored
         answer = restored['answer']
         if (restored['upstream_exit'] != 0 or answer['state'] != 'completed' or answer['error'] is not None
                 or answer['mutation_performed'] or 'NixOS' not in answer['output']['response']['text']):
             raise RuntimeError('public model did not recover after restoring the immutable view')
-        report['public_answer_after_corrupt_view_restored'] = restored
         report['desktop_after_failures'] = desktop(expected)
         if report['desktop_before_crashes']['processes'] != report['desktop_after_failures']['processes']:
             raise RuntimeError('desktop processes restarted during model failures')

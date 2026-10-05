@@ -145,11 +145,43 @@ def main():
         after = show()
         if after["ActiveState"] != "active" or after["MainPID"] == properties["MainPID"]:
             raise RuntimeError("packaged restart did not establish a new daemon")
+        history_proof=None
+        history_client=None
+        def verify_bus_owner_pid():
+            current=show()
+            if current["ActiveState"]!="active" or current["MainPID"]!=after["MainPID"] or not owns_fragment(current):
+                raise RuntimeError("installed broker changed during history qualification")
+            result=subprocess.run(["busctl","--user","call","org.freedesktop.DBus","/org/freedesktop/DBus","org.freedesktop.DBus","GetConnectionUnixProcessID","s","org.aios.Session1"],env=env,check=True,capture_output=True,timeout=5)
+            if result.stdout.decode().strip()!= "u "+after["MainPID"]:
+                raise RuntimeError("public bus owner is not the installed unit process")
+            return current["MainPID"]
+        if installed_model:
+            # Compile only a read-only client from this job's immutable source.
+            # The broker/model remain the protected current-system binaries above.
+            release=Path(__file__).resolve().parents[2]
+            arguments=["nix","build","--json","--no-link","--no-update-lock-file","--no-write-lock-file","path:"+str(release)+"#aios-cli"]
+            print("AIOS_HISTORY_CLIENT_BUILD="+json.dumps(arguments),flush=True)
+            built=subprocess.run(arguments,check=True,stdout=subprocess.PIPE,timeout=900)
+            outputs=json.loads(built.stdout)
+            if not isinstance(outputs,list) or len(outputs)!=1: raise RuntimeError("unexpected history client build outputs")
+            package=Path(outputs[0]["outputs"]["out"])
+            history_client=package/"bin/aios-session-history-check"
+            info=history_client.stat()
+            if not re.fullmatch(r"/nix/store/[a-z0-9]{32}-aios-cli-[A-Za-z0-9._+-]+",str(package)) or package.resolve()!=package or not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o222:
+                raise RuntimeError("history test client is not a protected source-built executable")
+            installed_owner_pid=verify_bus_owner_pid()
+            result=subprocess.run([str(history_client),"--json"],env=env,capture_output=True,timeout=320)
+            if verify_bus_owner_pid()!=installed_owner_pid: raise RuntimeError("history broker owner fence changed")
+            print("AIOS_PUBLIC_HISTORY_CLIENT="+json.dumps({"client":str(history_client),"client_source_built":True,"broker_installed":True,"upstream_exit":result.returncode,"stdout":result.stdout.decode(),"stderr":result.stderr.decode()}),flush=True)
+            if result.returncode!=0: raise RuntimeError("installed public history qualification failed")
+            history_proof=json.loads(result.stdout)
+            if history_proof.get("evidence_kind")!="actual-installed-public-bus-history-with-readonly-test-client" or history_proof.get("mutation_performed") is not False:
+                raise RuntimeError("public history proof class mismatch")
         print("AIOS_USER_SERVICE=" + json.dumps({"outputs":[str(p) for p in paths], "before":properties, "after":after,
             "unit_name":UNIT,"package_unit_sha256":hashlib.sha256(unit_bytes).hexdigest(),"exact_unit_bytes":True,
             "binary_source":"installed-system-closure" if installed_model else "nix-built-packages",
             "executables":{k:{"path":str(v),"sha256":hashlib.sha256(v.read_bytes()).hexdigest()} for k,v in binaries.items()},
-            "capabilities":capabilities,"ui_selection_denial":ui_denial,"installed_model":installed_model,"model_answer":answer,"model_service_answer":service_answer,"service_observation":observed}), flush=True)
+            "capabilities":capabilities,"ui_selection_denial":ui_denial,"installed_model":installed_model,"model_answer":answer,"model_service_answer":service_answer,"history_test_client":str(history_client) if history_client else None,"public_history":history_proof,"service_observation":observed}), flush=True)
     except Exception:
         print("AIOS_USER_SERVICE_FAILURE=" + json.dumps(show()), flush=True)
         journal = subprocess.run(["journalctl", "--user", "--user-unit=" + UNIT, "--boot", "--lines=20", "--no-pager", "--output=json", "--output-fields=MESSAGE,PRIORITY,_BOOT_ID,_UID"],
