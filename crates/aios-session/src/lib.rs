@@ -120,7 +120,7 @@ pub struct TaskStatus {
 
 struct Task {
     owner: Peer, expires: Instant, nonce: String, digest: [u8; 32], status: TaskStatus,
-    deadline: Instant, boottime_deadline: u64, control: Arc<AtomicU8>, text: Option<String>, events: Vec<Value>, grant: Option<aios_policy::ReadGrant>,
+    deadline: Instant, boottime_deadline: u64, control: Arc<AtomicU8>, text: Option<String>, events: Vec<Value>, grant: Option<aios_policy::ReadGrant>, service_handles: Vec<String>,
     graphical:Option<graphical::Selection>,native_cancel:Option<Arc<ui_bridge::Cancellation>>,native_receipt:Option<graphical::Receipt>,
 }
 impl Task {
@@ -187,6 +187,44 @@ impl State {
         self.policy.as_ref().ok_or(ErrorCode::PolicyChanged)?.check_read(task.grant.as_ref().ok_or(ErrorCode::AuthRequired)?,
             &peer.policy_subject()?, id, &Action::SystemInfo, &ReadResources::default(), aios_policy::boottime_ms()?)
     }
+    fn service_resource(&self,peer:&Peer,id:&str)->Result<(String,aios_policy::Resource),ErrorCode>{
+        let handle=self.handles.get(id).ok_or(ErrorCode::TargetNotFound)?;
+        if handle.owner!=*peer{return Err(ErrorCode::PermissionDenied);}
+        if handle.expires<=Instant::now(){return Err(ErrorCode::ApprovalExpired);}
+        let resource=aios_policy::Resource{field:"service_id".into(),kind:"scope-owner-expiry".into(),
+            handle:id.into(),identity_sha256:aios_policy::digest(&handle.unit)?};
+        Ok((handle.unit.clone(),resource))
+    }
+    fn task_service_handles(&self,id:&str,peer:&Peer)->Result<Vec<String>,ErrorCode>{
+        let task=self.task(id,peer)?;
+        Ok(task.service_handles.clone())
+    }
+    fn task_tools(&self,id:&str,peer:&Peer)->Result<Vec<aios_protocol::inference::ReadTool>,ErrorCode>{
+        self.check_task_read(id,peer)?;
+        let mut tools=vec![aios_protocol::inference::ReadTool::SystemInfo];
+        if !self.task(id,peer)?.service_handles.is_empty(){tools.push(aios_protocol::inference::ReadTool::SystemServiceStatus);}
+        Ok(tools)
+    }
+    fn task_read_target(&self,id:&str,peer:&Peer,action:&Action)->Result<Option<String>,ErrorCode>{
+        self.check_task_read(id,peer)?;
+        let task=self.task(id,peer)?;
+        let (unit,resources)=match action {
+            Action::SystemInfo=>(None,ReadResources::default()),
+            Action::SystemServiceStatus(args)=>{
+                if !task.service_handles.contains(&args.service_id){return Err(ErrorCode::PermissionDenied);}
+                let (unit,resource)=self.service_resource(peer,&args.service_id)?;
+                (Some(unit),ReadResources(vec![resource]))
+            },
+            _=>return Err(ErrorCode::UnsupportedCapability),
+        };
+        // Check the original authenticated task grant, not a direct-read grant
+        // synthesized from the model's proposal. Resource ownership/expiry is
+        // rechecked on every call before entering the real provider.
+        self.policy.as_ref().ok_or(ErrorCode::PolicyChanged)?.check_read(task.grant.as_ref().ok_or(ErrorCode::AuthRequired)?,
+            &peer.policy_subject()?,id,action,&resources,aios_policy::boottime_ms()?)?;
+        Ok(unit)
+    }
+
     fn check_direct_read(&mut self, peer: &Peer, action: &Action, resources: ReadResources) -> Result<(), ErrorCode> {
         let id = Uuid::new_v4().to_string();
         let scope = aios_policy::Scope { actions: [action.action_id().into()].into(),
@@ -250,9 +288,15 @@ impl State {
             // Selection is an observation, never a consent receipt.
             return Err(ErrorCode::AuthRequired);
         }
-        if !request.context_handles.is_empty() || request.selected_app_handle.is_some() {
+        if request.selected_app_handle.is_some() {
             return Err(ErrorCode::AuthRequired);
         }
+        }
+        if request.context_handles.len()>8 || selection.is_some() && !request.context_handles.is_empty(){return Err(ErrorCode::InvalidArgument);}
+        let mut resources=Vec::new();
+        for id in &request.context_handles {
+            if resources.iter().any(|r:&aios_policy::Resource|&r.handle==id){return Err(ErrorCode::InvalidArgument);}
+            resources.push(self.service_resource(peer,id)?.1);
         }
         let digest: [u8; 32] = Sha256::digest(canonical_json(&provider(&request)?)?).into();
         for (id, task) in &self.tasks {
@@ -264,7 +308,9 @@ impl State {
         if self.tasks.len() >= 64 || self.tasks.values().filter(|t| t.owner == *peer).count() >= 8 { return Err(ErrorCode::ResourceExhausted); }
         let id = Uuid::new_v4().to_string();
         let grant = if selection.is_none() && self.inference_configured && matches!(request.mode, Mode::Ask | Mode::Diagnose) {
-            let scope = aios_policy::Scope { actions: ["system.info".into()].into(), ..Default::default() };
+            let mut actions=std::collections::BTreeSet::from(["system.info".into()]);
+            if !resources.is_empty(){actions.insert("system.service_status".into());}
+            let scope = aios_policy::Scope { actions, resources:resources.into_iter().collect(), ..Default::default() };
             Some(self.read_grant(peer, id.clone(), &request.text, request.mode, scope, 90_000)?)
         } else { None };
         let submitted_at = now();
@@ -273,7 +319,7 @@ impl State {
         let status = TaskStatus { schema_version: 1, operation: "task_status".into(), request_id: id.clone(), mode: request.mode,
             state: "queued".into(), submitted_at, mutation_performed: false, error: None, output: None };
         let mut task = Task { owner: peer.clone(), expires: deadline + Duration::from_secs(300),
-            nonce: request.client_nonce, digest, status, deadline, boottime_deadline, control: Arc::new(AtomicU8::new(0)), text: Some(request.text), events: vec![], grant,graphical:selection,native_cancel:None,native_receipt:None };
+            nonce: request.client_nonce, digest, status, deadline, boottime_deadline, control: Arc::new(AtomicU8::new(0)), text: Some(request.text), events: vec![], grant,service_handles:request.context_handles,graphical:selection,native_cancel:None,native_receipt:None };
         task.event("accepted");
         if !self.inference_configured { task.finish(Err(ErrorCode::ModelUnavailable)); }
         else if matches!(request.mode, Mode::Act | Mode::Automate) { task.finish(Err(ErrorCode::UnsupportedCapability)); }
@@ -527,6 +573,26 @@ mod tests {
         assert_eq!(state.dispatch(&peer, Operation::GetStatus { task_id: task }).unwrap_err(), ErrorCode::TargetNotFound);
         let call = RawValue::from_string(r#"{"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":"handle"}}"#.into()).unwrap();
         assert_eq!(state.dispatch(&peer, Operation::Invoke { tool_call: call }).unwrap_err(), ErrorCode::TargetNotFound);
+    }
+    #[test]
+    fn task_service_scope_cannot_be_expanded_by_model_or_foreign_handles_fixture(){
+        let peer=peer_fixture();let mut foreign=peer.clone();foreign.connection_id=Some(Uuid::new_v4().to_string());
+        let mut state=State::with_inference();
+        let own=Uuid::new_v4().to_string();let other=Uuid::new_v4().to_string();
+        state.handles.insert(own.clone(),Handle{owner:peer.clone(),expires:Instant::now()+Duration::from_secs(30),unit:"sshd.service".into()});
+        state.handles.insert(other.clone(),Handle{owner:foreign,expires:Instant::now()+Duration::from_secs(30),unit:"must-not-be-accessed.service".into()});
+        let request=|handles:Vec<String>|Submit{mode:Mode::Ask,text:"Inspect selected service".into(),client_nonce:Uuid::new_v4().to_string(),context_handles:handles,selected_app_handle:None,selected_session_handle:None};
+        assert_eq!(state.submit_owned(&peer,request(vec![other.clone()]),None).unwrap_err(),ErrorCode::PermissionDenied);
+        let id=state.submit_owned(&peer,request(vec![own.clone()]),None).unwrap()["request_id"].as_str().unwrap().to_string();
+        let action=|handle:&str|parse_tool_call(json!({"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":handle}}).to_string().as_bytes()).unwrap();
+        assert_eq!(state.task_read_target(&id,&peer,&action(&own)).unwrap(),Some("sshd.service".into()));
+        assert_eq!(state.task_read_target(&id,&peer,&action(&other)).unwrap_err(),ErrorCode::PermissionDenied);
+        let unselected=Uuid::new_v4().to_string();state.handles.insert(unselected.clone(),Handle{owner:peer.clone(),expires:Instant::now()+Duration::from_secs(30),unit:"must-not-be-accessed.service".into()});
+        assert_eq!(state.task_read_target(&id,&peer,&action(&unselected)).unwrap_err(),ErrorCode::PermissionDenied);
+        state.handles.get_mut(&own).unwrap().expires=Instant::now();
+        assert_eq!(state.task_read_target(&id,&peer,&action(&own)).unwrap_err(),ErrorCode::ApprovalExpired);
+        state.dispatch(&peer,Operation::Cancel{task_id:id.clone()}).unwrap();
+        assert_eq!(state.task_read_target(&id,&peer,&Action::SystemInfo).unwrap_err(),ErrorCode::ApprovalExpired);
     }
     /// Kernel sockets and task controls are real; desktop work/subjects are
     /// fixtures. This proves lock independence, not native permission issuance.

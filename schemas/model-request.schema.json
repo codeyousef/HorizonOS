@@ -51,6 +51,7 @@
                 "response_mode": {
                   "enum": [
                     "decision",
+                    "read_decision",
                     "final_answer"
                   ]
                 },

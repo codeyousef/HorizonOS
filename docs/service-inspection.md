@@ -38,9 +38,11 @@ process identity and expire. A repeated nonce with the same typed request
 returns the same task; a changed request with that nonce returns `CONFLICT`.
 Default daemon startup connects on demand to the fixed, root-owned model
 socket for read-only `ask`/`diagnose` requests. A separate worker obtains fresh
-system information and requests a constrained final answer from local CPU
-inference. It independently parses the output and returns the attached evidence;
-it never dispatches a model-proposed action. Without an available model endpoint,
+system information and runs constrained local CPU decisions. Each typed read
+proposal is checked against the original task grant before its native provider
+runs; provider I/O does not hold the task-state mutex. A decision that has enough
+evidence transitions to a separate constrained final answer. Both the daemon and
+broker parse output independently, and the broker returns the retained evidence. Without an available model endpoint,
 the task terminates with `MODEL_UNAVAILABLE`. `act`/`automate` orchestration is
 currently unsupported. The isolated `--socket` fixture remains model-disabled.
 Task ownership does not support resuming from a different client connection.
@@ -86,7 +88,11 @@ Direct invocation carries no approved write plan; every write action returns
 original connection, request, fixed action and concrete broker-issued resources.
 Successful reads still require the provider's current scope and resource checks.
 Question tasks retain a volatile read grant for their original goal and the
-`system.info` action. Grants expire using suspend-inclusive boot time and are
+`system.info` action. Explicit caller-supplied `context_handles` can add
+`system.service_status` for owned, unexpired service handles only. The model
+cannot resolve a service name or add a handle to the grant. Ownership, expiry,
+resource binding and policy are checked before and after each provider read.
+Grants expire using suspend-inclusive boot time and are
 revoked immediately by Stop, Forget, disconnect, deadline or task completion.
 They cannot survive a broker restart or authorize another UID/session/client.
 No grant, nonce or write approval enters model context. Native graphical consent
@@ -145,6 +151,41 @@ or the complete orchestration loop.
 --json` runs actual native session and model daemons with private development
 qualification sockets. It verifies an evidence-backed question, nonce conflict,
 reconnect denials, queued and active cancellation, native context termination,
-private events, forgetting and unsupported write modes. This qualification is
+private events, forgetting and unsupported write modes. It also requires a real
+model-selected native service read and citation, and runs real constrained CPU
+probes using labeled hostile document fixtures; those probes execute no proposal. This qualification is
 one real UID; it does not establish the installed model sandbox, two-user
 inference isolation, graphical consent or the complete orchestration loop.
+
+## Bounded read reasoning
+
+`aiosctl ask "Is the selected service running?" --json --service sshd.service`
+resolves the explicitly named service on its authenticated private connection,
+then submits that owned handle with the question. A model-proposed service read
+must use that exact scope. The default `ask TEXT --json` uses the public session
+bus and offers only system information. Graphical questions retain their separate
+native receipt and selected-window evidence; they receive no OS read tools.
+
+The broker offers at most eight tools, admits at most twelve proposed reads per
+request and permits one structural-output repair for the entire request.
+Unknown/disallowed capabilities, unauthorized resources and stale references
+terminate the task without repair or alternate-tool fallback. Decisions use a
+192-token limit; final answers use 768. All generations share the original
+90-second deadline, and Stop revokes the task grant and active native generation.
+Each generation owns a separate authenticated model connection, whose teardown
+removes its private retained record.
+
+Context contains explicitly labeled untrusted observations and the authenticated
+question. Older observations are dropped before the newest evidence if the
+bounded transport context cannot fit; `dropped_evidence_count` and
+`context_complete` report that loss. No private history is attached without its
+own grant. This transport byte bound is separate from the daemon's actual
+6144-token input check. Partial provider reads return `PARTIAL_RESULT`; answers
+must cite at least one retained evidence ID. These checks bind references, but do
+not yet qualify arbitrary factual claims or the immutable write orchestration.
+
+A selected-service task starts in a constrained read-decision stage that cannot
+emit an answer. It offers service inspection until every explicitly selected
+handle has a complete native observation. The final answer must cite that service
+evidence; citing system information alone returns `STALE_EVIDENCE`. This gate is
+deterministic and does not rely on the model following a prompt instruction.

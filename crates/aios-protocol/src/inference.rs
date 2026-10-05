@@ -10,7 +10,7 @@ pub enum Profile { Normal, Low, High }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ResponseMode { Decision, FinalAnswer }
+pub enum ResponseMode { Decision, ReadDecision, FinalAnswer }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -55,11 +55,12 @@ impl Generation {
         Ok(())
     }
     pub fn output_budget(&self) -> u32 {
-        match self.response_mode { ResponseMode::Decision => 192, ResponseMode::FinalAnswer => 768 }
+        match self.response_mode { ResponseMode::Decision | ResponseMode::ReadDecision => 192, ResponseMode::FinalAnswer => 768 }
     }
     pub fn grammar(&self) -> Result<String, ErrorCode> {
         self.validate()?;
-        let mut root = "root ::= ws (answer | clarification | abstain".to_owned();
+        let mut root = "root ::= ws (clarification | abstain".to_owned();
+        if self.response_mode!=ResponseMode::ReadDecision{root.push_str(" | answer");}
         for tool in &self.allowed_tools {
             root.push_str(match tool { ReadTool::SystemInfo => " | system-info", ReadTool::SystemServiceStatus => " | service-status" });
         }
@@ -88,14 +89,16 @@ ws ::= [ \t\n\r]*
         let kind: Kind = serde_json::from_str(output).map_err(|_| ErrorCode::ModelOutputInvalid)?;
         match kind.kind.as_str() {
             "answer" => {
+                if self.response_mode==ResponseMode::ReadDecision{return Err(ErrorCode::PermissionDenied);}
                 #[derive(Deserialize)] #[serde(deny_unknown_fields)]
                 struct Answer { kind: String, text: String, evidence_ids: Vec<String> }
                 let answer: Answer = serde_json::from_str(output).map_err(|_| ErrorCode::ModelOutputInvalid)?;
                 let mut seen = HashSet::new();
                 if answer.kind != "answer" || answer.text.trim().is_empty() || answer.text.len() > 8192 ||
-                    answer.evidence_ids.len() > 64 || answer.evidence_ids.iter().any(|id| !self.evidence_ids.contains(id) || !seen.insert(id)) {
+                    answer.evidence_ids.len() > 64 || answer.evidence_ids.iter().any(|id| !seen.insert(id)) {
                     return Err(ErrorCode::ModelOutputInvalid);
                 }
+                if answer.evidence_ids.iter().any(|id| !self.evidence_ids.contains(id)){return Err(ErrorCode::StaleEvidence);}
             },
             "clarification" | "abstain" => {
                 #[derive(Deserialize)] #[serde(deny_unknown_fields)] struct Clarification { kind: String, question: String }
@@ -110,13 +113,21 @@ ws ::= [ \t\n\r]*
                 if text.trim().is_empty() || text.len() > 4096 { return Err(ErrorCode::ModelOutputInvalid); }
             },
             "tool_call" => {
-                let action = parse_tool_call(output.as_bytes()).map_err(|_| ErrorCode::ModelOutputInvalid)?;
-                let tool = match action {
-                    crate::contracts::Action::SystemInfo => ReadTool::SystemInfo,
-                    crate::contracts::Action::SystemServiceStatus(_) => ReadTool::SystemServiceStatus,
-                    _ => return Err(ErrorCode::ModelOutputInvalid),
+                #[derive(Deserialize)] #[serde(deny_unknown_fields)]
+                struct Tool { kind:String,action_id:String,arguments:Box<serde_json::value::RawValue> }
+                let proposal:Tool=serde_json::from_str(output).map_err(|_|ErrorCode::ModelOutputInvalid)?;
+                if proposal.kind!="tool_call"{return Err(ErrorCode::ModelOutputInvalid);}
+                crate::registry::capability(&proposal.action_id)?;
+                let tool=match proposal.action_id.as_str(){
+                    "system.info"=>ReadTool::SystemInfo,
+                    "system.service_status"=>ReadTool::SystemServiceStatus,
+                    _=>return Err(ErrorCode::PermissionDenied),
                 };
-                if !self.allowed_tools.contains(&tool) { return Err(ErrorCode::ModelOutputInvalid); }
+                if !self.allowed_tools.contains(&tool){return Err(ErrorCode::PermissionDenied);}
+                // Resolve capability/offer before validating its arguments.
+                // A malformed forbidden action never gains a repair attempt.
+                let _=proposal.arguments;
+                parse_tool_call(output.as_bytes()).map_err(|_|ErrorCode::ModelOutputInvalid)?;
             },
             _ => return Err(ErrorCode::ModelOutputInvalid),
         }

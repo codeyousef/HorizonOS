@@ -22,6 +22,14 @@ fn main() {
             Err(code) => api_error(code),
         }
     }
+    if let [command,text,flag,service_flag,unit]=args.as_slice(){
+        if command=="ask" && flag=="--json" && service_flag=="--service"{
+            match ask_service(text,unit){
+                Ok(value)=>{let failed=value["state"]!="completed";println!("{value}");std::process::exit(if failed{1}else{0});},
+                Err(code)=>api_error(code),
+            }
+        }
+    }
     if let [command, text, flag] = args.as_slice() {
         if command == "ask" && flag == "--json" {
             let outcome = (|| {
@@ -32,7 +40,7 @@ fn main() {
                 loop {
                     let status=client.status(&task)?;
                     if matches!(status["state"].as_str(),Some("completed"|"failed"|"cancelled")) {break Ok(status);}
-                    if std::time::Instant::now()>=deadline {return Err(aios_protocol::contracts::ErrorCode::DeadlineExceeded);}
+                    if std::time::Instant::now()>=deadline {let _=client.cancel(&task);return Err(aios_protocol::contracts::ErrorCode::DeadlineExceeded);}
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
             })();
@@ -78,8 +86,32 @@ fn main() {
         if let Err(error) = result { eprintln!("aiosctl: {error}"); std::process::exit(1); }
         return;
     }
-    eprintln!("Usage: aiosctl status --json | ask TEXT --json | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | system info --json | inspect service UNIT --json [--socket PRIVATE_PATH]");
+    eprintln!("Usage: aiosctl status --json | ask TEXT --json [--service UNIT] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | system info --json | inspect service UNIT --json [--socket PRIVATE_PATH]");
     std::process::exit(2);
+}
+
+fn ask_service(text:&str,unit:&str)->Result<serde_json::Value,aios_protocol::contracts::ErrorCode>{
+    use aios_protocol::contracts::ErrorCode;
+    use serde_json::{Value,json};
+    use std::os::unix::fs::MetadataExt;
+    let uid=std::fs::metadata("/proc/self").map_err(|_|ErrorCode::TargetChanged)?.uid();
+    let mut client=aios_session::Client::connect(&std::path::PathBuf::from(format!("/run/user/{uid}/aios/session.sock")))
+        .map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let call=|client:&mut aios_session::Client,operation:Value|->Result<Value,ErrorCode>{
+        let response=client.call(operation).map_err(|_|ErrorCode::TargetChanged)?;
+        match response.error{Some(error)=>Err(error.code),None=>response.data.ok_or(ErrorCode::InvalidArgument)}
+    };
+    let resolved=call(&mut client,json!({"kind":"resolve_service","unit_name":unit}))?;
+    let handle=resolved["service_id"].as_str().ok_or(ErrorCode::InvalidArgument)?;
+    let task=call(&mut client,json!({"kind":"submit","request":{"mode":"ask","text":text,"client_nonce":new_nonce(),"context_handles":[handle]}}))?;
+    let id=task["request_id"].as_str().ok_or(ErrorCode::InvalidArgument)?;
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(95);
+    loop{
+        let status=call(&mut client,json!({"kind":"get_status","task_id":id}))?;
+        if matches!(status["state"].as_str(),Some("completed"|"failed"|"cancelled")){return Ok(status);}
+        if std::time::Instant::now()>=deadline{let _=call(&mut client,json!({"kind":"cancel","task_id":id}));return Err(ErrorCode::DeadlineExceeded);}
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 fn read_window(session:&str,title:&str,goal:&str)->Result<serde_json::Value,aios_protocol::contracts::ErrorCode>{

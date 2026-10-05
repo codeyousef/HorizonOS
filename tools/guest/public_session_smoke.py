@@ -112,6 +112,7 @@ def main():
         question = cli("ask", "What operating system is running? Cite the provided observation.", "--json", timeout=100 if installed_model else 10)
         answer = json.loads(question.stdout)
         print("AIOS_USER_MODEL_ANSWER=" + json.dumps({"installed_model": installed_model, "upstream_exit": question.returncode, "answer": answer}), flush=True)
+        service_answer=None
         if installed_model:
             if question.returncode != 0 or answer["state"] != "completed" or answer["error"] is not None or answer["mutation_performed"]:
                 raise RuntimeError("hardened user broker did not reach the actual installed model")
@@ -120,6 +121,17 @@ def main():
                     or len(output["evidence"]) != 1 or output["response"]["evidence_ids"] != output["evidence"][0]["evidence_ids"]
                     or output["evidence"][0]["data"]["os_id"] != "nixos" or not output["local_cpu"] or output["mutation_performed"]):
                 raise RuntimeError("installed inference did not return independently enrolled system evidence")
+            selected=cli("ask","Is the selected sshd service running? Inspect its native status and cite the resulting service evidence.","--json","--service","sshd.service",timeout=100)
+            service_answer=json.loads(selected.stdout)
+            print("AIOS_USER_MODEL_SERVICE_ANSWER="+json.dumps({"upstream_exit":selected.returncode,"answer":service_answer}),flush=True)
+            if selected.returncode!=0 or service_answer["state"]!="completed" or service_answer["error"] is not None or service_answer["mutation_performed"]:
+                raise RuntimeError("installed scoped service question failed")
+            result=service_answer["output"]
+            native=[e for e in result["evidence"] if e["data"].get("unit_name")=="sshd.service"]
+            if (result["response"]["kind"]!="answer" or result["tool_calls"]<1 or result["tool_calls"]>12
+                or not native or native[-1]["data"]["active_state"]!="active"
+                or not set(result["response"]["evidence_ids"]).intersection(native[-1]["evidence_ids"])):
+                raise RuntimeError("installed service answer lacks scoped native evidence")
         elif question.returncode != 1 or answer["error"] != "MODEL_UNAVAILABLE" or answer["mutation_performed"]:
             raise RuntimeError("unavailable model was not reported truthfully")
         inspection = cli("inspect", "service", "sshd.service", "--json")
@@ -134,7 +146,7 @@ def main():
             "unit_name":UNIT,"package_unit_sha256":hashlib.sha256(unit_bytes).hexdigest(),"exact_unit_bytes":True,
             "binary_source":"installed-system-closure" if installed_model else "nix-built-packages",
             "executables":{k:{"path":str(v),"sha256":hashlib.sha256(v.read_bytes()).hexdigest()} for k,v in binaries.items()},
-            "capabilities":capabilities,"ui_selection_denial":ui_denial,"installed_model":installed_model,"model_answer":answer,"service_observation":observed}), flush=True)
+            "capabilities":capabilities,"ui_selection_denial":ui_denial,"installed_model":installed_model,"model_answer":answer,"model_service_answer":service_answer,"service_observation":observed}), flush=True)
     except Exception:
         print("AIOS_USER_SERVICE_FAILURE=" + json.dumps(show()), flush=True)
         journal = subprocess.run(["journalctl", "--user", "--user-unit=" + UNIT, "--boot", "--lines=20", "--no-pager", "--output=json", "--output-fields=MESSAGE,PRIORITY,_BOOT_ID,_UID"],

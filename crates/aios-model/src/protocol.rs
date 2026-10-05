@@ -42,15 +42,27 @@ mod tests {
     #[test] fn output_proposals_cannot_gain_authority_or_references() {
         let request = request();
         assert!(request.parse_output(r#"{"kind":"answer","text":"observed","evidence_ids":["ev_one"]}"#).is_ok());
-        for raw in [r#"{"kind":"answer","text":"observed","evidence_ids":["ev_other"]}"#,
+        assert_eq!(request.parse_output(r#"{"kind":"answer","text":"observed","evidence_ids":["ev_other"]}"#),Err(ErrorCode::StaleEvidence));
+        assert_eq!(request.parse_output(r#"{"kind":"tool_call","action_id":"system.info","arguments":{}}"#),Err(ErrorCode::PermissionDenied));
+        for raw in [
             r#"{"kind":"answer","text":"x","text":"y","evidence_ids":[]}"#,
-            r#"{"kind":"answer","text":"x","evidence_ids":[],"approved":true}"#,
-            r#"{"kind":"tool_call","action_id":"system.info","arguments":{}}"#] {
+            r#"{"kind":"answer","text":"x","evidence_ids":[],"approved":true}"#] {
             assert_eq!(request.parse_output(raw),Err(ErrorCode::ModelOutputInvalid));
         }
         let mut request = request;request.response_mode = ResponseMode::Decision;request.allowed_tools.push(ReadTool::SystemInfo);
         assert!(request.parse_output(r#"{"kind":"tool_call","action_id":"system.info","arguments":{}}"#).is_ok());
         assert!(request.parse_output(r#"{"kind":"tool_call","action_id":"shell.run","arguments":{}}"#).is_err());
+    }
+    #[test] fn required_read_decision_cannot_answer_before_provider_evidence(){
+        let mut request=request();request.response_mode=ResponseMode::ReadDecision;
+        request.allowed_tools=vec![ReadTool::SystemServiceStatus];
+        assert_eq!(request.output_budget(),192);
+        aios_protocol::validation::validate(include_str!("../../../schemas/model-request.schema.json"),
+            &serde_json::json!({"schema_version":1,"request_id":"4ba7f699-596d-4362-978c-70ac9cc69725","operation":{"kind":"generate","generation":request}})).unwrap();
+        assert!(!request.grammar().unwrap().lines().next().unwrap().contains("answer"));
+        assert_eq!(request.parse_output(r#"{"kind":"answer","text":"sshd is active","evidence_ids":["ev_one"]}"#),Err(ErrorCode::PermissionDenied));
+        assert!(request.parse_output(r#"{"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":"selected"}}"#).is_ok());
+        assert_eq!(request.parse_output(r#"{"kind":"tool_call","action_id":"packages.install","arguments":{}}"#),Err(ErrorCode::PermissionDenied));
     }
     #[test] fn optional_profiles_never_fall_back_and_mutating_tools_are_unavailable() {
         for profile in [Profile::Low, Profile::High] {
@@ -64,7 +76,7 @@ mod tests {
         candidate.allowed_tools = vec![ReadTool::SystemInfo, ReadTool::SystemServiceStatus];
         for action in ["packages.install", "system.service_restart", "files.move", "shell.run"] {
             let output = serde_json::json!({"kind":"tool_call","action_id":action,"arguments":{}});
-            assert_eq!(candidate.parse_output(&output.to_string()), Err(ErrorCode::ModelOutputInvalid));
+            assert!(candidate.parse_output(&output.to_string()).is_err());
             assert!(serde_json::from_value::<ReadTool>(serde_json::Value::String(action.into())).is_err());
         }
     }
