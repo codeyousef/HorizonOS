@@ -64,3 +64,10 @@ A native regression test creates a controlled non-dumpable own-user child.
 It verifies actual process credentials and inaccessible executable identity,
 requires an explicitly incomplete inventory, and lets the child exit naturally.
 This is library verification in the guest, not installed broker qualification.
+
+`services.aios.session.enable` registers the reviewed package's user units and
+starts `aios-sessiond.service` through the native user manager's `default.target`.
+The development image enables this independently of the incomplete global
+control-plane switch and model activation. Missing reviewed broker packages
+fail NixOS assertions. This wiring preserves the packaged sandbox and requires
+installed qualification; package presence alone does not establish a bus owner.

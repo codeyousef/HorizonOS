@@ -1,5 +1,5 @@
 # Pure module evaluation fixtures. These do not activate any guest configuration.
-{ nixpkgs }:
+{ nixpkgs, aiosCore }:
 let
   lib = nixpkgs.lib;
   uuid = "12345678-1234-4234-8234-123456789abc";
@@ -16,20 +16,36 @@ let
     environment.etc."aios/guest-role".text = "development\n";
     services.aios.development = { enable = true; expectedVmUuid = uuid; expectedInstallationUuid = uuid; };
   };
-  evaluate = modules:
-    let config = (lib.nixosSystem { modules = [ base ] ++ modules; }).config;
+  evaluateWith = args: modules:
+    let config = (lib.nixosSystem { specialArgs = args; modules = [ base ] ++ modules; }).config;
     in {
       failedAssertions = map (entry: entry.message) (builtins.filter (entry: !entry.assertion) config.assertions);
       helperPresent = builtins.any (package: (package.pname or "") == "aios-dev-deploy") config.environment.systemPackages;
       trustedUsers = config.nix.settings.trusted-users;
       developerRules = builtins.filter (rule: builtins.elem "dev" rule.users) config.security.sudo.extraRules;
       developmentEnabled = config.services.aios.development.enable;
+      sessionEnabled = config.services.aios.session.enable;
+      modelEnabled = config.services.aios.model.enable;
+      sessionWantedBy = if config.services.aios.session.enable then config.systemd.user.services.aios-sessiond.wantedBy else [];
+      sessionOverride = if config.services.aios.session.enable then config.systemd.user.services.aios-sessiond.overrideStrategy else null;
+      unitPackages = map toString config.systemd.packages;
+      modelAccess = config.users.groups.aios-inference.members or [];
+      desktopEnabled = config.services.desktopManager.plasma6.enable;
+      bootRequires = builtins.listToAttrs (map (name: {
+        inherit name;
+        value = if builtins.hasAttr name config.systemd.services then config.systemd.services.${name}.requires else [];
+      }) [ "sshd" "display-manager" "NetworkManager" ]);
     };
+  evaluate = evaluateWith { inherit aiosCore; };
+  session = { services.aios.session.enable = true; nix.settings.trusted-users = [ "root" ]; users.users.alice.isNormalUser = true; };
   development = ../../nix/modules/aios/default.nix;
   production = ../../nix/modules/aios/production.nix;
 in {
   development = evaluate [ development enabled ];
   disabled = evaluate [ development ];
+  sessionHeadless = evaluate [ development session ];
+  sessionDesktop = evaluate [ development session { services.desktopManager.plasma6.enable = true; services.displayManager.sddm.enable = true; } ];
+  sessionMissingPackage = evaluateWith {} [ development session ];
   wrongRole = evaluate [ development (enabled // { environment.etc."aios/guest-role".text = "production\n"; }) ];
   missingUuid = evaluate [ development enabled { services.aios.development.expectedVmUuid = lib.mkForce null; } ];
   extraNixTrust = evaluate [ development enabled { nix.settings.trusted-users = [ "root" "dev" ]; } ];

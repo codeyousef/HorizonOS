@@ -28,7 +28,7 @@ def main():
     reference = "path:" + str(release)
     locked = ["--no-update-lock-file", "--no-write-lock-file"]
     cases = json.loads(subprocess.check_output(["nix", "eval", "--json", *locked, reference + "#lib.developmentBoundary"], timeout=120))
-    for name in ("development", "disabled", "production"):
+    for name in ("development", "disabled", "production", "sessionHeadless", "sessionDesktop"):
         if cases[name]["failedAssertions"]:
             raise RuntimeError("valid module case rejected: " + name + " " + json.dumps(cases[name]["failedAssertions"]))
     required_denials = {
@@ -45,6 +45,7 @@ def main():
         "productionConsoleAutologin":"Production excludes graphical and console acceptance autologin.",
         "productionDevAccount":"Production excludes reserved development and tester accounts.",
         "productionTesterAccount":"Production excludes reserved development and tester accounts.",
+        "sessionMissingPackage":"Enabled Horizon OS user broker requires the reviewed aiosCore package.",
     }
     for name, reason in required_denials.items():
         if reason not in cases[name]["failedAssertions"]:
@@ -52,6 +53,20 @@ def main():
     for name in ("disabled", "production"):
         if cases[name]["helperPresent"] or cases[name]["developerRules"] or cases[name]["developmentEnabled"]:
             raise RuntimeError("developer authority leaked to nondevelopment case")
+        if cases[name]["sessionEnabled"] or cases[name]["sessionWantedBy"]:
+            raise RuntimeError("disabled broker was registered for startup")
+    for name in ("sessionHeadless", "sessionDesktop"):
+        case = cases[name]
+        if (not case["sessionEnabled"] or case["sessionWantedBy"] != ["default.target"]
+                or case["sessionOverride"] != "asDropin" or set(case["trustedUsers"]) != {"root"}
+                or case["modelEnabled"] or case["modelAccess"] or case["helperPresent"]
+                or case["developmentEnabled"] or case["developerRules"]
+                or not any(path.endswith("-aios-core-0.1.0") for path in case["unitPackages"])):
+            raise RuntimeError("user broker acquired unexpected authority or lost unit wiring: " + name + " " + json.dumps(case, sort_keys=True))
+        if any("aios-model.service" in group or "aios-model.socket" in group for group in case["bootRequires"].values()):
+            raise RuntimeError("broker module made boot/login/connectivity require inference")
+    if cases["sessionHeadless"]["desktopEnabled"] or not cases["sessionDesktop"]["desktopEnabled"]:
+        raise RuntimeError("user broker requires an unintended desktop configuration")
     dev = cases["development"]
     expected = [{"users":["dev"],"groups":[],"host":"ALL","runAs":"root:root","commands":[{"command":"/run/current-system/sw/bin/aios-dev-deploy --request-stdin","options":["NOPASSWD","NOSETENV"]}]}]
     if not dev["helperPresent"] or dev["trustedUsers"] != ["root"] or dev["developerRules"] != expected:

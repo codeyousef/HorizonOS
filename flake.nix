@@ -121,7 +121,7 @@
         value = pkgs.lib.getAttrFromPath entry.attribute pkgs;
       }) stateContract.catalog.content.packages);
       lib.managedState = import ./tests/nix/managed.nix { inherit nixpkgs stateContract; };
-      lib.developmentBoundary = import ./tests/nix/development.nix { inherit nixpkgs; };
+      lib.developmentBoundary = import ./tests/nix/development.nix { inherit nixpkgs; aiosCore = core; };
       lib.modelModule = import ./tests/nix/model.nix { inherit nixpkgs; aiosModel = model; aiosModelArtifact = modelArtifact; };
       lib.modelOptionsDocumentation = (pkgs.nixosOptionsDoc {
         options.services.aios = (nixpkgs.lib.nixosSystem { inherit system; modules = [ ./nix/modules/aios ]; }).options.services.aios;
