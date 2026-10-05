@@ -46,7 +46,7 @@ def require_answer(value, identity, handle):
     cited = answer['evidence_ids']
     matching = [item for item in output['evidence'] if item.get('complete') is True and item.get('error') is None
                 and item.get('data', {}).get('process_id') == handle
-                and all(item['data'].get(k) == v for k, v in identity.items())
+                and all(item['data'].get(k) == identity[k] for k in ('pid', 'start_time_ticks', 'executable_identity'))
                 and item.get('source', {}).get('provider') == 'linux-own-user-processes'
                 and set(item.get('evidence_ids', [])).intersection(cited)]
     if not matching:
@@ -109,6 +109,9 @@ def main():
         lock = (Path(match[1]) / 'lock.json').read_bytes()
         if lock != (release / 'models/lock.json').read_bytes():
             raise RuntimeError('installed model lock differs from frozen qualification source')
+        uid_fields = next(line.split()[1:] for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('Uid:'))
+        if uid_fields != [str(os.getuid())] * 4:
+            raise RuntimeError('native process has mixed credentials')
         native = {'pid': os.getpid(), 'uid': os.getuid(), 'boot_id': identity['boot_id'],
                   'start_time_ticks': int(Path('/proc/self/stat').read_text().rsplit(') ', 1)[1].split()[19])}
         exe = Path('/proc/self/exe').stat()
@@ -117,24 +120,27 @@ def main():
             f'ctime={exe.st_ctime_ns // 10**9}:{exe.st_ctime_ns % 10**9}')
         original, foreign = Unix(broker), Unix(broker)
         clients.extend([original, foreign])
+        selection_started = time.monotonic()
         rows = original.call(invoke('process.list', {'limit': 100}))['data']['processes']
         selected = next(item for item in rows if item['pid'] == os.getpid())
         handle = selected['process_id']
         observed = original.call(invoke('process.inspect', {'process_id': handle}))
-        if not all(observed['data'].get(k) == v for k, v in native.items()):
+        if not all(observed['data'].get(k) == native[k] for k in ('pid', 'start_time_ticks', 'executable_identity')):
             raise RuntimeError('public selection does not match independent native identity')
         refusals = {'foreign_handle': foreign.refuse(submit(handle), 'PERMISSION_DENIED'),
                     'unknown_handle': original.refuse(submit(str(uuid.uuid4())), 'TARGET_NOT_FOUND')}
         task = original.call(submit(handle))['request_id']
         refusals['foreign_task'] = foreign.refuse({'kind': 'get_status', 'task_id': task}, 'PERMISSION_DENIED')
         unix_answer = wait(original.call, task)
+        print('AIOS_PROCESS_TASK_PARTIAL=' + json.dumps({'phase': 'model_answer', 'native_identity': native,
+              'selection': observed, 'unix_answer': unix_answer}, sort_keys=True), flush=True)
         require_answer(unix_answer, native, handle)
         original.call({'kind': 'forget', 'task_id': task})
         refusals['forgotten_task'] = original.refuse({'kind': 'get_status', 'task_id': task}, 'TARGET_NOT_FOUND')
 
         # The broker closes idle streams after ten seconds; preserve the exact
         # original client while waiting for suspend-inclusive handle expiry.
-        deadline = time.monotonic() + 30.1
+        deadline = selection_started + 30.1
         while time.monotonic() < deadline:
             original.call({'kind': 'get_capabilities'})
             time.sleep(0.15)

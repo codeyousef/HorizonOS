@@ -98,10 +98,11 @@ class NativeRpcTests(unittest.TestCase):
         native = {'pid':52,'uid':1000,'boot_id':IDENTITY['boot_id'],'start_time_ticks':123,'executable_identity':'dev=1;ino=2'}
         handle = '11111111-1111-4111-8111-111111111111'
         evidence = {'complete':True,'error':None,'source':{'provider':'linux-own-user-processes'},
-                    'data':{**native,'process_id':handle},'evidence_ids':['current']}
+                    'data':{k:v for k,v in {**native,'process_id':handle}.items() if k not in ('uid','boot_id')},'evidence_ids':['current']}
         proof = {'evidence_kind':'real-installed-process-task','uid':1000,'boot_id':IDENTITY['boot_id'],
                  'installed_executable':'/nix/store/fixture-aios-core/bin/aios-sessiond','termination_performed':False,
                  'model_lock_sha256':'a'*64,'model_sha256':'b'*64,'native_identity':native,'selection':evidence,
+                 'broker_identity':{'boot_id':IDENTITY['boot_id']},
                  'unix_answer':{'state':'completed','error':None,'mutation_performed':False,'output':{
                      'local_cpu':True,'mutation_performed':False,'response':{'kind':'answer','text':'PID 52','evidence_ids':['current']},
                      'evidence':[evidence]}}}
@@ -111,13 +112,15 @@ class NativeRpcTests(unittest.TestCase):
         cases = [(proof, ExitCode.SUCCESS), ({}, ExitCode.VERIFICATION_FAILURE)]
         for flag in flags:
             cases.append(({**proof,flag:False}, ExitCode.VERIFICATION_FAILURE))
-        for change in ('wrong_identity','wrong_domain','stale_citation','no_model','no_native','bad_hash'):
+        for change in ('wrong_identity','wrong_domain','stale_citation','no_model','no_native','bad_hash','wrong_uid','wrong_boot'):
             bad = copy.deepcopy(proof)
             if change == 'wrong_identity': bad['unix_answer']['output']['evidence'][0]['data']['pid'] = 99
             if change == 'wrong_domain': bad['unix_answer']['output']['evidence'][0]['source']['provider'] = 'fixture'
             if change == 'stale_citation': bad['unix_answer']['output']['response']['evidence_ids'] = ['old']
             if change == 'no_model': bad['unix_answer']['output']['local_cpu'] = False
             if change == 'no_native': bad['native_identity'] = {}
+            if change == 'wrong_uid': bad['native_identity']['uid'] = 0
+            if change == 'wrong_boot': bad['broker_identity']['boot_id'] = 'stale'
             if change == 'bad_hash': bad['model_sha256'] = 'unverified'
             cases.append((bad, ExitCode.VERIFICATION_FAILURE))
         for value, expected in cases:

@@ -75,7 +75,7 @@ def _run(config, *, journal, process=False, process_task=False):
                     if item.get("complete") is True and item.get("error") is None
                     and item.get("source", {}).get("provider") == "linux-own-user-processes"
                     and item.get("data", {}).get("process_id") == handle
-                    and all(item.get("data", {}).get(k) == v for k, v in native.items())
+                    and all(item.get("data", {}).get(k) == native.get(k) for k in ("pid", "start_time_ticks", "executable_identity"))
                     and set(item.get("evidence_ids", [])).intersection(citations)]
                 valid = (answer.get("state") == "completed" and answer.get("error") is None
                     and answer.get("mutation_performed") is False and output_value.get("local_cpu") is True
@@ -85,10 +85,11 @@ def _run(config, *, journal, process=False, process_task=False):
                     and set(native) == {"pid", "uid", "start_time_ticks", "boot_id", "executable_identity"}
                     and type(native["pid"]) is int and native["pid"] > 1
                     and native["uid"] == observation["uid"] and native["boot_id"] == identity["boot_id"]
+                    and observation.get("broker_identity", {}).get("boot_id") == identity["boot_id"]
                     and type(native["start_time_ticks"]) is int and native["start_time_ticks"] > 0
                     and isinstance(native["executable_identity"], str) and native["executable_identity"].startswith("dev=")
                     and selection.get("complete") is True and selection.get("error") is None
-                    and all(selection.get("data", {}).get(k) == v for k, v in native.items())
+                    and all(selection.get("data", {}).get(k) == native.get(k) for k in ("pid", "start_time_ticks", "executable_identity"))
                     and all(isinstance(observation.get(k), str) and len(observation[k]) == 64
                             and all(c in "0123456789abcdef" for c in observation[k]) for k in ("model_lock_sha256", "model_sha256")))
         elif process:

@@ -9,9 +9,29 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools/guest'))
 import model_public_fixture as fixture
 import model_lifecycle_preflight as root_fixture
+import installed_process_task_smoke as process_task
 
 
 class PublicFailureBoundaryTests(unittest.TestCase):
+    def test_process_task_checks_actual_public_fields_and_current_native_citations(self):
+        native = {'pid':52,'uid':1000,'boot_id':'current','start_time_ticks':123,'executable_identity':'dev=1;ino=2'}
+        public = {k: v for k, v in native.items() if k not in ('uid', 'boot_id')}
+        public['process_id'] = 'selected'
+        base = {'state':'completed','error':None,'mutation_performed':False,'output':{
+            'local_cpu':True,'mutation_performed':False,
+            'response':{'kind':'answer','text':'PID 52','evidence_ids':['current-process']},
+            'evidence':[{'complete':True,'error':None,'source':{'provider':'linux-own-user-processes'},
+                         'data':public,'evidence_ids':['current-process']}]}}
+        process_task.require_answer(base, native, 'selected')
+        for key, value in [('pid',99),('start_time_ticks',124),('executable_identity','changed'),('process_id','foreign')]:
+            bad = copy.deepcopy(base); bad['output']['evidence'][0]['data'][key] = value
+            with self.assertRaises(RuntimeError): process_task.require_answer(bad,native,'selected')
+        for key, value in [('local_cpu',False),('mutation_performed',True),('evidence',[])]:
+            bad = copy.deepcopy(base); bad['output'][key] = value
+            with self.assertRaises(RuntimeError): process_task.require_answer(bad,native,'selected')
+        bad = copy.deepcopy(base); bad['output']['response']['evidence_ids'] = ['old']
+        with self.assertRaises(RuntimeError): process_task.require_answer(bad,native,'selected')
+
     def broker(self):
         broker = fixture.Broker.__new__(fixture.Broker)
         broker.uid = 1001
