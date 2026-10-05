@@ -39,6 +39,94 @@ fn unit_pid(connection: &Connection, sender: &str, unit: &str) -> u32 {
     Proxy::new(connection,sender,path.as_str(),"org.freedesktop.systemd1.Service").unwrap().get_property("MainPID").unwrap()
 }
 
+fn task_value(api:&Proxy<'_>,method:&str,id:&str)->Value {
+    let text:String=api.call(method,&(id,)).unwrap();serde_json::from_str(&text).unwrap()
+}
+fn task_denied(api:&Proxy<'_>,method:&str,arg:&str,code:&str) {
+    let error=api.call::<_,_,String>(method,&(arg,)).unwrap_err();
+    let zbus::Error::MethodError(name,_,_)=error else {panic!("expected explicit task refusal")};
+    assert_eq!(name.as_str(),format!("org.aios.Error.{code}"));
+}
+fn task_submit(api:&Proxy<'_>,handle:&str)->String {
+    api.call("Submit",&(json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),
+        "operation":{"kind":"submit","request":{"mode":"ask","text":"Inspect the explicitly selected process. Report its PID using only fresh process evidence and cite it.",
+        "client_nonce":uuid::Uuid::new_v4().to_string(),"context_handles":[handle]}}}).to_string(),)).unwrap()
+}
+fn task_wait(api:&Proxy<'_>,id:&str,active:bool)->Value {
+    let end=Instant::now()+Duration::from_secs(if active{15}else{95});
+    loop {
+        let value=task_value(api,"GetStatus",id);
+        if active && value["state"]=="generating" {return value;}
+        if matches!(value["state"].as_str(),Some("completed"|"failed"|"cancelled")) {
+            assert!(!active,"task terminated before active inference was observed: {value}");return value;
+        }
+        assert!(Instant::now()<end,"task did not reach required phase: {value}");
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+#[ignore="requires original installed broker and normal CPU model in enrolled guest"]
+fn installed_process_task_persistent_bus_and_active_cancellation() {
+    assert_eq!(fs::read_to_string("/etc/aios/guest-role").unwrap().trim(),"development");
+    assert_eq!(fs::read_to_string("/etc/aios/model-test-profile").unwrap().trim(),"installed-normal-cpu-model-v1");
+    let uid=nix::unistd::geteuid().as_raw();assert_eq!(uid,1000);
+    let native=OwnProcess::open(std::process::id()).unwrap().inspect().unwrap().identity;
+    let connection=connect(uid);let other_connection=connect(uid);
+    let broker=owner(&connection,NAME,uid);let manager=owner(&connection,"org.freedesktop.systemd1",uid);
+    assert_eq!(unit_pid(&connection,&manager.0,"aios-sessiond.service"),broker.1);
+    let api=Proxy::new(&connection,NAME,PATH,INTERFACE).unwrap();
+    let other=Proxy::new(&other_connection,NAME,PATH,INTERFACE).unwrap();
+    assert_ne!(connection.unique_name(),other_connection.unique_name());
+    let select=||{
+        let all=call(&api,"ListProcesses","process.list",json!({"limit":100}));
+        let row=all["data"]["processes"].as_array().unwrap().iter().find(|p|p["pid"]==native.pid).unwrap();
+        let handle=row["process_id"].as_str().unwrap().to_owned();
+        let value=call(&api,"InspectProcess","process.inspect",json!({"process_id":handle}));
+        assert_eq!(value["data"]["pid"],native.pid);assert_eq!(value["data"]["start_time_ticks"],native.start_time_ticks);
+        assert_eq!(value["data"]["executable_identity"],native.executable_identity);(handle,value)
+    };
+    let (handle,selection)=select();
+    // A same-PID, same-UID connection still has a distinct kernel bus sender.
+    let foreign_request=json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),
+        "operation":{"kind":"submit","request":{"mode":"ask","text":"Inspect selected process", "client_nonce":uuid::Uuid::new_v4().to_string(),"context_handles":[handle]}}}).to_string();
+    task_denied(&other,"Submit",&foreign_request,"PERMISSION_DENIED");
+    let id=task_submit(&api,&handle);
+    for method in ["GetStatus","Cancel","Forget"]{task_denied(&other,method,&id,"PERMISSION_DENIED");}
+    let answer=task_wait(&api,&id,false);
+    println!("AIOS_BUS_TASK_PARTIAL={}",json!({"native_identity":native,"selection":selection,"bus_answer":answer}));
+    assert_eq!(answer["state"],"completed");assert!(answer["error"].is_null());assert_eq!(answer["mutation_performed"],false);
+    let output=&answer["output"];assert_eq!(output["local_cpu"],true);assert_eq!(output["mutation_performed"],false);
+    assert_eq!(output["response"]["kind"],"answer");
+    let cited=output["response"]["evidence_ids"].as_array().unwrap();
+    assert!(output["evidence"].as_array().unwrap().iter().any(|e|e["complete"]==true && e["error"].is_null()
+        && e["source"]["provider"]=="linux-own-user-processes" && e["data"]["process_id"]==handle
+        && e["data"]["pid"]==native.pid && e["data"]["start_time_ticks"]==native.start_time_ticks
+        && e["data"]["executable_identity"]==native.executable_identity
+        && e["evidence_ids"].as_array().unwrap().iter().any(|id|cited.contains(id))));
+    assert!(output["response"]["text"].as_str().unwrap().split(|c:char|!c.is_ascii_digit()).any(|p|p==native.pid.to_string()));
+    assert_eq!(task_value(&api,"Forget",&id)["deleted"],true);task_denied(&api,"GetStatus",&id,"TARGET_NOT_FOUND");
+    let (cancel_handle,_)=select();let cancel_id=task_submit(&api,&cancel_handle);
+    let active=task_wait(&api,&cancel_id,true);let started=Instant::now();
+    let cancellation=task_value(&api,"Cancel",&cancel_id);assert_eq!(cancellation["cancelled"],true);
+    let cancelled=task_wait(&api,&cancel_id,false);assert_eq!(cancelled["state"],"cancelled");
+    assert_eq!(cancelled["error"],"CANCELLED");assert!(cancelled["output"].is_null());assert_eq!(cancelled["mutation_performed"],false);
+    let elapsed=started.elapsed().as_millis();assert!(elapsed<2000,"cancellation exceeded bound");
+    assert_eq!(task_value(&api,"Forget",&cancel_id)["deleted"],true);
+    let (forget_handle,_)=select();let forget_id=task_submit(&api,&forget_handle);
+    let forgetting=task_wait(&api,&forget_id,true);assert_eq!(task_value(&api,"Forget",&forget_id)["deleted"],true);
+    // Confirm that a late inference completion never resurrects forgotten data.
+    for _ in 0..40 {task_denied(&api,"GetStatus",&forget_id,"TARGET_NOT_FOUND");thread::sleep(Duration::from_millis(50));}
+    assert_eq!(owner(&connection,NAME,uid),broker);assert_eq!(unit_pid(&connection,&manager.0,"aios-sessiond.service"),broker.1);
+    assert_eq!(OwnProcess::open(native.pid).unwrap().inspect().unwrap().identity,native);
+    println!("AIOS_BUS_PROCESS_TASK={}",json!({"evidence_kind":"real-installed-bus-process-task","uid":uid,"boot_id":native.boot_id,
+        "broker_pid":broker.1,"broker_uid":uid,"sender":connection.unique_name().unwrap().as_str(),
+        "foreign_sender":other_connection.unique_name().unwrap().as_str(),"native_identity":native,"selection":selection,"bus_answer":answer,
+        "active_before_cancel":active,"cancelled_status":cancelled,"cancellation_ms":elapsed,"active_before_forget":forgetting,
+        "original_bus_task_verified":true,"native_citation_verified":true,"foreign_handle_refused":true,"foreign_task_refused":true,
+        "forgotten_task_refused":true,"active_cancellation_verified":true,"active_forget_verified":true,"termination_performed":false}));
+}
+
 #[test]
 #[ignore="requires the installed process broker in a verified enrolled NixOS guest"]
 fn installed_process_handles_pages_native_identity_and_refusals() {

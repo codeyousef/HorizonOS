@@ -118,3 +118,17 @@ is rechecked before results leave the component. Four active connections and
 the existing global handle/cursor quotas bound resource retention. Idle bridges
 close after 35 seconds; handles still expire at 30 seconds without renewal.
 The user-manager module starts this component without a graphical dependency.
+
+The foreground `process-task-bus` integration provider compiles a native test
+client from frozen source inside the verified guest. It retains one actual
+D-Bus unique sender through process selection, Submit and the CPU answer, and
+compares the cited PID/start/executable locator with independent native identity.
+A second connection from the same process must not reuse the selection or read,
+cancel or forget the original task. The provider also observes active inference
+before cancelling and forgetting separate tasks: cancellation must finish within
+two seconds with no output, and forgotten data must remain inaccessible during
+the subsequent bounded observation. It attests the original installed broker
+before and after, and requires the installed normal model lock to match source.
+This does not establish cross-UID isolation, in-flight handle expiry, disconnect
+cleanup, graceful signal effects or real PID reuse. No replacement broker or
+model is started by this provider.
