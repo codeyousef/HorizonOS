@@ -51,10 +51,9 @@ def recheck(expected):
         raise RuntimeError('graph fixture target changed')
 
 
-def command(expected, argv, subject=None):
+def command(expected, argv):
     recheck(expected)
-    result = subprocess.run(argv, capture_output=True, timeout=15, user=subject, group=pwd.getpwnam(subject).pw_gid if subject else None,
-                            extra_groups=[] if subject else None)
+    result = subprocess.run(argv, capture_output=True, timeout=15)
     recheck(expected)
     if len(result.stdout) + len(result.stderr) > 131072:
         raise RuntimeError('graph fixture output bound exceeded')
@@ -70,12 +69,28 @@ def control(expected, operation):
 
 
 def properties(expected, name, fields):
-    if name not in (UNIT, 'sshd.service', 'aios-reconcile.service', 'aios-reconcile.timer', 'aios-model.service'):
+    if name not in (UNIT, 'sshd.service', 'aios-reconcile.service', 'aios-reconcile.timer', 'aios-model.service', 'aios-graph-denied-probe.service'):
         raise RuntimeError('unregistered graph fixture unit')
     result = command(expected, [SYSTEMCTL, 'show', name, *['--property=' + f for f in fields]])
     if result.returncode:
         raise RuntimeError('native unit inspection failed')
     return dict(line.split('=', 1) for line in result.stdout.decode().splitlines() if '=' in line)
+
+
+def denied_probe_valid(value):
+    # The immutable probe executes this exact package as dev. Require a real
+    # exited process, not a start/namespace/credential failure or signal.
+    return value == {'User': 'dev', 'Result': 'exit-code', 'ExecMainCode': '1',
+                     'ExecMainStatus': '1', 'ActiveState': 'failed', 'SubState': 'failed'}
+
+
+def denied_probe(expected):
+    result = command(expected, [SYSTEMCTL, 'start', 'aios-graph-denied-probe.service'])
+    value = properties(expected, 'aios-graph-denied-probe.service',
+                       ['User', 'Result', 'ExecMainCode', 'ExecMainStatus', 'ActiveState', 'SubState'])
+    if result.returncode == 0 or not denied_probe_valid(value):
+        raise RuntimeError('normal development UID denial was not verified')
+    return {'upstream_exit': 1, 'native_unit': value}
 
 
 def raw_timer_trigger(data):
@@ -231,10 +246,7 @@ def main():
         proof['steps']['service_comparison'] = {'native': native, 'captured': cached['data']['properties']['captured'], 'unknown_properties_preserved': all(cached['data']['properties'][k] is None for k in ('main_pid', 'result', 'ordering_after'))}
         if not proof['steps']['service_comparison']['unknown_properties_preserved']:
             raise RuntimeError('unobserved service properties were invented')
-        denied = command(expected, [executable, '--inspect'], 'dev')
-        if denied.returncode == 0:
-            raise RuntimeError('normal development UID obtained private graph control')
-        proof['steps']['foreign_uid_denied'] = {'upstream_exit': denied.returncode}
+        proof['steps']['foreign_uid_denied'] = denied_probe(expected)
         before = proof['steps']['startup']['process']
         control(expected, 'restart'); ready(expected, executable)
         after = installed_process(expected, executable)

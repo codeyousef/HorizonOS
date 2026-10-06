@@ -2,9 +2,21 @@
 import copy
 import unittest
 import installed_graph_owner_smoke as gate
-from graph_owner_preflight import raw_timer_trigger
+from graph_owner_preflight import raw_timer_trigger, denied_probe_valid
 
 class GraphEvidenceTests(unittest.TestCase):
+    def test_denial_requires_original_dev_process_exit(self):
+        value = self.denial_unit()
+        self.assertTrue(denied_probe_valid(value))
+        for key, other in (('User', 'root'), ('Result', 'resources'), ('ExecMainCode', '2'),
+                           ('ExecMainStatus', '203'), ('ExecMainStatus', '0'), ('ActiveState', 'active')):
+            altered = dict(value); altered[key] = other
+            with self.subTest(key=key, other=other): self.assertFalse(denied_probe_valid(altered))
+
+    def denial_unit(self):
+        return {'User': 'dev', 'Result': 'exit-code', 'ExecMainCode': '1', 'ExecMainStatus': '1',
+                'ActiveState': 'failed', 'SubState': 'failed'}
+
     def test_native_timer_timestamp_refuses_display_text_or_wrong_wire_type(self):
         self.assertEqual(raw_timer_trigger(b't 909503463'), 909503463)
         for text in (b'15min 9.503463s', b's 909503463', b't -1', b't 0x1', b't 1 2', b't 18446744073709551616'):
@@ -15,7 +27,7 @@ class GraphEvidenceTests(unittest.TestCase):
         identity = {"boot_id": "fixture-boot"}
         steps = {k: {} for k in gate.REQUIRED}
         steps.update({"service_comparison": {"unknown_properties_preserved": True},
-            "foreign_uid_denied": {"upstream_exit": 1},
+            "foreign_uid_denied": {"upstream_exit": 1, "native_unit": self.denial_unit()},
             "corruption_recovery": {"ledger_unchanged": True},
             "real_timer": {"elapsed_ns": 900_000_000_000, "status": {"model_invoked": False, "execution_authority": False}},
             "final_process": {"zero_capabilities": True, "private_modes_verified": True}})

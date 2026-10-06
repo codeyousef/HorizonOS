@@ -7,6 +7,7 @@ import stat
 import subprocess
 
 import snapshot
+from graph_owner_preflight import denied_probe_valid
 
 REPORT = Path('/run/aios-graph-acceptance/result.json')
 PHASE = REPORT.with_name('phase.json')
@@ -38,6 +39,7 @@ def qualified(value, identity):
                 and value['evidence_kind'] == 'actual-installed-graph-owner' and set(steps) == REQUIRED
                 and steps['service_comparison']['unknown_properties_preserved'] is True
                 and type(steps['foreign_uid_denied']['upstream_exit']) is int and steps['foreign_uid_denied']['upstream_exit'] != 0
+                and denied_probe_valid(steps['foreign_uid_denied']['native_unit'])
                 and steps['corruption_recovery']['ledger_unchanged'] is True
                 and type(steps['real_timer']['elapsed_ns']) is int and steps['real_timer']['elapsed_ns'] >= 900_000_000_000
                 and steps['real_timer']['status']['model_invoked'] is False

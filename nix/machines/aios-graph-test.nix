@@ -21,6 +21,21 @@ in {
   } ];
   environment.etc."aios/graph-test-profile".text = "fixed-installed-graph-owner-v1\n";
   environment.systemPackages = [ (runner "installed_graph_owner_smoke") ];
+  # No boot link or RPC. Only the fixed coordinator starts this exact command;
+  # systemd supplies native dev credentials before executing the store binary.
+  systemd.services.aios-graph-denied-probe = {
+    description = "Horizon OS fixed normal UID graph denial probe";
+    serviceConfig = {
+      Type = "oneshot"; User = "dev"; Group = config.users.users.dev.group;
+      ExecStart = "${aiosState}/bin/aios-stated --inspect";
+      Restart = "no"; TimeoutStartSec = 15;
+      NoNewPrivileges = true; CapabilityBoundingSet = [];
+      ProtectSystem = "strict"; ProtectHome = "tmpfs";
+      PrivateTmp = true; PrivateNetwork = true;
+      RestrictAddressFamilies = [ "AF_UNIX" ];
+      MemoryMax = "32M"; TasksMax = 8; UMask = "0077";
+    };
+  };
   systemd.services.aios-graph-acceptance = {
     description = "Horizon OS fixed initial installed graph qualification";
     wantedBy = [ "multi-user.target" ];
@@ -34,7 +49,7 @@ in {
       RuntimeDirectory = "aios-graph-acceptance"; RuntimeDirectoryMode = "0755";
       RuntimeDirectoryPreserve = "yes";
       NoNewPrivileges = true;
-      CapabilityBoundingSet = [ "CAP_DAC_OVERRIDE" "CAP_SYS_PTRACE" "CAP_SETUID" "CAP_SETGID" ];
+      CapabilityBoundingSet = [ "CAP_DAC_OVERRIDE" "CAP_SYS_PTRACE" ];
       ProtectSystem = "strict"; ProtectHome = "tmpfs";
       ReadWritePaths = [ "/var/lib/aios/state" ];
       ReadOnlyPaths = [ "-/var/lib/aios/transactions" ];
