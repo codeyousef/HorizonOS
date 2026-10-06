@@ -17,7 +17,10 @@ FULL-synchronous WAL. Incompatible stores are refused and preserved.
 
 A complete native snapshot atomically replaces only its provider, scope and
 source-of-truth class. Absence from a complete enumeration tombstones a node.
-An incomplete enumeration preserves the previous nodes and records Partial.
+An incomplete enumeration merges actually observed nodes, preserves unobserved
+nodes and records Partial. Only explicit verified native absences tombstone
+individual nodes; omission from a partial enumeration never implies absence.
+Partial updates do not advance the last complete checkpoint/hash/success.
 Stable identities cannot be rebound through ID reuse. Intended, built, running,
 boot-selected, user/application and unmanaged nodes remain distinct.
 
@@ -87,3 +90,26 @@ than claiming a successful rebuild. A damaged ownership marker also blocks.
 These library contracts require native adapter, scheduler, scoped viewer and
 installed recovery notification integration. Transaction ledgers use separate paths and recovery
 rules; graph storage never opens or resets them.
+
+## Native own-user process adapter
+
+Native clocks read the fixed kernel boot identifier from verified procfs and
+sample kernel real/monotonic clocks, checking the boot before and after. The
+process adapter uses the existing own-UID inventory with retained pidfds and
+proc descriptors. Graph identities bind the actual UID, boot, PID and start
+ticks. Its checkpoint is captured before enumeration; notifications racing a
+collection cannot be acknowledged by moving the checkpoint after collection.
+
+A complete native census replaces this provider's running nodes. Access denial,
+exit or executable-identity change during collection/recheck makes the snapshot
+partial and preserves unobserved diagnostic nodes. Live observations update
+their nodes; only retained-identity TargetNotFound results remove exact nodes. Collection and apply must fit
+within the two-second process freshness window. Errors signal reconciliation
+loss; older snapshots cannot extend their lifetime by resampling only the clock.
+
+Live reads re-inspect the retained native object and never reopen a PID stored
+in graph properties. A retained object may be read after a cache snapshot
+expires because the result is a new native observation, with its own timestamp.
+The enclosing authenticated broker still owns read scopes, grants, revocation
+and disconnect lifetimes. This adapter is not a root/other-UID process census,
+an execution permission or an installed graph daemon.

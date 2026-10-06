@@ -99,7 +99,7 @@ fn resolve(store:&GraphStore,now:crate::graph::ObservationTime,purpose:ReadPurpo
 fn provider_snapshot(token:Option<String>,mono:u64,ids:&[&str])->ProviderSnapshot {
     let time=observation_time(mono);let mut nodes=Vec::new();for id in ids{let mut n=node(id);n.realtime_ns=time.realtime_ns;nodes.push(n);}
     ProviderSnapshot{provider:"native-systemd".into(),expected_token:token,source_truth:SourceTruth::Running,time,
-        source_revision:crate::graph::SourceRevision::default(),complete:true,nodes}
+        source_revision:crate::graph::SourceRevision::default(),complete:true,verified_absent_ids:vec![],nodes}
 }
 #[test] fn complete_provider_replacement_is_atomic_and_partial_keeps_prior_nodes(){
     let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();
@@ -292,4 +292,25 @@ fn corrupt_owned_graph(temp:&Temporary)->Vec<(String,Vec<u8>)>{
         if empty {OpenOptions::new().write(true).create_new(true).mode(0o600).open(temp.0.join("graph.sqlite3")).unwrap();}
         assert!(matches!(GraphStore::open(&temp.0,Scope::System),Err(Error::IdentityChanged)));assert_eq!(fs::read(wal).unwrap(),b"orphan native WAL");assert_eq!(temp.0.join("graph.sqlite3").exists(),empty);assert!(!temp.0.join("graph.identity").exists());
     }
+}
+
+#[test] fn partial_observations_merge_without_inferring_absence_or_advancing_complete_checkpoint(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();let first=store.apply_provider_snapshot(provider_snapshot(None,1,&["a","b"])).unwrap();
+    let mut part=provider_snapshot(Some(first.token),2,&["a","c"]);part.complete=false;part.nodes[0].properties=serde_json::json!({"active":true});
+    let partial=store.apply_provider_snapshot(part).unwrap();assert_eq!(partial.status,ProviderStatus::Partial);assert_eq!(partial.last_success,Some(100));
+    let rows=store.nodes(vec!["a".into(),"b".into(),"c".into()]).unwrap();assert_eq!(rows.len(),3);assert_eq!(rows[0].properties["active"],true);assert_eq!(rows[0].revision,2);assert_eq!(rows[1].revision,1);
+    let mut wrong=provider_snapshot(Some(partial.token.clone()),3,&["d"]);wrong.complete=false;wrong.verified_absent_ids=vec!["a".into()];wrong.nodes[0].id="c".into();wrong.nodes[0].stable_key="changed".into();
+    assert_eq!(store.apply_provider_snapshot(wrong),Err(Error::IdentityChanged));assert_eq!(store.nodes(vec!["a".into(),"d".into()]).unwrap().len(),1);
+    let mut removal=provider_snapshot(Some(partial.token),3,&[]);removal.complete=false;removal.verified_absent_ids=vec!["a".into()];let removed=store.apply_provider_snapshot(removal).unwrap();
+    assert_eq!(removed.status,ProviderStatus::Partial);assert!(store.nodes(vec!["a".into()]).unwrap().is_empty());assert_eq!(store.nodes(vec!["b".into(),"c".into()]).unwrap().len(),2);
+    let mut old=provider_snapshot(Some(removed.token),2,&[]);old.complete=false;assert_eq!(store.apply_provider_snapshot(old),Err(Error::IdentityChanged));
+}
+#[test] fn native_absence_bounds_foreign_bindings_and_partial_conflicts_roll_back(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();store.upsert_nodes(vec![node("foreign")]).unwrap();
+    let mut foreign=node("foreign");foreign.provider="other-native-provider".into();foreign.id="other-node".into();store.upsert_nodes(vec![foreign]).unwrap();
+    let first=store.apply_provider_snapshot(provider_snapshot(None,1,&["a","b"])).unwrap();
+    let mut invalid=provider_snapshot(Some(first.token.clone()),2,&["a"]);invalid.complete=false;invalid.verified_absent_ids=vec!["a".into()];assert_eq!(store.apply_provider_snapshot(invalid),Err(Error::Invalid));
+    let mut invalid=provider_snapshot(Some(first.token.clone()),2,&[]);invalid.complete=false;invalid.verified_absent_ids=vec!["other-node".into()];assert_eq!(store.apply_provider_snapshot(invalid),Err(Error::WrongScope));
+    let mut conflict=provider_snapshot(Some(first.token.clone()),2,&["b"]);conflict.complete=false;conflict.nodes[0].stable_key="changed".into();conflict.verified_absent_ids=vec!["a".into()];assert_eq!(store.apply_provider_snapshot(conflict),Err(Error::IdentityChanged));assert_eq!(store.nodes(vec!["a".into(),"b".into()]).unwrap().len(),2);
+    let mut big=provider_snapshot(Some(first.token),2,&[]);big.complete=false;big.verified_absent_ids=(0..8193).map(|n|format!("native:{n}")).collect();assert_eq!(store.apply_provider_snapshot(big),Err(Error::ResourceExhausted));
 }

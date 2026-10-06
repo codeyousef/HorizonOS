@@ -18,14 +18,17 @@ impl ProviderStatus {
 }
 #[derive(Clone,Debug,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Checkpoint { invalidations:u64, last_snapshot:Option<ObservationTime>, source_revision:SourceRevision,
+struct Checkpoint { invalidations:u64, last_snapshot:Option<ObservationTime>, #[serde(default)] last_observation:Option<ObservationTime>, source_revision:SourceRevision,
     source_truth:Option<SourceTruth>, snapshot_hash:Option<String> }
-impl Default for Checkpoint {fn default()->Self{Self{invalidations:0,last_snapshot:None,source_revision:SourceRevision::default(),source_truth:None,snapshot_hash:None}}}
+impl Default for Checkpoint {fn default()->Self{Self{invalidations:0,last_snapshot:None,last_observation:None,source_revision:SourceRevision::default(),source_truth:None,snapshot_hash:None}}}
 #[derive(Clone,Debug,PartialEq,Eq)]
 pub struct ProviderState {pub provider:String,pub token:String,pub status:ProviderStatus,pub last_success:Option<u64>,pub error:Option<Value>}
 #[derive(Clone,Debug)]
 pub struct ProviderSnapshot {pub provider:String,pub expected_token:Option<String>,pub source_truth:SourceTruth,
-    pub time:ObservationTime,pub source_revision:SourceRevision,pub complete:bool,pub nodes:Vec<Node>}
+    pub time:ObservationTime,pub source_revision:SourceRevision,pub complete:bool,pub nodes:Vec<Node>,
+    /// Exact absence verified by a native retained identity, never inferred from
+    /// exclusion in an incomplete enumeration. No execution authority.
+    pub verified_absent_ids:Vec<String>}
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize)]
 #[serde(rename_all="snake_case")]
 pub enum EventKind { Changed, Removed, Lost, GenerationChanged, Boot }
@@ -51,7 +54,7 @@ pub(super) fn validate_context(time:&ObservationTime,revision:&SourceRevision)->
 }
 pub(super) fn validate_snapshot(s:&ProviderSnapshot)->Result<()> {
     if !key(&s.provider,64) || !valid_time(&s.time) || s.expected_token.as_ref().is_some_and(|t|!valid_token(t)){return Err(Error::Invalid);}
-    if s.nodes.len()>SNAPSHOT_NODES {return Err(Error::ResourceExhausted);}
+    if s.nodes.len().saturating_add(s.verified_absent_ids.len())>SNAPSHOT_NODES {return Err(Error::ResourceExhausted);}
     validate_context(&s.time,&s.source_revision)?;
     let mut total=0usize;let mut ids=BTreeSet::new();let mut identities=BTreeSet::new();
     for n in &s.nodes {
@@ -59,6 +62,11 @@ pub(super) fn validate_snapshot(s:&ProviderSnapshot)->Result<()> {
             || n.realtime_ns!=s.time.realtime_ns || !ids.insert(&n.id) || !identities.insert((&n.kind,&n.stable_key)){return Err(Error::Invalid);}
         if !bounded_properties(&n.properties){return Err(Error::ResourceExhausted);}
         total=total.checked_add(canonical(&n.properties)?.len()+n.id.len()+n.kind.len()+n.stable_key.len()+256).ok_or(Error::ResourceExhausted)?;
+        if total>SNAPSHOT_BYTES{return Err(Error::ResourceExhausted);}
+    }
+    for id in &s.verified_absent_ids {
+        if !key(id,128) || !ids.insert(id){return Err(Error::Invalid);}
+        total=total.checked_add(id.len()+64).ok_or(Error::ResourceExhausted)?;
         if total>SNAPSHOT_BYTES{return Err(Error::ResourceExhausted);}
     }
     Ok(())
@@ -112,21 +120,23 @@ impl Database {
         if actual!=snapshot.expected_token{return Err(Error::IdentityChanged);}
         let mut checkpoint=previous.as_ref().map(Row::checkpoint).transpose()?.unwrap_or_default();
         if checkpoint.source_truth.is_some_and(|truth|truth!=snapshot.source_truth){return Err(Error::IdentityChanged);}
-        if let Some(old)=&checkpoint.last_snapshot {
+        if let Some(old)=checkpoint.last_observation.as_ref().or(checkpoint.last_snapshot.as_ref()) {
             if !valid_time(old){return Err(Error::Corrupt);}
             if old.boot==snapshot.time.boot && snapshot.time.monotonic_ns<old.monotonic_ns{return Err(Error::IdentityChanged);}
         }
-        // Incomplete enumeration never removes nodes or calls their state ready.
-        // Its payload is discarded, leaving the prior atomic snapshot intact.
-        if !snapshot.complete {
-            persist(&tx,&snapshot.provider,&checkpoint,ProviderStatus::Partial,previous.as_ref().and_then(|r|r.last_success),Some("{\"code\":\"incomplete_snapshot\"}"))?;
-            tx.commit().map_err(sql)?;return row(&self.connection,&snapshot.provider)?.ok_or(Error::Corrupt)?.state(&snapshot.provider);
+        // An incomplete enumeration updates only facts actually observed. It
+        // cannot infer absence. An explicit native retained-identity exit can
+        // remove exactly that node, after validating scope/provider/truth.
+        for id in &snapshot.verified_absent_ids {
+            let binding:Option<(i64,String,String)>=tx.query_row("SELECT scope_uid,provider,source_truth FROM nodes WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(sql)?;
+            if binding.is_some_and(|(uid,provider,truth)|uid!=scope.uid() || provider!=snapshot.provider || truth!=snapshot.source_truth.text()){return Err(Error::WrongScope);}
+            tx.execute("UPDATE nodes SET deleted_at=?2,revision=revision+1 WHERE id=?1 AND deleted_at IS NULL",params![id,snapshot.time.realtime_ns as i64]).map_err(sql)?;
         }
         let mut hashes=Vec::with_capacity(snapshot.nodes.len());
-        // Mark absent nodes only inside the same transaction as every observed
-        // node and provider checkpoint. Readers cannot see a partial replacement.
-        tx.execute("UPDATE nodes SET deleted_at=?1 WHERE provider=?2 AND scope_uid=?3 AND source_truth=?4 AND deleted_at IS NULL",
-            params![snapshot.time.realtime_ns as i64,snapshot.provider,scope.uid(),snapshot.source_truth.text()]).map_err(sql)?;
+        if snapshot.complete {
+            tx.execute("UPDATE nodes SET deleted_at=?1 WHERE provider=?2 AND scope_uid=?3 AND source_truth=?4 AND deleted_at IS NULL",
+                params![snapshot.time.realtime_ns as i64,snapshot.provider,scope.uid(),snapshot.source_truth.text()]).map_err(sql)?;
+        }
         for n in &snapshot.nodes {
             let json=canonical(&n.properties)?;hashes.push(digest(&canonical(&(&n.id,&n.kind,&n.stable_key,&json))?));
             let changed=tx.execute("INSERT INTO nodes(id,kind,scope_uid,provider,stable_key,properties_json,source_truth,first_seen,last_seen,revision) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,1)
@@ -135,11 +145,18 @@ impl Database {
                 params![n.id,n.kind,scope.uid(),snapshot.provider,n.stable_key,json,snapshot.source_truth.text(),snapshot.time.realtime_ns as i64]).map_err(sql)?;
             if changed!=1{return Err(Error::IdentityChanged);}
         }
-        hashes.sort(); // Stable snapshot hash ignores enumeration order.
-        let bytes=serde_json::to_vec(&hashes).map_err(|_|Error::Invalid)?;
-        checkpoint.last_snapshot=Some(snapshot.time.clone());checkpoint.source_revision=snapshot.source_revision;
-        checkpoint.source_truth=Some(snapshot.source_truth);checkpoint.snapshot_hash=Some(format!("{:x}",Sha256::digest(bytes)));
-        persist(&tx,&snapshot.provider,&checkpoint,ProviderStatus::Ready,Some(snapshot.time.realtime_ns as i64),None)?;
+        checkpoint.last_observation=Some(snapshot.time.clone());checkpoint.source_truth=Some(snapshot.source_truth);
+        if snapshot.complete {
+            hashes.sort(); // Stable complete-snapshot hash ignores order.
+            let bytes=serde_json::to_vec(&hashes).map_err(|_|Error::Invalid)?;
+            checkpoint.last_snapshot=Some(snapshot.time.clone());checkpoint.source_revision=snapshot.source_revision;
+            checkpoint.snapshot_hash=Some(format!("{:x}",Sha256::digest(bytes)));
+            persist(&tx,&snapshot.provider,&checkpoint,ProviderStatus::Ready,Some(snapshot.time.realtime_ns as i64),None)?;
+        }else{
+            // Last complete checkpoint/hash/success remain unchanged; Partial
+            // never promotes known subset observations to a complete census.
+            persist(&tx,&snapshot.provider,&checkpoint,ProviderStatus::Partial,previous.as_ref().and_then(|r|r.last_success),Some("{\"code\":\"incomplete_snapshot\"}"))?;
+        }
         tx.commit().map_err(sql)?;row(&self.connection,&snapshot.provider)?.ok_or(Error::Corrupt)?.state(&snapshot.provider)
     }
     pub(super) fn events(&mut self,scope:Scope,provider:&str,events:Vec<ProviderEvent>)->Result<ProviderState>{

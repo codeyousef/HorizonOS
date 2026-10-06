@@ -127,6 +127,7 @@ name = "aios-state"
 version = "0.1.0"
 dependencies = [
  "aios-protocol",
+ "aios-system",
  "libc",
  "rusqlite",
  "serde",

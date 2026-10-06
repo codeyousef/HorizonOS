@@ -238,7 +238,7 @@ impl Request {
         Self::Snapshot(_,reply)|Self::Events(_,_,reply)=>{let _=reply.send(Err(error));},Self::Plan(_,_,_,reply)=>{let _=reply.send(Err(error));},
     }}
 }
-pub struct GraphStore { sender:Option<SyncSender<Request>>,worker:Option<JoinHandle<()>>,overflow:Arc<AtomicBool>,recovery:Option<RecoveryReceipt> }
+pub struct GraphStore { sender:Option<SyncSender<Request>>,worker:Option<JoinHandle<()>>,overflow:Arc<AtomicBool>,recovery:Option<RecoveryReceipt>,scope:Scope }
 impl GraphStore {
     /// The trusted owner selects Scope from authenticated native identity.
     /// Callers must not choose database scope from model request fields.
@@ -270,11 +270,12 @@ impl GraphStore {
                 Request::ResolveEvidence(id,binding,now,revision,purpose,reply)=>{let _=reply.send(db.resolve_evidence(scope,&id,&binding,&now,&revision,purpose));},
             }}
         }).map_err(|_|Error::Storage)?;
-        Ok(Self{sender:Some(sender),worker:Some(worker),overflow,recovery})
+        Ok(Self{sender:Some(sender),worker:Some(worker),overflow,recovery,scope})
     }
     /// Diagnostic receipt of preserved corrupt cache files. This is never a
     /// source locator, execution permission or authority to delete quarantine.
     pub fn recovery_receipt(&self)->Option<&RecoveryReceipt>{self.recovery.as_ref()}
+    pub(crate) fn native_scope(&self)->Scope{self.scope}
     fn send(&self,request:Request)->Result<()> {
         self.sender.as_ref().ok_or(Error::Storage)?.try_send(request).map_err(|error|match error {
             TrySendError::Full(_)=>{self.overflow.store(true,Ordering::Release);Error::ResourceExhausted},TrySendError::Disconnected(_)=>Error::Storage,
@@ -282,7 +283,8 @@ impl GraphStore {
     }
     /// Provider identifiers, clocks and revisions originate in native adapters.
     /// A complete snapshot replaces only this fixed scope/provider/truth. A
-    /// partial one preserves the previous nodes and explicitly reports Partial.
+    /// partial one merges observed nodes, preserves unknown nodes and reports Partial.
+    /// Only explicit verified native absences remove nodes in a partial census.
     pub fn apply_provider_snapshot(&self,snapshot:ProviderSnapshot)->Result<ProviderState>{
         reconcile::validate_snapshot(&snapshot)?;
         let (reply,receiver)=mpsc::sync_channel(1);self.send(Request::Snapshot(snapshot,reply))?;receiver.recv().map_err(|_|Error::Storage)?
