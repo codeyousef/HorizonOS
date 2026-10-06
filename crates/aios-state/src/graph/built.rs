@@ -5,7 +5,7 @@ use super::{generations, native::{Error, NativeTime, Result}, store::{GraphStore
 use crate::{Catalog, CatalogEntry, ManagedState, MAX_CATALOG_BYTES, MAX_MANIFEST_BYTES};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{fs::{self, OpenOptions}, io::Read, os::unix::fs::{MetadataExt, OpenOptionsExt}, path::Path};
+use std::{fs::{self, OpenOptions}, io::Read, os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt}, path::{Path, PathBuf}};
 
 pub const PROVIDER: &str = "native-built-managed-configuration";
 pub const NODE: &str = "configuration:built-managed";
@@ -25,6 +25,27 @@ pub struct BuiltConfiguration {
     pub catalog_packages: Vec<CatalogEntry>,
     pub configuration: ManagedState,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct ArtifactObservation {
+    name: String,
+    path: String,
+    present: bool,
+    canonical_store_path: Option<String>,
+    store_closure: Option<String>,
+    store_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct CatalogRuntimeObservation {
+    binary_paths_verified: bool,
+    desktop_entries_verified: bool,
+    binaries: Vec<ArtifactObservation>,
+    desktop_entries: Vec<ArtifactObservation>,
+    runtime_available: bool,
+    realized_package_closure: Option<String>,
+    realized_store_hash: Option<String>,
+}
 fn changed() -> Error { Error::Native(aios_protocol::contracts::ErrorCode::TargetChanged) }
 fn invalid() -> Error { Error::Native(aios_protocol::contracts::ErrorCode::InvalidArgument) }
 fn hash(bytes: &[u8]) -> String { format!("{:x}", Sha256::digest(bytes)) }
@@ -32,6 +53,50 @@ fn store_file(path: &Path) -> bool {
     let Some(name) = path.strip_prefix("/nix/store").ok().and_then(|p|p.components().next()).and_then(|p|p.as_os_str().to_str()) else { return false; };
     let Some((digest, suffix)) = name.split_once('-') else { return false; };
     digest.len()==32 && digest.bytes().all(|b|b"0123456789abcdfghijklmnpqrsvwxyz".contains(&b)) && !suffix.is_empty()
+}
+fn store_root(path: &Path) -> Option<(PathBuf,String)> {
+    let name=path.strip_prefix("/nix/store").ok()?.components().next()?.as_os_str().to_str()?;
+    let (digest,suffix)=name.split_once('-')?;
+    if digest.len()!=32 || !digest.bytes().all(|b|b"0123456789abcdfghijklmnpqrsvwxyz".contains(&b)) || suffix.is_empty() { return None; }
+    Some((Path::new("/nix/store").join(name),digest.into()))
+}
+fn observe_artifact(base:&Path,name:&str,executable:bool)->Result<ArtifactObservation> {
+    let path=base.join(name);
+    let resolved=match fs::canonicalize(&path) {
+        Ok(value)=>value,
+        Err(error) if error.kind()==std::io::ErrorKind::NotFound => return Ok(ArtifactObservation{name:name.into(),path:path.display().to_string(),
+            present:false,canonical_store_path:None,store_closure:None,store_hash:None}),
+        Err(_)=>return Err(changed()),
+    };
+    let Some((closure,digest))=store_root(&resolved) else { return Err(changed()); };
+    let store=fs::symlink_metadata("/nix/store").map_err(|_|changed())?;
+    if !store.is_dir() || store.uid()!=0 || !store_mode(store.mode()) { return Err(changed()); }
+    let mut parent=resolved.parent().ok_or_else(changed)?;
+    while parent!=Path::new("/nix/store") {
+        let info=fs::symlink_metadata(parent).map_err(|_|changed())?;
+        if !info.is_dir() || info.uid()!=0 || info.mode()&0o022!=0 { return Err(changed()); }
+        parent=parent.parent().ok_or_else(changed)?;
+    }
+    let before=fs::metadata(&resolved).map_err(|_|changed())?;
+    let located=fs::symlink_metadata(&resolved).map_err(|_|changed())?;
+    if !before.is_file() || !located.is_file() || before.uid()!=0 || before.permissions().mode()&0o022!=0
+        || executable && before.permissions().mode()&0o111==0 || fingerprint(&before)!=fingerprint(&located)
+        || fs::canonicalize(&path).ok().as_ref()!=Some(&resolved) { return Err(changed()); }
+    Ok(ArtifactObservation{name:name.into(),path:path.display().to_string(),present:true,
+        canonical_store_path:Some(resolved.display().to_string()),store_closure:Some(closure.display().to_string()),store_hash:Some(digest)})
+}
+fn observe_catalog_runtime(running:&str,entry:&CatalogEntry)->Result<CatalogRuntimeObservation> {
+    let root=Path::new(running);
+    let binaries=entry.binaries.iter().map(|name|observe_artifact(&root.join("sw/bin"),name,true)).collect::<Result<Vec<_>>>()?;
+    let desktop_entries=entry.desktop_ids.iter().map(|name|observe_artifact(&root.join("sw/share/applications"),name,false)).collect::<Result<Vec<_>>>()?;
+    let mut artifacts=binaries.iter().chain(&desktop_entries);
+    let first=artifacts.next().and_then(|item|item.store_closure.as_ref().zip(item.store_hash.as_ref()));
+    let same_closure=first.filter(|(closure,digest)|artifacts.all(|item|item.store_closure.as_ref()==Some(*closure)&&item.store_hash.as_ref()==Some(*digest)));
+    let (realized_package_closure,realized_store_hash)=same_closure
+        .map(|(closure,digest)|(Some(closure.clone()),Some(digest.clone()))).unwrap_or_default();
+    let runtime_available=binaries.iter().chain(&desktop_entries).all(|item|item.present);
+    Ok(CatalogRuntimeObservation{binary_paths_verified:true,desktop_entries_verified:true,binaries,desktop_entries,runtime_available,
+        realized_package_closure,realized_store_hash})
 }
 fn fingerprint(m: &fs::Metadata) -> (u64,u64,u64,i64,i64,i64,i64) {
     (m.dev(),m.ino(),m.len(),m.mtime(),m.mtime_nsec(),m.ctime(),m.ctime_nsec())
@@ -117,30 +182,30 @@ impl NativeBuiltSnapshot {
                 "complete_package_inventory_verified":false,"execution_authority":false});
             let mut nodes=vec![Node{id:NODE.into(),kind:"configuration".into(),scope:Scope::System,provider:PROVIDER.into(),
                 stable_key:NODE.into(),properties,source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns}];
-            for package in &self.data.catalog_packages {
+            let runtime=self.data.catalog_packages.iter().map(|package|observe_catalog_runtime(&self.data.running_closure,package)).collect::<Result<Vec<_>>>()?;
+            for (package,runtime) in self.data.catalog_packages.iter().zip(&runtime) {
                 let id=format!("catalog:package:{}",package.id);
                 let selected=self.data.configuration.system_packages.contains(&package.id);
                 nodes.push(Node{id:id.clone(),kind:"package_catalog_entry".into(),scope:Scope::System,provider:PROVIDER.into(),stable_key:id,
                     properties:serde_json::json!({"metadata":package,"catalog_revision":self.data.catalog_revision,
                         "catalog_sha256":self.data.catalog_sha256,"nixpkgs_revision":self.data.nixpkgs_revision,
                         "lock_sha256":self.data.lock_sha256,"platform":self.data.platform,"declared_selected":selected,
-                        "realized_package_closure":null,"binary_paths_verified":false,"desktop_entries_verified":false,
-                        "runtime_available":null,"source_permissions":"root-owned-immutable-nix-store",
+                        "runtime":runtime,"source_permissions":"root-owned-immutable-nix-store",
                         "catalog_complete":true,"execution_authority":false}),
                     source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns});
-            }
-            for package in &self.data.configuration.system_packages {
-                let id=format!("configuration:built-package:{package}");
-                nodes.push(Node{id:id.clone(),kind:"configuration".into(),scope:Scope::System,provider:PROVIDER.into(),stable_key:id,
-                    properties:serde_json::json!({"catalog_id":package,"catalog_entry_id":format!("catalog:package:{package}"),
-                        "running_closure":self.data.running_closure,"manifest_sha256":self.data.manifest_sha256,
-                        "catalog_revision":self.data.catalog_revision,"captured":self.captured,"runtime_available":null,
-                        "realized_package_closure":null,"binary_paths_verified":false,"desktop_entries_verified":false}),
-                    source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns});
+                if selected {
+                    let configured_id=format!("configuration:built-package:{}",package.id);
+                    nodes.push(Node{id:configured_id.clone(),kind:"configuration".into(),scope:Scope::System,provider:PROVIDER.into(),stable_key:configured_id,
+                        properties:serde_json::json!({"catalog_id":package.id,"catalog_entry_id":format!("catalog:package:{}",package.id),
+                            "running_closure":self.data.running_closure,"manifest_sha256":self.data.manifest_sha256,
+                            "catalog_revision":self.data.catalog_revision,"captured":self.captured,"runtime":runtime}),
+                        source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns});
+                }
             }
             let state=store.apply_provider_snapshot(ProviderSnapshot{provider:PROVIDER.into(),expected_token:self.token.clone(),source_truth:SourceTruth::Built,
                 time:self.captured.clone(),source_revision:self.revision(),complete:true,nodes,verified_absent_ids:vec![]})?;
-            if observe()?.1!=self.data { return Err(changed()); }Ok(state)
+            let after_runtime=current.catalog_packages.iter().map(|package|observe_catalog_runtime(&current.running_closure,package)).collect::<Result<Vec<_>>>()?;
+            if observe()?.1!=self.data || after_runtime!=runtime { return Err(changed()); }Ok(state)
         })();if result.is_err(){store.report_event_loss();}result
     }
 }
@@ -180,6 +245,8 @@ impl NativeBuiltSnapshot {
         for p in ["/tmp/metadata.json","/nix/storeish/object","/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-metadata/x","/nix/store/metadata/x"] {
             assert!(!store_file(Path::new(p)));
         }
+        assert_eq!(store_root(Path::new("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-metadata/bin/tool")),
+            Some((PathBuf::from("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-metadata"),"0123456789abcdfghijklmnpqrsvwxyz".into())));
     }
     #[test] fn writable_store_boundary_requires_nix_sticky_permissions() {
         for mode in [0o555,0o755,0o1775] { assert!(store_mode(mode)); }

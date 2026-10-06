@@ -9,6 +9,6 @@
   failures without logging task or target data.
 - Add opaque R1 task grants bound to authenticated subject, exact scope, policy,
   plan, live resources, broker incarnation, volatile nonce and expiry.
-- Expose immutable reviewed package-catalog metadata as provenance nodes without
-  misrepresenting catalog membership as installed/runtime availability.
+- Expose immutable reviewed package-catalog provenance separately from managed
+  selection, and verify declared runtime artifacts against the running Nix closure.
 - Initial Rust protocol framing and NixOS engineering scaffold.
