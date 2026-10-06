@@ -88,3 +88,19 @@ retention; disconnect cancels work before shared caller cleanup. Its potential c
 ordinary same-UID filesystem access, explicitly within this native component
 boundary. The orchestration broker's full sandbox remains intact. The component
 starts in the user manager independently of a graphical session and inference.
+
+The root journal observer uses empty home-directory views (`ProtectHome=tmpfs`)
+and a read-only binding of the fixed `/run/user` directory. The binding must
+include runtime directories created after observer startup; individually
+binding absent user sockets would not support later logins. This explicitly
+exposes user runtime metadata and Unix sockets to the trusted root component.
+It does not expose home directories or provide a caller-selected file or bus
+endpoint. Only immutable configured normal readers may resolve user units.
+The adapter derives the UID from the native originating system-bus sender,
+checks the root-managed user manager's compiled executable and incarnation,
+then checks the actual kernel socket peer and manager's unique bus owner.
+Its fixed calls read unit identity/properties; no arbitrary method, launch,
+environment, credential or user-runtime file read is exposed. Unit/manager
+restart, endpoint replacement, owner change and caller loss invalidate the
+binding. A five-second caller deadline and four retained worker slots bound
+stalled user buses without changing authorization or escalating permissions.

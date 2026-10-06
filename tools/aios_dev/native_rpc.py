@@ -55,6 +55,7 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False):
     prefix = b"AIOS_INSTALLED_BUS_PROCESS_TASK=" if bus_task else b"AIOS_INSTALLED_PROCESS_TASK=" if process_task else b"AIOS_INSTALLED_PROCESS=" if process else b"AIOS_INSTALLED_JOURNAL=" if journal else b"AIOS_INSTALLED_EXECUTOR "
     records = [line[len(prefix):] for line in output.splitlines() if line.startswith(prefix)]
     observation = None
+    journal_sandbox = None
     try:
         if len(records) == 1:
             observation = sync.contract.decode(records[0])
@@ -131,6 +132,10 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False):
                     "cross_connection_refused","query_drift_refused","claimed_uid_refused","app_filter_refused","expiry_refused","process_component_verified",
                     "unmanaged_native_caller_refused","unix_origin_forwarding_verified")))
         elif journal:
+            capsules = [line[len(b"AIOS_INSTALLED_JOURNAL_SANDBOX="):] for line in output.splitlines()
+                if line.startswith(b"AIOS_INSTALLED_JOURNAL_SANDBOX=")]
+            if len(capsules)==1:
+                journal_sandbox = sync.contract.decode(capsules[0])
             valid = (isinstance(observation,dict) and observation.get("evidence_kind")=="real-installed-native-journal-observer"
                 and type(observation.get("uid")) is int and observation["uid"] >= 1000
                 and type(observation.get("observer_uid")) is int and observation["observer_uid"]==0
@@ -144,7 +149,16 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False):
                     "time_filter","priority_filter","entry_limit","cursor_continuation","cross_connection_refused",
                     "query_drift_refused","missing_boot_refused","claimed_uid_refused","redaction_before_evidence","evidence_hash_verified","expiry_refused",
                     "historical_boot_filter","batch_evidence_boot_verified","user_unit_filter","native_user_manager_bound",
-                    "unit_change_refused","user_unit_expiry_refused")))
+                    "unit_change_refused","user_unit_expiry_refused"))
+                and isinstance(journal_sandbox,dict)
+                and journal_sandbox.get("empty_homes_and_readonly_runtime_binding_verified") is True
+                and journal_sandbox.get("before")==journal_sandbox.get("after")
+                and isinstance(journal_sandbox.get("before"),dict)
+                and journal_sandbox["before"].get("MainPID")==str(observation["observer_pid"])
+                and all(journal_sandbox["before"].get(key)==value for key,value in
+                    {"ProtectHome":"tmpfs","ProtectSystem":"strict","NoNewPrivileges":"yes","PrivateNetwork":"yes"}.items())
+                and journal_sandbox["before"].get("BindReadOnlyPaths") in
+                    ("/run/user","/run/user:/run/user","/run/user:/run/user:rbind"))
         else:
             valid = (isinstance(observation,dict) and type(observation.get("uid")) is int and observation["uid"] >= 1000
             and type(observation.get("root_bus_owner_uid")) is int and observation["root_bus_owner_uid"] == 0 and type(observation.get("root_bus_owner_pid")) is int
@@ -160,6 +174,7 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False):
         "subject":config.values["ssh_user"],"argv":["/run/current-system/sw/bin/python3",str(script)],
         "started_at":started,"finished_at":datetime.now(timezone.utc).isoformat(),"upstream_exit":status,
         "exit_status":int(code),"caller_session_held_open":True,"probe_observation_valid":valid,"probe":observation,
+        "journal_sandbox":journal_sandbox,
         "limitations":(["Actual installed original persistent bus task and CPU model; native identity/citation and active cancellation/forget.",
             "Does not qualify in-flight expiry/disconnection, cross-UID callers, signals or PID reuse."] if bus_task else ["Actual installed original Unix task, local CPU model, independent native process identity and cited observation.",
             "Does not qualify persistent bus tasks, in-flight expiry/revocation/disconnection, cross-UID callers, signals or PID reuse."] if process_task else ["Actual installed user broker, controlled naturally exiting child, independent native proc/pidfd identity.",

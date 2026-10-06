@@ -74,6 +74,12 @@ a fresh handle. User handles infer the user source and reject a system or
 kernel source. No request selects a UID, bus endpoint or arbitrary method.
 Each resolution/recheck has a five-second caller deadline and a maximum of
 four native workers. Timed-out workers retain their slot until they finish.
+The installed observer keeps empty home-directory views and a read-only
+binding of `/run/user`. Binding the fixed parent permits user managers to start
+after the observer. Runtime paths are derived only from the authenticated UID;
+the bus connection permits fixed unit-property observations, with no arbitrary
+path or D-Bus method in the request. This sandbox exception is documented in
+[the threat model](threat-model.md).
 
 `GetJournalEvidence` accepts an observer-issued evidence ID. It returns only
 sanitized payloads, their content hash and native boot/cursor locators to the

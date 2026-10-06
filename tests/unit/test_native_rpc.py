@@ -62,7 +62,11 @@ class NativeRpcTests(unittest.TestCase):
         history_malformed={**proof,"historical_boot_id":"not-a-boot"}
         batch_unchecked={**proof,"batch_evidence_boot_verified":False}
         drifted={**proof,"boot_id":"another-boot"}
-        for output,expected in ((b"",ExitCode.VERIFICATION_FAILURE),
+        properties={"MainPID":"50","ProtectHome":"tmpfs","ProtectSystem":"strict","NoNewPrivileges":"yes",
+            "PrivateNetwork":"yes","BindReadOnlyPaths":"/run/user:/run/user:rbind"}
+        capsule={"before":properties,"after":properties,"empty_homes_and_readonly_runtime_binding_verified":True}
+        capsule_line=b"AIOS_INSTALLED_JOURNAL_SANDBOX="+json.dumps(capsule).encode()+b"\n"
+        cases=((b"",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(user_unit_missing).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(unit_change_unchecked).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(incomplete).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
@@ -73,7 +77,15 @@ class NativeRpcTests(unittest.TestCase):
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(history_malformed).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(batch_unchecked).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(drifted).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
-            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(proof).encode()+b"\n",ExitCode.SUCCESS)):
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(proof).encode()+b"\n",ExitCode.SUCCESS))
+        cases=[(output+capsule_line,expected) for output,expected in cases]
+        proof_line=b"AIOS_INSTALLED_JOURNAL="+json.dumps(proof).encode()+b"\n"
+        cases.append((proof_line,ExitCode.VERIFICATION_FAILURE))
+        for bad in ({**capsule,"after":{**properties,"MainPID":"51"}},
+                    {**capsule,"before":{**properties,"ProtectHome":"no"},"after":{**properties,"ProtectHome":"no"}},
+                    {**capsule,"before":{**properties,"BindReadOnlyPaths":"/home"},"after":{**properties,"BindReadOnlyPaths":"/home"}}):
+            cases.append((proof_line+b"AIOS_INSTALLED_JOURNAL_SANDBOX="+json.dumps(bad).encode()+b"\n",ExitCode.VERIFICATION_FAILURE))
+        for output,expected in cases:
             with patch.object(native_rpc.acceptance,"STORAGE_ROOT",self.root), \
                  patch.object(native_rpc.guest,"enrolled_identity",return_value=({"host_key_fingerprint":"fixture-pin"},IDENTITY)), \
                  patch.object(native_rpc.sync,"synchronize",return_value=(0,self.publication)), \

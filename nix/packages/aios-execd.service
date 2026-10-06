@@ -27,7 +27,10 @@ PrivateUsers=false
 PrivateTmp=true
 PrivateNetwork=true
 ProtectSystem=strict
-ProtectHome=true
+# Homes remain empty. Native own-user unit observation requires the fixed
+# runtime bus directories, including users whose manager starts after this unit.
+ProtectHome=tmpfs
+BindReadOnlyPaths=/run/user
 ReadWritePaths=/var/lib/aios/candidates /var/lib/aios/transactions
 ProtectKernelTunables=true
 ProtectKernelModules=true
