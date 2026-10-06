@@ -186,3 +186,20 @@ do not prove runtime postconditions. Approval receipts, a current approved
 intended manifest and managed-transaction provenance remain separate authority.
 The root-private `--metadata` diagnostic compares the cache with fresh native
 metadata and returns capture time and freshness without execution authority.
+
+The root-private `--service-evidence UNIT.service` captures fixed native systemd
+properties for one loaded unit and records a sealed observation and service
+locator. It does not load or start the unit. The provider scope is that selected
+unit; a complete selected read does not establish a complete service census.
+The pre-read provider checkpoint, boot, five-second deadline, native property
+comparison and entity revision bind the descriptor. A subsequent selected read
+invalidates older revisions.
+
+`--evidence ID` resolves only a current, sealed service descriptor through the
+compiled native systemd property viewer. Scope, locator kind and lifetime are
+checked before the native query, then exact properties and the original seal
+are checked again. Changed properties refuse the citation rather than relabel
+it as current. These controls use the existing root/graph kernel peer checks;
+they are not a model tool, user task grant, executable URI opener or effect.
+File, journal, option, application and UI viewers require their own scoped
+native access adapters; this service route cannot substitute for them.

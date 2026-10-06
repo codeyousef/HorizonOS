@@ -12,7 +12,7 @@ impl From<super::native::Error> for Error{fn from(e:super::native::Error)->Self{
 type Result<T>=std::result::Result<T,Error>;
 #[derive(Debug,Deserialize,Serialize)]
 #[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
-enum Request{Status{},Reconcile{},Generations{},Devices{},Metadata{},Service{unit_name:String}}
+enum Request{Status{},Reconcile{},Generations{},Devices{},Metadata{},ServiceEvidence{unit_name:String},Evidence{id:String},Service{unit_name:String}}
 fn identity()->Result<u32>{
     // Fixed account lookup at startup, before spawning any worker threads.
     let account=unsafe{libc::getpwnam(c"aios-state".as_ptr())};
@@ -173,6 +173,11 @@ impl Owner{
             Request::Generations{}=>self.generation_view(),
             Request::Devices{}=>self.device_view(),
             Request::Metadata{}=>self.metadata_view(),
+            Request::ServiceEvidence{unit_name}=>{
+                let id=super::service_evidence::NativeServiceEvidence::collect(&self.graph,&unit_name)?.record(&self.graph)?;
+                Ok(json!({"schema_version":1,"evidence_id":id,"execution_authority":false}))
+            },
+            Request::Evidence{id}=>Ok(super::service_evidence::view(&self.graph,&id)?),
             Request::Reconcile{}=>{
                 let now=NativeTime::observe()?;
                 if now.observation().boot!=self.last_attempt.boot || now.observation().monotonic_ns.checked_sub(self.last_attempt.monotonic_ns).is_none_or(|age|age>=1_000_000_000){self.reconcile()?;}
@@ -261,7 +266,9 @@ pub fn entry()->Result<()>{
     let uid=identity()?;let args=std::env::args().skip(1).collect::<Vec<_>>();
     match args.as_slice(){[]=>run(uid),[arg] if arg=="--inspect"=>client(uid,Request::Status{}),[arg] if arg=="--reconcile"=>client(uid,Request::Reconcile{}),
         [arg] if arg=="--generations"=>client(uid,Request::Generations{}),[arg] if arg=="--devices"=>client(uid,Request::Devices{}),[arg] if arg=="--metadata"=>client(uid,Request::Metadata{}),
-        [arg,name] if arg=="--service"=>client(uid,Request::Service{unit_name:name.clone()}),_=>Err(Error::Protocol)}
+        [arg,name] if arg=="--service"=>client(uid,Request::Service{unit_name:name.clone()}),
+        [arg,name] if arg=="--service-evidence"=>client(uid,Request::ServiceEvidence{unit_name:name.clone()}),
+        [arg,id] if arg=="--evidence"=>client(uid,Request::Evidence{id:id.clone()}),_=>Err(Error::Protocol)}
 }
 #[cfg(test)]mod tests{
     use super::*;
@@ -269,6 +276,9 @@ pub fn entry()->Result<()>{
         for text in [r#"{"kind":"status","uid":0}"#,r#"{"kind":"reconcile","uid":0}"#,r#"{"kind":"status","kind":"reconcile"}"#,r#"{"kind":"service","unit_name":"sshd.service","unit_name":"other.service"}"#,r#"{"kind":"sql","sql":"DROP TABLE nodes"}"#,r#"{"kind":"service","unit_name":"sshd.service","path":"/etc/shadow"}"#]{assert!(serde_json::from_str::<Request>(text).is_err());}
         assert!(matches!(serde_json::from_str::<Request>(r#"{"kind":"status"}"#).unwrap(),Request::Status{}));
         assert!(matches!(serde_json::from_str::<Request>(r#"{"kind":"generations"}"#).unwrap(),Request::Generations{}));
+        assert!(matches!(serde_json::from_str::<Request>(r#"{"kind":"service_evidence","unit_name":"sshd.service"}"#).unwrap(),Request::ServiceEvidence{..}));
+        assert!(matches!(serde_json::from_str::<Request>(r#"{"kind":"evidence","id":"service-evidence:fixture"}"#).unwrap(),Request::Evidence{..}));
+        for text in [r#"{"kind":"service_evidence","unit_name":"sshd.service","method":"StartUnit"}"#,r#"{"kind":"evidence","id":"x","uri":"file:///etc/shadow"}"#,r#"{"kind":"evidence","id":"x","uid":0}"#] {assert!(serde_json::from_str::<Request>(text).is_err());}
         for text in [r#"{"kind":"devices","path":"/dev/vda"}"#,r#"{"kind":"devices","kind":"status"}"#,r#"{"kind":"generations","path":"/tmp/profile"}"#,r#"{"kind":"generations","kind":"status"}"#]{assert!(serde_json::from_str::<Request>(text).is_err());}
     }
     #[test]fn unchanged_generation_samples_coalesce_but_divergence_or_failure_refreshes(){
@@ -294,6 +304,12 @@ pub fn entry()->Result<()>{
         let built=owner.request(Request::Metadata{}).unwrap();
         assert_eq!(built["data"]["freshness"],"Current");assert_eq!(built["data"]["source_truth"],"built");
         assert_eq!(built["data"]["approved_manifest_verified"],false);assert_eq!(built["execution_authority"],false);
+        let descriptor=owner.request(Request::ServiceEvidence{unit_name:"sshd.service".into()}).unwrap();
+        assert_eq!(descriptor["execution_authority"],false);
+        let citation=owner.request(Request::Evidence{id:descriptor["evidence_id"].as_str().unwrap().into()}).unwrap();
+        assert_eq!(citation["viewer"],"native-systemd-service-properties");assert_eq!(citation["freshness"],"Current");
+        assert_eq!(citation["data"]["unit_name"],"sshd.service");assert_eq!(citation["execution_authority"],false);
+        assert!(owner.request(Request::ServiceEvidence{unit_name:"file:///etc/shadow".into()}).is_err());
         let device_view=owner.device_view().unwrap();assert_eq!(device_view["execution_authority"],false);
         assert_eq!(device_view["live_identity_retained"],false);
         let observed=generations::observe().unwrap().1;

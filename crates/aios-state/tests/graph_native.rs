@@ -9,6 +9,50 @@ struct Fixture(PathBuf);
 impl Drop for Fixture{fn drop(&mut self){fs::remove_dir_all(&self.0).unwrap();}}
 
 #[test]
+#[ignore="requires enrolled NixOS guest and pinned native systemd; no installed viewer claim"]
+fn native_service_evidence_viewer_rechecks_properties_scope_seal_and_deadline() {
+    use aios_state::graph::{service_evidence::{NativeServiceEvidence,view},native::{NativeTime,Error as NativeError}};
+    let (fixture,uid)=process_fixture();let store=GraphStore::open(&fixture.0,Scope::System).unwrap();
+    let id=NativeServiceEvidence::collect(&store,"sshd.service").unwrap().record(&store).unwrap();
+    let value=view(&store,&id).unwrap();
+    assert_eq!(value["viewer"],"native-systemd-service-properties");assert_eq!(value["freshness"],"Current");
+    assert_eq!(value["executable_uri"],false);assert_eq!(value["execution_authority"],false);
+    assert_eq!(value["complete_service_inventory_verified"],false);assert_eq!(value["data"]["ordering_is_not_causation"],true);
+    let output=Command::new("/run/current-system/sw/bin/systemctl").args(["show","sshd.service","--property=LoadState","--property=ActiveState","--property=SubState","--property=MainPID","--property=Result"]).output().unwrap();assert!(output.status.success());
+    let text=String::from_utf8(output.stdout).unwrap();let native=text.lines().map(|s|s.split_once('=').unwrap()).collect::<std::collections::BTreeMap<_,_>>();
+    for (field,property) in [("load_state","LoadState"),("active_state","ActiveState"),("sub_state","SubState"),("result","Result")] {assert_eq!(value["data"][field],native[property]);}
+    assert_eq!(value["data"]["main_pid"].as_u64().unwrap(),native["MainPID"].parse::<u64>().unwrap());
+    let user_path=fixture.0.join("user");fs::create_dir(&user_path).unwrap();fs::set_permissions(&user_path,fs::Permissions::from_mode(0o700)).unwrap();
+    let user=GraphStore::open(&user_path,Scope::User(uid)).unwrap();
+    assert!(matches!(NativeServiceEvidence::collect(&user,"sshd.service"),Err(NativeError::WrongScope)));
+    assert!(matches!(view(&user,&id),Err(NativeError::WrongScope)));
+    for invalid in ["../sshd.service","file:///etc/shadow","sshd.service;reboot"] {assert!(NativeServiceEvidence::collect(&store,invalid).is_err());}
+    let before=NativeServiceEvidence::collect(&store,"sshd.service").unwrap();
+    let competing=NativeServiceEvidence::collect(&store,"sshd.service").unwrap();let current=before.record(&store).unwrap();
+    assert!(competing.record(&store).is_err());assert!(view(&store,&id).is_err());
+    let current_view=view(&store,&current).unwrap();let node_id=current_view["data"]["service_id"].as_str().unwrap();
+    let row=store.nodes(vec![node_id.into()]).unwrap().remove(0);let captured=NativeTime::observe().unwrap().observation().clone();
+    store.append_evidence(ObservationInput{id:"fixture-foreign-locator-observation".into(),provider:row.provider.clone(),entity_id:row.id,
+        entity_revision:row.revision,time:captured.clone(),payload:current_view["data"].clone(),sensitivity:Sensitivity::Public},
+        EvidenceInput{id:"fixture-foreign-locator".into(),scope:Scope::System,locator:SourceLocator::File{scope_handle:"fixture-file-scope".into(),
+            display_uri:"file:///etc/shadow".into(),content_hash:"a".repeat(64),range:DocumentRange::Lines{first:1,last:1}},excerpt:"fixture".into(),
+            authenticated_binding:"native-system-service-read".into(),access_lifetime_ns:5_000_000_000,freshness_class:aios_state::graph::FreshnessClass::Service,source_revision:SourceRevision::default()}).unwrap();
+    assert!(matches!(view(&store,"fixture-foreign-locator"),Err(NativeError::Native(aios_protocol::contracts::ErrorCode::InvalidArgument))));
+    let db=rusqlite::Connection::open(fixture.0.join("graph.sqlite3")).unwrap();
+    db.execute("UPDATE observations SET payload_json='{}' WHERE id=(SELECT observation_id FROM evidence WHERE id=?1)",rusqlite::params![current]).unwrap();drop(db);
+    assert!(matches!(view(&store,&current),Err(NativeError::Graph(Error::Corrupt))));
+    let expiry=NativeServiceEvidence::collect(&store,"sshd.service").unwrap().record(&store).unwrap();
+    let expired_capture=NativeServiceEvidence::collect(&store,"sshd.service").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5100));
+    assert!(matches!(view(&store,&expiry),Err(NativeError::Graph(Error::StaleEvidence))));
+    assert!(matches!(expired_capture.record(&store),Err(NativeError::Native(aios_protocol::contracts::ErrorCode::TargetChanged))));
+    println!("AIOS_NATIVE_SERVICE_EVIDENCE={}",json!({"evidence_kind":"native-service-evidence-library-and-trusted-viewer","native_view":value,
+        "independent_systemctl":text,"uid":uid,"foreign_scope_refused":true,"foreign_locator_is_fixture":true,"foreign_locator_refused":true,
+        "tampered_payload_fixture_refused":true,"actual_expiry_wait_ms":5100,"expired_citation_refused":true,"competing_checkpoint_refused":true,
+        "old_revision_refused":true,"expired_capture_not_published":true,"installed_runtime_wiring":false,"all_viewer_kinds_implemented":false}));drop(user);drop(store);
+}
+
+#[test]
 #[ignore="requires an enrolled NixOS guest; reads original immutable built configuration"]
 fn real_built_configuration_is_hash_bound_and_does_not_claim_approval_or_runtime() {
     use aios_state::graph::built::{self,NativeBuiltSnapshot,PROVIDER,NODE};
