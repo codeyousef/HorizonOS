@@ -109,14 +109,15 @@ fixed headless same-UID component in the original user namespace. The broker's
 private user namespace prevents kernel executable checks against normal user
 processes. The process component has an explicit namespace/filesystem exception
 documented in the threat model; it drops usable capabilities at startup and
-provides no signal, shell or arbitrary-file API. Its mode-0600 fixed socket is
+provides no shell or arbitrary-file API. Its fixed native-confirmed termination
+lifecycle is separate from public process tool calls. Its mode-0600 socket is
 accessible only to the exact managed broker. Native bus references or the actual
 originating Unix descriptor bind each retained connection and its process
 handles. Shared owner-aware state retains cross-connection permission denials;
 the same embedded policy checks bracket native work and original caller proof
 is rechecked before results leave the component. Four active connections and
 the existing global handle/cursor quotas bound resource retention. Idle bridges
-close after 35 seconds; handles still expire at 30 seconds without renewal.
+close after 95 seconds; handles still expire at 30 seconds without renewal.
 The user-manager module starts this component without a graphical dependency.
 
 The foreground `process-task-bus` integration provider compiles a native test
@@ -170,6 +171,36 @@ independently of native queries. After signal delivery, receipts preserve the
 sent signal and report independently observed exit or partial effects;
 Stop or original-client disconnect cannot falsely report no mutation.
 The worker never retries an effect and returns stable terminal receipts. It runs
-outside global task state. Trusted orchestration must enforce task admission and
-connect public lifecycle controls; this worker is not yet wired into public
-broker/helper IPC or qualified as an installed termination provider.
+outside global task state. Its retained managed-broker proof also binds the
+exact provider connection and original service invocation, including both final
+delivery checks. A disconnected or replaced broker cannot leave a pending
+effect authorized through a still-live originating client.
+
+The private managed bridge accepts closed `start_process_termination`,
+`get_process_termination`, `cancel_process_termination` and
+`forget_process_termination` operations. Start requires an original Act request,
+UUID task/process handles, bounded goal and an explicitly selected native
+session. Credentials, signal choices, approval tokens and caller-supplied
+closure/timeout fields are rejected. The native display is resolved inside the
+worker; no inherited display or cross-user fallback is used. Start queues work
+and returns promptly. Only native confirmation can authorize its one effect.
+
+At most four termination workers run across provider connections. Each
+connection retains at most eight task records and 4096 used task IDs; forgetting
+does not permit replay. Admission is released on worker completion or failed
+thread creation. Tasks have a fixed 90-second suspend-inclusive budget; process
+handles keep their original 30-second lifetime. Idle transport expires after
+95 seconds. Status and Stop exchange only small owned task records, while
+native consent/observations run outside those locks. Disconnect latches Stop
+before shared inventory cleanup, even if another native read holds process
+state. Forget cancels work and removes its owner-visible status; worker-owned
+transient state is released when that bounded worker exits.
+
+Cancel acknowledges the request separately from the final outcome. A signal
+already sent remains in the final partial receipt, with verified exit and
+completion reported independently. Terminal facts are not erased by Stop.
+Records are accessible only through their original managed bridge connection;
+reconnection cannot recover or control another connection's task. The public
+broker/model action route still refuses termination. Installed production
+consent, broker/client lifecycle and end-to-end effect qualification remain
+required before advertising this capability in the registry.

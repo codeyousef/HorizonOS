@@ -1,6 +1,7 @@
 //! Fixed native process component. Only the managed broker may transfer an
-//! originating kernel socket or native bus reference. No PID/UID claims, signal,
-//! shell, arbitrary file or graphical operation is accepted by this bridge.
+//! originating kernel socket or native bus reference. Observations and a fixed
+//! native-confirmed termination lifecycle accept no PID/UID claims, approval,
+//! signal overrides, shell or arbitrary file operations.
 use crate::{identity::Peer,managed_service::{ManagedService,Role},Operation,Request,SharedState};
 use aios_protocol::{read_frame_with_limit,write_frame,MAX_TASK_BYTES,MAX_FRAME_BYTES,contracts::{Action,ErrorCode,parse_tool_call}};
 use serde_json::{json,Value};
@@ -26,14 +27,18 @@ pub fn serve(mut stream:UnixStream,state:SharedState)->Result<()>{
     let broker=ManagedService::authenticate(&stream,Role::Broker)?;
     let origin=crate::ui_bridge::receive_origin(&mut stream)?;
     let peer=origin.peer()?;broker.verify(&stream)?;
-    struct Owner{state:SharedState,peer:Peer}
-    impl Drop for Owner{fn drop(&mut self){if let Ok(mut state)=self.state.lock(){state.disconnect(&self.peer);}}}
-    let _owner=Owner{state:state.clone(),peer:peer.clone()};
+    struct Owner{state:SharedState,peer:Peer,tasks:crate::process_tasks::Context}
+    impl Drop for Owner{fn drop(&mut self){
+        // Latch cancellation before waiting for shared inventory cleanup.
+        self.tasks.cancel_all();
+        if let Ok(mut state)=self.state.lock(){state.disconnect(&self.peer);}
+    }}
+    let mut owner=Owner{state:state.clone(),peer:peer.clone(),tasks:Default::default()};
     write_frame(&mut stream,&json!({"schema_version":2,"request_id":uuid::Uuid::new_v4().to_string(),
         "operation":"process_bound","origin_sha256":origin.identity_sha256()?}).to_string()).map_err(|_|ErrorCode::TargetChanged)?;
-    // Handles expire at 30s. Idle transport remains alive long enough to return
-    // the required expired-handle error; it does not refresh handle lifetimes.
-    stream.set_read_timeout(Some(Duration::from_secs(35))).map_err(|_|ErrorCode::TargetChanged)?;
+    // Native handles still expire at 30s without renewal. A retained task has
+    // its own finite 90s bound; transport idleness must not silently shorten it.
+    stream.set_read_timeout(Some(Duration::from_secs(95))).map_err(|_|ErrorCode::TargetChanged)?;
     for _ in 0..4096{
         let Some(raw)=read_frame_with_limit(&mut stream,MAX_TASK_BYTES).map_err(|_|ErrorCode::InvalidArgument)? else{return Ok(());};
         broker.verify(&stream)?;origin.verify()?;
@@ -42,7 +47,10 @@ pub fn serve(mut stream:UnixStream,state:SharedState)->Result<()>{
         #[derive(serde::Deserialize)] #[serde(deny_unknown_fields)]
         struct SelectedRead{kind:String,task_id:String,process_id:String}
         let selected=serde_json::from_str::<SelectedRead>(request.operation.get()).ok();
-        let result=if request.schema_version!=1{Err(ErrorCode::UnsupportedSchema)}else if let Some(selected)=selected{
+        let managed=crate::process_tasks::parse(request.operation.get());
+        let result=if request.schema_version!=1{Err(ErrorCode::UnsupportedSchema)}else if let Err(code)=managed{Err(code)}else if let Some(operation)=managed?{
+            owner.tasks.execute(operation,&request.request_id,&origin,&broker,&stream,&state)
+        }else if let Some(selected)=selected{
             if selected.kind!="task_process_inspect" || !crate::uuid(&selected.task_id) || !crate::uuid(&selected.process_id){Err(ErrorCode::InvalidArgument)}else{
                 // Only the fixed managed broker can enter this branch. It owns
                 // the opaque original task grant and checks it on both sides

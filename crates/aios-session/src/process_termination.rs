@@ -35,6 +35,7 @@ impl CurrentResources for Resources<'_>{
     fn dynamic_arguments(&self,_:&str,_:&Value,_:&policy::Scope)->Result<()>{Err(ErrorCode::UnsupportedCapability)}
 }
 pub(crate) struct NativeTerminationTask {
+    broker:Option<(crate::managed_service::ManagedService,std::os::unix::net::UnixStream)>,
     origin:OriginatingClient,selection:SelectedProcess,display:DisplayBinding,closure:String,
     policy:policy::Policy,request_id:String,control:Arc<AtomicU8>,
     pending:Option<TerminationConfirmation>,delivery:Option<TerminationDelivery>,prepared:Option<Prepared>,
@@ -42,7 +43,7 @@ pub(crate) struct NativeTerminationTask {
 }
 pub(crate) struct NativeTerminationStop {control:Arc<AtomicU8>,prompt:ReadCancellation,signal:Cancellation}
 impl NativeTerminationStop {
-    pub(crate) fn stop(&self){self.control.store(1,Ordering::Release);self.prompt.cancel();self.signal.cancel();}
+    pub(crate) fn stop(&self){self.signal.cancel();self.control.store(1,Ordering::Release);self.prompt.cancel();}
 }
 impl NativeTerminationTask {
     /// Only a trusted authenticated human task route may call this after
@@ -67,14 +68,21 @@ impl NativeTerminationTask {
                 boot_id:native.boot_id,executable_identity:native.executable_identity},current_closure.clone(),30_000,90_000)?;
         if proposal.native_preview_digest()?!=policy::digest(prepared.preview())?{return Err(ErrorCode::PlanChanged);}
         let pending=proposal.launch(&policy,&subject,&Resources{selection:&selection,origin:&origin,display:&display,closure:&current_closure})?;
-        let mut task=Self{origin,selection,display,closure:current_closure,policy,request_id,control,
+        let mut task=Self{broker:None,origin,selection,display,closure:current_closure,policy,request_id,control,
             pending:Some(pending),delivery:None,prepared:Some(prepared),attempt:None,signal_cancel,terminal:None,failure:None};
         task.check()?;Ok(task)
+    }
+    /// The managed transport is retained only as native lifetime evidence.
+    /// It cannot be reconstructed from a serialized PID or service name.
+    pub(crate) fn bind_broker(&mut self,broker:crate::managed_service::ManagedService,stream:std::os::unix::net::UnixStream)->Result<()>{
+        if self.broker.is_some(){return Err(ErrorCode::Conflict);}
+        broker.verify(&stream)?;self.broker=Some((broker,stream));self.check()
     }
     fn resources(&self)->Resources<'_>{Resources{selection:&self.selection,origin:&self.origin,display:&self.display,closure:&self.closure}}
     fn check(&mut self)->Result<()>{
         let result=(||{
             if self.control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
+            if let Some((broker,stream))=&self.broker{broker.verify(stream)?;}
             self.origin.verify()?;self.selection.verify(&self.origin.peer()?)?;self.display.verify()?;
             if closure()?!=self.closure{return Err(ErrorCode::TargetChanged);}Ok(())
         })();
@@ -90,13 +98,15 @@ impl NativeTerminationTask {
         if let Some(value)=&self.terminal{return Ok(Some(value.clone()));}
         if let Some(code)=self.failure{return Err(code);}
         if let Some(attempt)=&mut self.attempt{
-            if self.control.load(Ordering::Acquire)!=0 || self.origin.verify().is_err(){self.signal_cancel.cancel();}
+            if self.control.load(Ordering::Acquire)!=0 || self.origin.verify().is_err()
+                || self.broker.as_ref().map_or(true,|(broker,stream)|broker.verify(stream).is_err()){self.signal_cancel.cancel();}
             let receipt=attempt.poll();if let Some(value)=&receipt{self.terminal=Some(value.clone());}return Ok(receipt);
         }
         let result=self.poll_before_effect();
         if let Err(code)=result{self.fail(code);}result
     }
     fn poll_before_effect(&mut self)->Result<Option<Receipt>>{
+        if self.broker.is_none(){return Err(ErrorCode::PermissionDenied);}
         self.check()?;
         let subject=self.origin.peer()?.policy_subject()?;
         let resources=Resources{selection:&self.selection,origin:&self.origin,display:&self.display,closure:&self.closure};
@@ -112,6 +122,9 @@ impl NativeTerminationTask {
             delivery.revalidate(&self.policy,&subject,&self.request_id,&policy::digest(preview)?,&self.resources())?;
             if self.control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
             self.origin.verify()?;self.selection.verify_lifetime(&self.origin.peer()?)?;
+            let (broker,stream)=self.broker.as_ref().ok_or(ErrorCode::PermissionDenied)?;broker.verify(stream)?;
+            if self.control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
+            self.selection.verify_lifetime(&self.origin.peer()?)?;
             delivery.check_deadline()
         })?;
         self.attempt=Some(attempt);self.poll()
