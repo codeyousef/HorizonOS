@@ -2,7 +2,7 @@
 import copy
 import unittest
 import installed_graph_owner_smoke as gate
-from graph_owner_preflight import raw_timer_trigger, denied_probe_valid, event_proof_valid, event_status_ready, device_proof_valid
+from graph_owner_preflight import raw_timer_trigger, denied_probe_valid, event_proof_valid, event_status_ready, device_proof_valid, metadata_proof_valid
 
 class GraphEvidenceTests(unittest.TestCase):
     def test_denial_requires_original_dev_process_exit(self):
@@ -78,6 +78,34 @@ class GraphEvidenceTests(unittest.TestCase):
                 'device': {'syspath': '/sys/devices/fixture', 'major': 252, 'minor': 0,
                     'serial': 'fixture-native-serial', 'serial_short': None, 'wwn': None, 'bus': None, 'model': None, 'vendor': None}}}}
 
+    def metadata_fixture(self):
+        manifest = {'fixture': 'typed built data'}
+        return {'execution_authority': False, 'native': {'manifest': manifest, 'manifest_sha256': 'a'*64, 'catalog_sha256': 'b'*64},
+            'metadata': {'source_truth': 'built', 'freshness': 'Current', 'captured': {'boot': 'fixture-boot'},
+                'approved_manifest_verified': False, 'managed_transaction': None, 'runtime_postconditions_verified': False,
+                'complete_package_inventory_verified': False, 'configuration': {'running_closure': 'fixture-system',
+                    'manifest_sha256': 'a'*64, 'catalog_sha256': 'b'*64, 'configuration': manifest}}}
+
+    def test_built_metadata_gate_refuses_wrong_hash_scope_or_invented_approval(self):
+        identity = {'boot_id': 'fixture-boot', 'current_system': 'fixture-system'}
+        value = self.metadata_fixture(); self.assertTrue(metadata_proof_valid(value, identity))
+        for field, other in [('source_truth', 'intended'), ('freshness', 'Stale'), ('freshness', 'Unknown'),
+                             ('approved_manifest_verified', True), ('managed_transaction', 'guessed'),
+                             ('runtime_postconditions_verified', True), ('complete_package_inventory_verified', True)]:
+            altered = copy.deepcopy(value); altered['metadata'][field] = other
+            self.assertFalse(metadata_proof_valid(altered, identity))
+        for field in ('manifest_sha256', 'catalog_sha256', 'running_closure', 'configuration'):
+            altered = copy.deepcopy(value); altered['metadata']['configuration'][field] = 'foreign'
+            self.assertFalse(metadata_proof_valid(altered, identity))
+        altered = copy.deepcopy(value); altered['metadata']['captured']['boot'] = 'foreign'
+        self.assertFalse(metadata_proof_valid(altered, identity))
+        altered = copy.deepcopy(value); altered['execution_authority'] = True
+        self.assertFalse(metadata_proof_valid(altered, identity))
+        for other in (True, 'short', 'A'*64):
+            altered = copy.deepcopy(value); altered['native']['manifest_sha256'] = other
+            altered['metadata']['configuration']['manifest_sha256'] = other
+            self.assertFalse(metadata_proof_valid(altered, identity))
+
     def test_device_gate_refuses_foreign_kernel_identity_or_invented_missing_serial(self):
         identity = {'boot_id': 'fixture-boot', 'disk_serial': 'fixture-native-serial'}
         value = self.device_fixture(); self.assertTrue(device_proof_valid(value, identity))
@@ -97,6 +125,7 @@ class GraphEvidenceTests(unittest.TestCase):
         steps.update({"service_comparison": {"unknown_properties_preserved": True},
             "systemd_events": self.event_fixture(),
             "startup_devices": self.device_fixture(),
+            "startup_metadata": self.metadata_fixture(),
             "startup_generations": {"execution_authority": False, "data": {"freshness": "Current", "pointers": {"running_closure": "fixture-system", "bootloader_entry": None, "managed_transaction": None}}},
             "foreign_uid_denied": {"upstream_exit": 1, "native_unit": self.denial_unit()},
             "corruption_recovery": {"ledger_unchanged": True},

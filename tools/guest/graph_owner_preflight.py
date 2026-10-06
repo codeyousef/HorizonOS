@@ -46,6 +46,24 @@ def device_proof_valid(value, identity):
         return False
 
 
+def metadata_proof_valid(value, identity):
+    try:
+        view, native = value['metadata'], value['native']
+        data = view['configuration']
+        return (value['execution_authority'] is False and view['source_truth'] == 'built'
+                and view['freshness'] == 'Current' and view['captured']['boot'] == identity['boot_id']
+                and view['approved_manifest_verified'] is False and view['managed_transaction'] is None
+                and view['runtime_postconditions_verified'] is False and view['complete_package_inventory_verified'] is False
+                and data['running_closure'] == identity['current_system']
+                and all(type(native[key]) is str and re.fullmatch('[0-9a-f]{64}', native[key])
+                        for key in ('manifest_sha256', 'catalog_sha256'))
+                and data['manifest_sha256'] == native['manifest_sha256']
+                and data['catalog_sha256'] == native['catalog_sha256']
+                and data['configuration'] == native['manifest'])
+    except (KeyError, TypeError):
+        return False
+
+
 def event_status_ready(observed, boot):
     try:
         return (observed['boot'] == boot and observed['event_watcher_installed'] is True
@@ -298,6 +316,29 @@ def main():
                 or pointers['bootloader_entry'] is not None or pointers['managed_transaction'] is not None):
             raise RuntimeError('native graph generation observations differ or infer unobserved provenance')
         proof['steps']['startup_generations'] = generations
+        metadata = graph(expected, executable, '--metadata')
+        native_metadata = {}
+        for name, bound in [('managed.json', 65536), ('catalog.json', 262144)]:
+            # Fixed files inside the independently verified running closure.
+            # No model locator or cached path selects a privileged read.
+            path = Path(expected['current_system']) / 'etc/aios' / name
+            fd = os.open(path.resolve(strict=True), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, 'rb') as file:
+                before = os.fstat(file.fileno())
+                if not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or before.st_mode & 0o222 or not 0 < before.st_size <= bound:
+                    raise RuntimeError('unsafe fixed original built metadata')
+                raw = file.read(bound + 1)
+                after = os.fstat(file.fileno())
+                if len(raw) != before.st_size or (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                    raise RuntimeError('fixed original built metadata changed')
+            native_metadata['manifest_sha256' if name == 'managed.json' else 'catalog_sha256'] = hashlib.sha256(raw).hexdigest()
+            if name == 'managed.json':
+                native_metadata['manifest'] = snapshot.decode(raw)
+        metadata_proof = {'metadata': metadata['data'], 'native': native_metadata,
+                          'execution_authority': metadata['execution_authority']}
+        if not metadata_proof_valid(metadata_proof, expected):
+            raise RuntimeError('original built configuration differs or invents approval/runtime provenance')
+        proof['steps']['startup_metadata'] = metadata_proof
         devices = graph(expected, executable, '--devices')
         # Independent fixed managed QEMU root-disk locator, never a graph/model
         # path interpreted with root authority or a raw block-device read.

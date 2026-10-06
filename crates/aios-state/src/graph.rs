@@ -8,6 +8,7 @@ pub mod native;
 pub mod runtime;
 pub mod generations;
 pub mod devices;
+pub mod built;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]

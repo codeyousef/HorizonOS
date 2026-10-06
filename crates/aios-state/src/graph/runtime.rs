@@ -12,7 +12,7 @@ impl From<super::native::Error> for Error{fn from(e:super::native::Error)->Self{
 type Result<T>=std::result::Result<T,Error>;
 #[derive(Debug,Deserialize,Serialize)]
 #[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
-enum Request{Status{},Reconcile{},Generations{},Devices{},Service{unit_name:String}}
+enum Request{Status{},Reconcile{},Generations{},Devices{},Metadata{},Service{unit_name:String}}
 fn identity()->Result<u32>{
     // Fixed account lookup at startup, before spawning any worker threads.
     let account=unsafe{libc::getpwnam(c"aios-state".as_ptr())};
@@ -38,8 +38,31 @@ fn frame_write(stream:&mut UnixStream,value:&Value)->Result<()>{
 struct GenerationCache{captured:ObservationTime,pointers:SystemPointers}
 fn generation_refresh_needed(previous:Option<&SystemPointers>,observed:&SystemPointers,failed:bool)->bool{failed || previous!=Some(observed)}
 struct Owner{graph:GraphStore,ids:Vec<String>,attempts:u64,successful:u64,last_attempt:ObservationTime,last_error:Option<String>,
-    generations:Option<GenerationCache>,generation_error:Option<String>,last_generation_probe:ObservationTime,generation_changes:u64,event_watcher:bool,event_error:Option<String>,systemd_notifications:u64,event_refreshes:u64,device_ids:Vec<String>,device_error:Option<String>}
+    generations:Option<GenerationCache>,generation_error:Option<String>,last_generation_probe:ObservationTime,generation_changes:u64,event_watcher:bool,event_error:Option<String>,systemd_notifications:u64,event_refreshes:u64,device_ids:Vec<String>,device_error:Option<String>,metadata:Option<super::built::NativeBuiltSnapshot>,metadata_error:Option<String>}
 impl Owner{
+    fn reconcile_metadata(&mut self)->Result<()>{
+        let result=(||{let snapshot=super::built::NativeBuiltSnapshot::collect(&self.graph)?;
+            snapshot.apply(&self.graph)?;self.metadata=Some(snapshot);Ok(())})();
+        self.metadata_error=result.as_ref().err().map(|e:&Error|format!("{e:?}"));result
+    }
+    fn metadata_view(&self)->Result<Value>{
+        let observed=super::built::observe();
+        let data=if let Some(cached)=&self.metadata{
+            let freshness=match &observed{
+                Ok((now,current)) if now.boot!=cached.captured().boot || current!=cached.data()=>"Stale",
+                Ok((now,_)) if self.metadata_error.is_none()=>{
+                    let ready=self.graph.reconciliation_plan(super::built::PROVIDER.into(),now.clone(),cached.revision())?.state
+                        .is_some_and(|s|s.status==ProviderStatus::Ready && s.error.is_none());
+                    if ready{"Current"}else{"Unknown"}
+                },_=>"Unknown",
+            };
+            json!({"configuration":cached.data(),"captured":cached.captured(),"freshness":freshness,"source_truth":"built",
+                "approved_manifest_verified":false,"managed_transaction":null,"runtime_postconditions_verified":false,
+                "complete_package_inventory_verified":false})
+        }else{Value::Null};
+        Ok(json!({"schema_version":1,"data":data,"error":self.metadata_error,"source":"cached-native-built-managed-configuration",
+            "live_compared_at":observed.as_ref().ok().map(|(t,_)|t),"execution_authority":false}))
+    }
     fn systemd_event(&mut self,notifications:u64,loss:bool)->Result<()>{
         let captured=NativeTime::observe()?.observation().clone();
         self.systemd_notifications=self.systemd_notifications.saturating_add(notifications);
@@ -80,12 +103,12 @@ impl Owner{
         self.last_attempt=NativeTime::observe()?.observation().clone();self.attempts=self.attempts.checked_add(1).ok_or(Error::Protocol)?;
         // Each provider owns its source truth/checkpoint. A failed generation
         // read does not turn service facts into generation or managed facts.
-        let generations=self.reconcile_generations();let devices=self.reconcile_devices();
+        let generations=self.reconcile_generations();let devices=self.reconcile_devices();let metadata=self.reconcile_metadata();
         let result=(||{
             let snapshot=NativeSystemdSnapshot::collect(&self.graph)?;let state=snapshot.apply(&self.graph)?;
             self.ids=snapshot.ids()?;self.last_error=if state.status==ProviderStatus::Ready{None}else{Some("INCOMPLETE_SNAPSHOT".into())};
             if state.status==ProviderStatus::Ready{self.successful=self.successful.checked_add(1).ok_or(Error::Protocol)?;}Ok(())
-        })();if let Err(error)=&result{self.graph.report_event_loss();self.last_error=Some(format!("{error:?}"));}result.and(generations).and(devices)
+        })();if let Err(error)=&result{self.graph.report_event_loss();self.last_error=Some(format!("{error:?}"));}result.and(generations).and(devices).and(metadata)
     }
     fn poll_generations(&mut self)->Result<()>{
         let now=NativeTime::observe()?.observation().clone();
@@ -140,6 +163,7 @@ impl Owner{
             "period_seconds":900,"model_invoked":false,"execution_authority":false,"event_watcher_installed":self.event_watcher,"event_watcher_error":self.event_error,
             "systemd_notifications":self.systemd_notifications,"event_reconciliations":self.event_refreshes,
             "observed_block_disks":self.device_ids.len(),"block_device_error":self.device_error,"udev_event_watcher_installed":false,
+            "built_configuration_observed":self.metadata.is_some(),"built_configuration_error":self.metadata_error,
             "generation_poll_seconds":1,"observed_generation_changes":self.generation_changes,"generation_error":self.generation_error,
             "quarantine":self.graph.recovery_receipt().map(|r|r.quarantine_directory.file_name().unwrap_or_default().to_string_lossy())}))
     }
@@ -148,6 +172,7 @@ impl Owner{
             Request::Status{}=>self.status(),
             Request::Generations{}=>self.generation_view(),
             Request::Devices{}=>self.device_view(),
+            Request::Metadata{}=>self.metadata_view(),
             Request::Reconcile{}=>{
                 let now=NativeTime::observe()?;
                 if now.observation().boot!=self.last_attempt.boot || now.observation().monotonic_ns.checked_sub(self.last_attempt.monotonic_ns).is_none_or(|age|age>=1_000_000_000){self.reconcile()?;}
@@ -184,7 +209,7 @@ fn run(uid:u32)->Result<()>{
     let listener=UnixListener::bind(SOCKET)?;fs::set_permissions(SOCKET,fs::Permissions::from_mode(0o600))?;listener.set_nonblocking(true)?;
     let now=NativeTime::observe()?.observation().clone();
     let mut owner=Owner{graph,ids:Vec::new(),attempts:0,successful:0,last_attempt:now.clone(),last_error:None,
-        generations:None,generation_error:None,last_generation_probe:now,generation_changes:0,event_watcher:false,event_error:None,systemd_notifications:0,event_refreshes:0,device_ids:vec![],device_error:None};
+        generations:None,generation_error:None,last_generation_probe:now,generation_changes:0,event_watcher:false,event_error:None,systemd_notifications:0,event_refreshes:0,device_ids:vec![],device_error:None,metadata:None,metadata_error:None};
     let mut watcher=aios_system::services::events::SystemdEvents::connect().ok();
     owner.event_watcher=watcher.is_some();
     if watcher.is_none(){owner.event_error=Some("SUBSCRIPTION_UNAVAILABLE".into());owner.graph.report_event_loss();}
@@ -235,7 +260,7 @@ fn client(uid:u32,request:Request)->Result<()>{
 pub fn entry()->Result<()>{
     let uid=identity()?;let args=std::env::args().skip(1).collect::<Vec<_>>();
     match args.as_slice(){[]=>run(uid),[arg] if arg=="--inspect"=>client(uid,Request::Status{}),[arg] if arg=="--reconcile"=>client(uid,Request::Reconcile{}),
-        [arg] if arg=="--generations"=>client(uid,Request::Generations{}),[arg] if arg=="--devices"=>client(uid,Request::Devices{}),
+        [arg] if arg=="--generations"=>client(uid,Request::Generations{}),[arg] if arg=="--devices"=>client(uid,Request::Devices{}),[arg] if arg=="--metadata"=>client(uid,Request::Metadata{}),
         [arg,name] if arg=="--service"=>client(uid,Request::Service{unit_name:name.clone()}),_=>Err(Error::Protocol)}
 }
 #[cfg(test)]mod tests{
@@ -262,9 +287,13 @@ pub fn entry()->Result<()>{
         fs::create_dir(&root).unwrap();fs::set_permissions(&root,fs::Permissions::from_mode(0o700)).unwrap();
         let graph=GraphStore::open(&root,Scope::System).unwrap();
         let mut owner=Owner{graph,ids:vec![],attempts:0,successful:0,last_attempt:now.clone(),last_error:None,
-            generations:None,generation_error:None,last_generation_probe:now,generation_changes:0,event_watcher:false,event_error:None,systemd_notifications:0,event_refreshes:0,device_ids:vec![],device_error:None};
+            generations:None,generation_error:None,last_generation_probe:now,generation_changes:0,event_watcher:false,event_error:None,systemd_notifications:0,event_refreshes:0,device_ids:vec![],device_error:None,metadata:None,metadata_error:None};
         owner.reconcile().unwrap();
         assert!(!owner.device_ids.is_empty());assert!(owner.device_error.is_none());
+        assert!(owner.metadata_error.is_none());assert!(owner.metadata.is_some());
+        let built=owner.request(Request::Metadata{}).unwrap();
+        assert_eq!(built["data"]["freshness"],"Current");assert_eq!(built["data"]["source_truth"],"built");
+        assert_eq!(built["data"]["approved_manifest_verified"],false);assert_eq!(built["execution_authority"],false);
         let device_view=owner.device_view().unwrap();assert_eq!(device_view["execution_authority"],false);
         assert_eq!(device_view["live_identity_retained"],false);
         let observed=generations::observe().unwrap().1;

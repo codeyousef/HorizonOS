@@ -9,6 +9,37 @@ struct Fixture(PathBuf);
 impl Drop for Fixture{fn drop(&mut self){fs::remove_dir_all(&self.0).unwrap();}}
 
 #[test]
+#[ignore="requires an enrolled NixOS guest; reads original immutable built configuration"]
+fn real_built_configuration_is_hash_bound_and_does_not_claim_approval_or_runtime() {
+    use aios_state::graph::built::{self,NativeBuiltSnapshot,PROVIDER,NODE};
+    let fixture=Fixture(std::env::temp_dir().join(format!("aios-graph-built-{}-{}",std::process::id(),time().monotonic_ns)));
+    fs::create_dir(&fixture.0).unwrap();fs::set_permissions(&fixture.0,fs::Permissions::from_mode(0o700)).unwrap();
+    let graph=fixture.0.join("graph");fs::create_dir(&graph).unwrap();fs::set_permissions(&graph,fs::Permissions::from_mode(0o700)).unwrap();
+    let store=GraphStore::open(&graph,Scope::System).unwrap();
+    let snapshot=NativeBuiltSnapshot::collect(&store).unwrap();let data=snapshot.data().clone();
+    let running=fs::canonicalize("/run/current-system").unwrap();assert_eq!(data.running_closure,running.to_str().unwrap());
+    let manifest=fs::read(running.join("etc/aios/managed.json")).unwrap();let catalog=fs::read(running.join("etc/aios/catalog.json")).unwrap();
+    assert_eq!(data.manifest_sha256,format!("{:x}",Sha256::digest(&manifest)));
+    assert_eq!(data.catalog_sha256,format!("{:x}",Sha256::digest(&catalog)));
+    assert_eq!(serde_json::to_value(&data.configuration).unwrap(),serde_json::from_slice::<serde_json::Value>(&manifest).unwrap());
+    let state=snapshot.apply(&store).unwrap();assert_eq!(state.status,ProviderStatus::Ready);
+    let row=store.nodes(vec![NODE.into()]).unwrap().remove(0);
+    assert_eq!(row.source_truth,SourceTruth::Built);assert_eq!(row.provider,PROVIDER);
+    assert_eq!(row.properties["approved_manifest_verified"],false);assert_eq!(row.properties["managed_transaction"],serde_json::Value::Null);
+    assert_eq!(row.properties["runtime_postconditions_verified"],false);assert_eq!(row.properties["complete_package_inventory_verified"],false);
+    assert_eq!(row.properties["manifest_sha256"],data.manifest_sha256);
+    assert_eq!(built::observe().unwrap().1,data);
+    let other=fixture.0.join("other");fs::create_dir(&other).unwrap();fs::set_permissions(&other,fs::Permissions::from_mode(0o700)).unwrap();
+    let user=GraphStore::open(&other,Scope::User(unsafe{libc::geteuid()})).unwrap();
+    assert!(matches!(NativeBuiltSnapshot::collect(&user),Err(aios_state::graph::native::Error::WrongScope)));
+    let expired=NativeBuiltSnapshot::collect(&store).unwrap();std::thread::sleep(std::time::Duration::from_millis(2100));
+    assert!(matches!(expired.apply(&store),Err(aios_state::graph::native::Error::Native(aios_protocol::contracts::ErrorCode::TargetChanged))));
+    println!("AIOS_NATIVE_BUILT_CONFIGURATION={}",json!({"evidence_kind":"native-built-configuration-graph-library","data":data,
+        "native_file_hashes_compared":true,"read_only_original_metadata":true,"approved_manifest_verified":false,
+        "runtime_postconditions_verified":false,"expired_snapshot_refused":true,"installed_owner_wiring":false}));
+}
+
+#[test]
 #[ignore="requires an enrolled NixOS guest; reads fixed system pointers only"]
 fn real_system_pointers_are_separate_and_do_not_infer_boot_or_management() {
     use aios_state::graph::generations::{self, NativeGenerationSnapshot, RUNNING_PROVIDER, PROFILE_PROVIDER};

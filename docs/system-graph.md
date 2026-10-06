@@ -125,8 +125,8 @@ descriptions are omitted. Service-specific result/MainPID/ordering fields remain
 unknown unless separately observed; loaded units are not the installed-unit
 catalog, intended state or proof of a dependency.
 
-The private control protocol accepts status, reconciliation, fixed generation
-pointer diagnostics and a single
+The private control protocol accepts status, reconciliation, fixed generation,
+block-disk and built-configuration diagnostics and a single
 validated service-name cache lookup, with peer credentials, fixed frame bounds
 and timeouts. Only root and the graph identity may use it. It is an internal
 component/operator channel; authenticated product graph retrieval is separate.
@@ -169,3 +169,20 @@ The root-private `--devices` diagnostic includes capture time and a conservative
 two-second cache eligibility limit. Partial snapshots cannot claim Current.
 These observations do not grant storage execution authority or expose raw
 block-device access; effect providers must acquire critical identity live.
+
+The built-configuration provider reads only `etc/aios/managed.json` and
+`etc/aios/catalog.json` inside the observed running closure. It requires
+root-owned immutable store objects and ancestors, bounded descriptor reads,
+stable native pointers, exact file hashes and typed catalog/manifest validation.
+The complete canonical managed data must match its template and catalog
+revisions. An opaque snapshot expires after two seconds before application;
+the provider checkpoint is captured before collection and checked on publication.
+
+Configuration and declared package-selection nodes have `built` source truth.
+The catalog is a selectable-package catalog; it is not a complete installed
+package inventory. A declared package does not supply an observed package
+closure or prove runtime availability. Service and power declarations likewise
+do not prove runtime postconditions. Approval receipts, a current approved
+intended manifest and managed-transaction provenance remain separate authority.
+The root-private `--metadata` diagnostic compares the cache with fresh native
+metadata and returns capture time and freshness without execution authority.
