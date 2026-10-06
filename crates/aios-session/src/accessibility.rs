@@ -30,6 +30,9 @@ fn check(deadline:Instant,control:&AtomicU8)->Result<()>{
 fn text(value:String,max:usize)->Result<String>{
     if value.len()>max || value.chars().any(|c|c=='\0' || ('\u{202a}'..='\u{202e}').contains(&c) || ('\u{2066}'..='\u{2069}').contains(&c)){return Err(ErrorCode::PartialResult);}Ok(value)
 }
+fn charge_text(bytes:&mut usize,length:usize)->bool{
+    match bytes.checked_add(length){Some(total) if total<=16384=>{*bytes=total;true},_=>false}
+}
 #[derive(Clone,Debug,PartialEq,Eq,Serialize)]
 struct BusIdentity { address:String,id:String,server_pid:u32,server_start:u64,launcher_owner:String,launcher_pid:u32,launcher_start:u64 }
 struct Bus { connection:Connection,identity:BusIdentity }
@@ -180,11 +183,12 @@ impl WindowBinding {
             let role:u32=p.call("GetRole",&()).map_err(error)?;
             // Do not even query protected names, text, actions or children.
             if matches!(role,16|40|60){
+                if !charge_text(&mut bytes,"[redacted]".len()){truncated=true;break;}
                 nodes.push(Node{node_handle:Uuid::new_v4().to_string(),role:format!("atspi:{role}"),name:"[redacted]".into(),states:vec![],actions:vec![]});continue;
             }
             let mut name=text(p.get_property("Name").map_err(error)?,16384)?;
-            if bytes+name.len()>16384{truncated=true;break;}
-            bytes+=name.len();let native_name=name.clone();name=name.chars().take(256).collect();
+            if !charge_text(&mut bytes,name.len()){truncated=true;break;}
+            let native_name=name.clone();name=name.chars().take(256).collect();
             let native_states:Vec<u32>=p.call("GetState",&()).map_err(error)?;
             if native_states.len()>2{return Err(ErrorCode::PartialResult);}
             let states=(0u32..64).filter(|i|native_states.get((i/32)as usize).is_some_and(|word|word&(1u32<<(i%32))!=0)).take(16).map(|i|format!("atspi:{i}")).collect();
@@ -198,8 +202,8 @@ impl WindowBinding {
                 for i in 0..count {
                     check(deadline,control)?;
                     let name=text(action.call("GetName",&(i,)).map_err(error)?,128)?;
-                    if bytes+name.len()>16384{truncated=true;break;}
-                    bytes+=name.len();actions.push(name);
+                    if !charge_text(&mut bytes,name.len()){truncated=true;break;}
+                    actions.push(name);
                 }
             }
             let node_handle=Uuid::new_v4().to_string();

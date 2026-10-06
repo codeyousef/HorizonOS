@@ -201,7 +201,19 @@ mod tests {
         parse_tool_call(json!({"kind":"tool_call","action_id":id,"arguments":args}).to_string().as_bytes()).unwrap()
     }
     fn retained(state: &mut State, peer: &Peer, pid: u32) -> String {
-        let native = OwnProcess::open(pid).unwrap();
+        // A packaged fixture launcher can exec its native child after spawn
+        // returns. Wait only for this pre-selection identity observation;
+        // never retry authorization or signal a target after it has changed.
+        let deadline=std::time::Instant::now()+std::time::Duration::from_millis(500);
+        let native=loop {
+            match OwnProcess::open(pid) {
+                Ok(native)=>break native,
+                Err(ErrorCode::TargetChanged) if std::time::Instant::now()<deadline=>{
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                },
+                Err(error)=>panic!("owned process fixture identity: {error:?}"),
+            }
+        };
         let digest = aios_policy::digest(&native.inspect().unwrap().identity).unwrap();
         let id = Uuid::new_v4().to_string();
         state.processes.processes.insert(id.clone(), Process { owner:peer.clone(), expires:expiry().unwrap(), native, digest, revoked:Arc::new(AtomicBool::new(false)) });
