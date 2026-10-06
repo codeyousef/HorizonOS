@@ -331,7 +331,9 @@ The provider retains the actual private page; its snapshot scope identity binds
 that page generation, selected window and native ancestry. It re-resolves the
 page under the original caller and delivered native read grant before and after
 matching. This derived check exports no grant and extends no expiry. A stale
-page, scope change, Stop or disconnected caller ends the read without retry.
+page or scope change ends the read without retry while retaining the authenticated
+control channel so the originating client can still issue Stop or Forget.
+Stop or caller disconnect independently revokes the read.
 The provider chooses read purpose from its authenticated route, never from
 presentation text or a model argument. Public inference and direct native reads
 request only `ui.snapshot`; explicit managed window inspection requests

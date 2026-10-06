@@ -641,7 +641,7 @@ fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut O
     identity::verify(stream,peer)?;
     let result=ui.as_ref().ok_or(ErrorCode::AuthRequired)?.client.lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(native);
     identity::verify(stream,peer)?;
-    if matches!(result,Err(ErrorCode::TargetChanged|ErrorCode::PermissionDenied)){ui.take();}
+    if matches!(result,Err(ErrorCode::PermissionDenied)){ui.take();}
     result
 }
 fn selected_ui_session(state:&SharedState,peer:&Peer,handle:&str)->Result<identity::GraphicalSession,ErrorCode>{
