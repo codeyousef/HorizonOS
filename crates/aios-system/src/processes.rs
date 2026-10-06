@@ -1,11 +1,12 @@
 //! Own-user process observations. Handles retain a native pidfd and proc
-//! directory; no command line, environment, process name or signal API.
+//! directory; no command line, environment or process name access.
 use aios_protocol::contracts::ErrorCode;
 use serde::Serialize;
 use std::{fs::{File,OpenOptions},io::Read,os::{fd::{AsRawFd,FromRawFd,OwnedFd},unix::fs::{MetadataExt,OpenOptionsExt}},path::Path};
 type Result<T> = std::result::Result<T,ErrorCode>;
 const MAX_BYTES:u64=65536;
 const MAX_SAFE:u64=9_007_199_254_740_991;
+pub mod termination;
 
 fn error(e:std::io::Error)->ErrorCode {
     match e.raw_os_error() {

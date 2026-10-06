@@ -34,7 +34,7 @@ after native work, and reauthenticate the originating peer at both boundaries.
 requests and fix their action identifiers on the server. They cannot dispatch
 other actions or accept a caller-selected UID, PID or privileged namespace.
 
-There is no signal method in the observation library and no termination route.
+The public observation routes provide no signal or termination method.
 Authenticated `Submit.context_handles` can select existing process handles as
 well as service handles. The broker resolves each selected process through the
 same original client connection before minting the task's opaque read grant.
@@ -132,3 +132,25 @@ before and after, and requires the installed normal model lock to match source.
 This does not establish cross-UID isolation, in-flight handle expiry, disconnect
 cleanup, graceful signal effects or real PID reuse. No replacement broker or
 model is started by this provider.
+
+The native termination adapter freezes a retained own-user proc directory and
+pidfd into an immutable preview with PID, UID, start time, boot and executable
+identity. Preparing a plan sends no signal. The adapter accepts only one SIGTERM
+attempt, refuses self-termination, and provides suspend-inclusive bounded exit
+verification through that same pidfd. It never falls back to a numeric PID,
+process group, shell or SIGKILL. An ignored signal, timeout, post-signal Stop or
+verification error retains a partial-effect receipt; it cannot claim rollback.
+Polling does not sleep or acquire a broker task lock. Dropping the verifier
+does not signal the target.
+
+This adapter does not issue permission. Its trusted broker callback must check
+the original authenticated client/task, exact R2 approval, canonical preview,
+policy/boot/closure, current resource and expiry on both checks before delivery.
+Native child tests use synthetic authority callbacks and independently observe
+SIGTERM acknowledgement, natural exit, refusal and ignored-signal survival.
+Those tests are library evidence, not installed consent or public termination
+qualification. The public process bridge still rejects signal actions and the
+registry remains contract-only until native consent and original task ownership
+are connected and installed verification succeeds. A pidfd prevents PID reuse;
+process executable identity is rechecked before delivery, without promising
+atomic exclusion of an unsandboxed same-UID concurrent exec.

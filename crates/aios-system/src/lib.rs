@@ -1,4 +1,5 @@
-//! Read-only observations of the local OS. No inference or privilege required.
+//! Native OS observations and fixed process effect adapters. Brokers own
+//! authorization; this crate neither issues permission nor invokes inference.
 use aios_protocol::contracts::{ErrorCode, ProviderError, ProviderResult, ResultStatus, Source};
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::Read, path::Path, process::{Command, Stdio}, thread, time::{Duration, Instant}};
