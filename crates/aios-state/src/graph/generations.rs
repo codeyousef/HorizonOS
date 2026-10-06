@@ -97,6 +97,7 @@ impl NativeGenerationSnapshot {
             closure_hash: None, document_hash: None }
     }
     pub fn pointers(&self) -> &SystemPointers { &self.pointers }
+    pub fn captured(&self) -> &ObservationTime { &self.captured }
     pub fn apply(&self, store: &GraphStore) -> Result<(ProviderState, ProviderState)> {
         if store.native_scope() != Scope::System { return Err(Error::WrongScope); }
         let result = (|| {
@@ -107,14 +108,17 @@ impl NativeGenerationSnapshot {
                 return Err(Error::Native(aios_protocol::contracts::ErrorCode::TargetChanged));
             }
             let revision = Self::revision(&self.pointers);
-            let snapshot = |provider: &str, token: Option<String>, truth, id: &str, complete| ProviderSnapshot {
+            let snapshot = |provider: &str, token: Option<String>, truth, id: &str, complete, properties| ProviderSnapshot {
                 provider: provider.into(), expected_token: token, source_truth: truth, time: self.captured.clone(), source_revision: revision.clone(), complete,
                 verified_absent_ids: vec![], nodes: vec![Node { id: id.into(), kind: "generation".into(), scope: Scope::System,
-                    provider: provider.into(), stable_key: id.into(), properties: serde_json::json!({"pointers":self.pointers,"captured":self.captured}),
+                    provider: provider.into(), stable_key: id.into(), properties,
                     source_truth: truth, realtime_ns: self.captured.realtime_ns }] };
-            let running = store.apply_provider_snapshot(snapshot(RUNNING_PROVIDER, self.running_token.clone(), SourceTruth::Running, "generation:running-system", true))?;
+            let running = store.apply_provider_snapshot(snapshot(RUNNING_PROVIDER, self.running_token.clone(), SourceTruth::Running, "generation:running-system", true,
+                serde_json::json!({"running_closure":self.pointers.running_closure,"captured":self.captured})))?;
             let selected = store.apply_provider_snapshot(snapshot(PROFILE_PROVIDER, self.profile_token.clone(), SourceTruth::BootSelected,
-                "generation:selected-system-profile", self.pointers.selected_profile_generation.is_some()))?;
+                "generation:selected-system-profile", self.pointers.selected_profile_generation.is_some(),
+                serde_json::json!({"selected_profile_closure":self.pointers.selected_profile_closure,"selected_profile_generation":self.pointers.selected_profile_generation,
+                    "bootloader_entry":self.pointers.bootloader_entry,"managed_transaction":self.pointers.managed_transaction,"captured":self.captured})))?;
             if observe()?.1 != self.pointers { return Err(Error::Native(aios_protocol::contracts::ErrorCode::TargetChanged)); }
             Ok((running, selected))
         })();

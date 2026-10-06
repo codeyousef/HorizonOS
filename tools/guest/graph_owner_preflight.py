@@ -238,6 +238,16 @@ def main():
         # Boot reconciliation can precede SSH activation; sample natively now
         # before comparing mutable service state with the later live manager.
         graph(expected, executable, '--reconcile')
+        generations = graph(expected, executable, '--generations')
+        pointers = generations['data']['pointers']
+        selected = Path('/nix/var/nix/profiles/system').resolve(strict=True)
+        if (generations['execution_authority'] is not False or generations['data']['freshness'] != 'Current'
+                or pointers['running_closure'] != expected['current_system']
+                or pointers['selected_profile_closure'] != str(selected)
+                or pointers['running_profile_divergence'] != (expected['current_system'] != str(selected))
+                or pointers['bootloader_entry'] is not None or pointers['managed_transaction'] is not None):
+            raise RuntimeError('native graph generation observations differ or infer unobserved provenance')
+        proof['steps']['startup_generations'] = generations
         cached = graph(expected, executable, '--service', 'sshd.service')
         native = properties(expected, 'sshd.service', ['LoadState', 'ActiveState', 'SubState'])
         observed = cached['data']['properties']['observation']

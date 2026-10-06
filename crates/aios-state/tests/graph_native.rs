@@ -25,6 +25,10 @@ fn real_system_pointers_are_separate_and_do_not_infer_boot_or_management() {
     let rows=store.nodes(vec!["generation:running-system".into(),"generation:selected-system-profile".into()]).unwrap();
     assert_eq!(rows.len(),2);assert_eq!(rows[0].provider,RUNNING_PROVIDER);assert_eq!(rows[0].source_truth,SourceTruth::Running);
     assert_eq!(rows[1].provider,PROFILE_PROVIDER);assert_eq!(rows[1].source_truth,SourceTruth::BootSelected);
+    assert_eq!(rows[0].properties["running_closure"],pointers.running_closure);
+    assert!(rows[0].properties.get("selected_profile_closure").is_none());
+    assert_eq!(rows[1].properties["selected_profile_closure"],serde_json::to_value(&pointers.selected_profile_closure).unwrap());
+    assert!(rows[1].properties.get("running_closure").is_none());
     assert_eq!(generations::observe().unwrap().1,pointers);
     let other=fixture.0.join("other");fs::create_dir(&other).unwrap();fs::set_permissions(&other,fs::Permissions::from_mode(0o700)).unwrap();
     let user=GraphStore::open(&other,Scope::User(unsafe{libc::geteuid()})).unwrap();

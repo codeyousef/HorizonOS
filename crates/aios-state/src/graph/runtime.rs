@@ -1,6 +1,6 @@
 //! Private system graph owner. This internal control socket is accessible only
 //! to the graph identity and root; it is not a model/user task RPC surface.
-use super::{native::{NativeTime,NativeSystemdSnapshot,SYSTEMD_PROVIDER,system_service_key},store::{GraphStore,Scope,ProviderStatus},SourceRevision,ObservationTime,FreshnessClass,freshness};
+use super::{native::{NativeTime,NativeSystemdSnapshot,SYSTEMD_PROVIDER,system_service_key},generations::{self,NativeGenerationSnapshot,SystemPointers,RUNNING_PROVIDER,PROFILE_PROVIDER},store::{GraphStore,Scope,ProviderStatus,ProviderEvent,EventKind},SourceRevision,ObservationTime,FreshnessClass,freshness};
 use serde::{Deserialize,Serialize};use serde_json::{Value,json};
 use std::{fs,io::{self,Read,Write},os::{fd::AsRawFd,unix::{net::{UnixListener,UnixStream},fs::{MetadataExt,PermissionsExt,FileTypeExt}}},path::Path,time::Duration};
 const STATE:&str="/var/lib/aios/state";const RUNTIME:&str="/run/aios-state";const SOCKET:&str="/run/aios-state/owner.sock";
@@ -12,7 +12,7 @@ impl From<super::native::Error> for Error{fn from(e:super::native::Error)->Self{
 type Result<T>=std::result::Result<T,Error>;
 #[derive(Debug,Deserialize,Serialize)]
 #[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
-enum Request{Status{},Reconcile{},Service{unit_name:String}}
+enum Request{Status{},Reconcile{},Generations{},Service{unit_name:String}}
 fn identity()->Result<u32>{
     // Fixed account lookup at startup, before spawning any worker threads.
     let account=unsafe{libc::getpwnam(c"aios-state".as_ptr())};
@@ -35,15 +35,73 @@ fn frame_write(stream:&mut UnixStream,value:&Value)->Result<()>{
     let bytes=serde_json::to_vec(value).map_err(|_|Error::Protocol)?;if bytes.len()>MAX_REPLY{return Err(Error::Protocol);}
     stream.write_all(&(bytes.len() as u32).to_be_bytes())?;stream.write_all(&bytes)?;Ok(())
 }
-struct Owner{graph:GraphStore,ids:Vec<String>,attempts:u64,successful:u64,last_attempt:ObservationTime,last_error:Option<String>}
+struct GenerationCache{captured:ObservationTime,pointers:SystemPointers}
+fn generation_refresh_needed(previous:Option<&SystemPointers>,observed:&SystemPointers,failed:bool)->bool{failed || previous!=Some(observed)}
+struct Owner{graph:GraphStore,ids:Vec<String>,attempts:u64,successful:u64,last_attempt:ObservationTime,last_error:Option<String>,
+    generations:Option<GenerationCache>,generation_error:Option<String>,last_generation_probe:ObservationTime,generation_changes:u64}
 impl Owner{
+    fn reconcile_generations(&mut self)->Result<()>{
+        let result=(||{
+            let snapshot=NativeGenerationSnapshot::collect(&self.graph)?;snapshot.apply(&self.graph)?;
+            self.generations=Some(GenerationCache{captured:snapshot.captured().clone(),pointers:snapshot.pointers().clone()});Ok(())
+        })();
+        self.generation_error=result.as_ref().err().map(|e:&Error|format!("{e:?}"));result
+    }
     fn reconcile(&mut self)->Result<()>{
         self.last_attempt=NativeTime::observe()?.observation().clone();self.attempts=self.attempts.checked_add(1).ok_or(Error::Protocol)?;
+        // Each provider owns its source truth/checkpoint. A failed generation
+        // read does not turn service facts into generation or managed facts.
+        let generations=self.reconcile_generations();
         let result=(||{
             let snapshot=NativeSystemdSnapshot::collect(&self.graph)?;let state=snapshot.apply(&self.graph)?;
             self.ids=snapshot.ids()?;self.last_error=if state.status==ProviderStatus::Ready{None}else{Some("INCOMPLETE_SNAPSHOT".into())};
             if state.status==ProviderStatus::Ready{self.successful=self.successful.checked_add(1).ok_or(Error::Protocol)?;}Ok(())
-        })();if let Err(error)=&result{self.graph.report_event_loss();self.last_error=Some(format!("{error:?}"));}result
+        })();if let Err(error)=&result{self.graph.report_event_loss();self.last_error=Some(format!("{error:?}"));}result.and(generations)
+    }
+    fn poll_generations(&mut self)->Result<()>{
+        let now=NativeTime::observe()?.observation().clone();
+        if now.boot==self.last_generation_probe.boot && now.monotonic_ns.checked_sub(self.last_generation_probe.monotonic_ns).is_some_and(|age|age<1_000_000_000){return Ok(());}
+        self.last_generation_probe=now;
+        let (captured,observed)=match generations::observe(){
+            Ok(value)=>value,
+            Err(error)=>{if self.generation_error.is_none(){self.graph.report_event_loss();}self.generation_error=Some(format!("{error:?}"));return Err(error.into());}
+        };
+        let prior=self.generations.as_ref().map(|g|&g.pointers);
+        if generation_refresh_needed(prior,&observed,self.generation_error.is_some()){
+            if let Some(prior)=prior.filter(|p|*p!=&observed){
+                use sha2::{Digest,Sha256};
+                // Native poll observations, not model or command notifications.
+                // Stable unchanged samples produce no event or reconciliation.
+                for provider in [RUNNING_PROVIDER,PROFILE_PROVIDER,SYSTEMD_PROVIDER]{
+                    let payload=json!({"before":prior,"after":observed,"source":"fixed-native-system-pointer-poll"});
+                    let encoded=serde_json::to_vec(&(provider,&captured,&payload)).map_err(|_|Error::Protocol)?;
+                    self.graph.ingest_provider_events(provider.into(),vec![ProviderEvent{id:format!("generation:{:x}",Sha256::digest(encoded)),
+                        entity_id:None,kind:EventKind::GenerationChanged,time:captured.clone(),origin_transaction_id:None,payload}])?;
+                }
+                self.generation_changes=self.generation_changes.checked_add(1).ok_or(Error::Protocol)?;
+            }
+            self.reconcile()?;
+        }
+        Ok(())
+    }
+    fn generation_view(&self)->Result<Value>{
+        let current=generations::observe();
+        let data=if let Some(cached)=&self.generations{
+            let freshness=match &current{
+                Ok((now,pointers)) if now.boot!=cached.captured.boot || pointers!=&cached.pointers=>"Stale",
+                Ok((now,_)) if self.generation_error.is_none()=>{
+                    let revision=SourceRevision{generation:Some(cached.pointers.running_closure.clone()),profile:cached.pointers.selected_profile_closure.clone(),closure_hash:None,document_hash:None};
+                    let mut eligible=true;for provider in [RUNNING_PROVIDER,PROFILE_PROVIDER]{
+                        eligible &= self.graph.reconciliation_plan(provider.into(),now.clone(),revision.clone())?.state.is_some_and(|s|s.status==ProviderStatus::Ready && s.error.is_none());
+                    }
+                    if eligible{"Current"}else{"Unknown"}
+                },_=>"Unknown",
+            };
+            json!({"pointers":cached.pointers,"captured":cached.captured,"freshness":freshness,
+                "running_source_truth":"running","profile_source_truth":"boot_selected","bootloader_selection_verified":false,"managed_provenance_verified":false})
+        }else{Value::Null};
+        Ok(json!({"schema_version":1,"data":data,"error":self.generation_error,"live_compared_at":current.as_ref().ok().map(|(t,_)|t),
+            "source":"cached-native-system-pointers","execution_authority":false}))
     }
     fn status(&self)->Result<Value>{
         let now=NativeTime::observe()?;let plan=self.graph.reconciliation_plan(SYSTEMD_PROVIDER.into(),now.observation().clone(),SourceRevision::default())?;
@@ -51,11 +109,13 @@ impl Owner{
         Ok(json!({"schema_version":1,"scope":"system","boot":now.observation().boot,"provider":provider,"reconciliations_attempted":self.attempts,
             "complete_reconciliations":self.successful,"last_attempt":self.last_attempt,"last_error":self.last_error,"observed_loaded_services":self.ids.len(),
             "period_seconds":900,"model_invoked":false,"execution_authority":false,"event_watcher_installed":false,
+            "generation_poll_seconds":1,"observed_generation_changes":self.generation_changes,"generation_error":self.generation_error,
             "quarantine":self.graph.recovery_receipt().map(|r|r.quarantine_directory.file_name().unwrap_or_default().to_string_lossy())}))
     }
     fn request(&mut self,request:Request)->Result<Value>{
         match request{
             Request::Status{}=>self.status(),
+            Request::Generations{}=>self.generation_view(),
             Request::Reconcile{}=>{
                 let now=NativeTime::observe()?;
                 if now.observation().boot!=self.last_attempt.boot || now.observation().monotonic_ns.checked_sub(self.last_attempt.monotonic_ns).is_none_or(|age|age>=1_000_000_000){self.reconcile()?;}
@@ -90,10 +150,13 @@ fn run(uid:u32)->Result<()>{
         if !meta.file_type().is_socket() || meta.uid()!=uid || meta.mode()&0o777!=0o600 || UnixStream::connect(SOCKET).is_ok(){return Err(Error::Identity);}fs::remove_file(SOCKET)?;
     }
     let listener=UnixListener::bind(SOCKET)?;fs::set_permissions(SOCKET,fs::Permissions::from_mode(0o600))?;listener.set_nonblocking(true)?;
-    let mut owner=Owner{graph,ids:Vec::new(),attempts:0,successful:0,last_attempt:NativeTime::observe()?.observation().clone(),last_error:None};
+    let now=NativeTime::observe()?.observation().clone();
+    let mut owner=Owner{graph,ids:Vec::new(),attempts:0,successful:0,last_attempt:now.clone(),last_error:None,
+        generations:None,generation_error:None,last_generation_probe:now,generation_changes:0};
     if let Err(error)=owner.reconcile(){eprintln!("aios-stated: startup snapshot unavailable: {error:?}");}
     loop{
         // Fixed periodic fallback also covers a timer signal that was lost.
+        if let Err(error)=owner.poll_generations(){eprintln!("aios-stated: native generation sampling unavailable: {error:?}");}
         let now=NativeTime::observe()?;
         if now.observation().boot!=owner.last_attempt.boot || now.observation().monotonic_ns.checked_sub(owner.last_attempt.monotonic_ns).is_none_or(|age|age>=PERIOD_NS){
             if let Err(error)=owner.reconcile(){eprintln!("aios-stated: periodic snapshot unavailable: {error:?}");}
@@ -115,6 +178,7 @@ fn client(uid:u32,request:Request)->Result<()>{
 pub fn entry()->Result<()>{
     let uid=identity()?;let args=std::env::args().skip(1).collect::<Vec<_>>();
     match args.as_slice(){[]=>run(uid),[arg] if arg=="--inspect"=>client(uid,Request::Status{}),[arg] if arg=="--reconcile"=>client(uid,Request::Reconcile{}),
+        [arg] if arg=="--generations"=>client(uid,Request::Generations{}),
         [arg,name] if arg=="--service"=>client(uid,Request::Service{unit_name:name.clone()}),_=>Err(Error::Protocol)}
 }
 #[cfg(test)]mod tests{
@@ -122,6 +186,44 @@ pub fn entry()->Result<()>{
     #[test]fn fixed_control_schema_refuses_unknown_fields_and_generic_sql(){
         for text in [r#"{"kind":"status","uid":0}"#,r#"{"kind":"reconcile","uid":0}"#,r#"{"kind":"status","kind":"reconcile"}"#,r#"{"kind":"service","unit_name":"sshd.service","unit_name":"other.service"}"#,r#"{"kind":"sql","sql":"DROP TABLE nodes"}"#,r#"{"kind":"service","unit_name":"sshd.service","path":"/etc/shadow"}"#]{assert!(serde_json::from_str::<Request>(text).is_err());}
         assert!(matches!(serde_json::from_str::<Request>(r#"{"kind":"status"}"#).unwrap(),Request::Status{}));
+        assert!(matches!(serde_json::from_str::<Request>(r#"{"kind":"generations"}"#).unwrap(),Request::Generations{}));
+        for text in [r#"{"kind":"generations","path":"/tmp/profile"}"#,r#"{"kind":"generations","kind":"status"}"#]{assert!(serde_json::from_str::<Request>(text).is_err());}
+    }
+    #[test]fn unchanged_generation_samples_coalesce_but_divergence_or_failure_refreshes(){
+        let prior=SystemPointers{running_closure:"fixture-running".into(),selected_profile_closure:Some("fixture-running".into()),selected_profile_generation:Some(1),running_profile_divergence:Some(false),bootloader_entry:None,managed_transaction:None};
+        assert!(!generation_refresh_needed(Some(&prior),&prior,false));
+        assert!(generation_refresh_needed(None,&prior,false));assert!(generation_refresh_needed(Some(&prior),&prior,true));
+        let mut changed=prior.clone();changed.selected_profile_generation=Some(2);assert!(generation_refresh_needed(Some(&prior),&changed,false));
+        changed.selected_profile_closure=Some("fixture-other".into());changed.running_profile_divergence=Some(true);assert!(generation_refresh_needed(Some(&prior),&changed,false));
+    }
+    #[test]
+    #[ignore="requires an enrolled NixOS guest; graph is an owned library fixture, not the installed service"]
+    fn native_owner_reconciles_pointers_and_invalidates_injected_old_cache(){
+        use std::os::unix::fs::PermissionsExt;
+        let now=NativeTime::observe().unwrap().observation().clone();
+        let root=std::env::temp_dir().join(format!("aios-owner-generation-{}-{}",std::process::id(),now.monotonic_ns));
+        fs::create_dir(&root).unwrap();fs::set_permissions(&root,fs::Permissions::from_mode(0o700)).unwrap();
+        let graph=GraphStore::open(&root,Scope::System).unwrap();
+        let mut owner=Owner{graph,ids:vec![],attempts:0,successful:0,last_attempt:now.clone(),last_error:None,
+            generations:None,generation_error:None,last_generation_probe:now,generation_changes:0};
+        owner.reconcile().unwrap();
+        let observed=generations::observe().unwrap().1;
+        let view=owner.generation_view().unwrap();assert_eq!(view["data"]["pointers"],serde_json::to_value(&observed).unwrap());
+        assert_eq!(view["data"]["freshness"],"Current");assert_eq!(view["execution_authority"],false);
+        let before=owner.attempts;
+        std::thread::sleep(Duration::from_millis(1100));owner.poll_generations().unwrap();
+        assert_eq!(owner.attempts,before);assert_eq!(owner.generation_changes,0);
+        // Simulated old cache against actual unchanged native pointers. This
+        // proves polling invalidation, not an actual root generation mutation.
+        owner.generations.as_mut().unwrap().pointers.selected_profile_generation=Some(u64::MAX);
+        assert_eq!(owner.generation_view().unwrap()["data"]["freshness"],"Stale");
+        std::thread::sleep(Duration::from_millis(1100));owner.poll_generations().unwrap();
+        assert_eq!(owner.generation_changes,1);assert_eq!(owner.attempts,before+1);
+        assert_eq!(owner.generation_view().unwrap()["data"]["freshness"],"Current");
+        assert_eq!(owner.generations.as_ref().unwrap().pointers,observed);
+        println!("AIOS_NATIVE_OWNER_GENERATIONS={}",json!({"native_pointers":observed,"unchanged_samples_coalesced":true,
+            "injected_old_cache_invalidated":true,"native_reconciliation_restored":true,"system_profile_mutated":false,"installed_owner_verified":false}));
+        drop(owner);fs::remove_dir_all(root).unwrap();
     }
     #[test]fn oversized_or_empty_frames_are_refused_before_allocation(){
         for n in [0u32,4097]{let (mut a,mut b)=UnixStream::pair().unwrap();a.write_all(&n.to_be_bytes()).unwrap();assert!(matches!(frame_read(&mut b,4096),Err(Error::Protocol)));}

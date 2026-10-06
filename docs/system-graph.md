@@ -125,11 +125,23 @@ descriptions are omitted. Service-specific result/MainPID/ordering fields remain
 unknown unless separately observed; loaded units are not the installed-unit
 catalog, intended state or proof of a dependency.
 
-The private control protocol accepts status, reconciliation and a single
+The private control protocol accepts status, reconciliation, fixed generation
+pointer diagnostics and a single
 validated service-name cache lookup, with peer credentials, fixed frame bounds
 and timeouts. Only root and the graph identity may use it. It is an internal
 component/operator channel; authenticated product graph retrieval is separate.
 Cache lookups show captured time and freshness and never authorize effects.
 The service has no model, home, activation or transaction-ledger access. It is
 wanted by normal boot and does not become a requirement of desktop or SSH.
-This system owner does not yet provide user overlays or native event watching.
+Running NixOS activation and the selected system profile are observed separately
+through fixed root-owned paths and retained as separate source-truth providers.
+The native pointer pair is rechecked before/after persistence. Generation
+diagnostics compare the cached pair with a new native read; missing, invalidated
+or failed reads cannot claim current state. The profile does not prove a
+bootloader entry or approved managed transaction; those fields remain unknown.
+Once per second, the owner samples the two fixed pointers. An observed change
+invalidates generation and service snapshots, records bounded native generation
+events and reconciles without inference. Unchanged samples coalesce. This polling
+does not claim a systemd event subscription, complete closure metadata or user
+overlay reconciliation. The fifteen-minute timer/fallback remains independent.
+This system owner does not yet provide user overlays or native systemd event watching.

@@ -24,9 +24,10 @@ class GraphEvidenceTests(unittest.TestCase):
                 raw_timer_trigger(text)
 
     def fixture(self):
-        identity = {"boot_id": "fixture-boot"}
+        identity = {"boot_id": "fixture-boot", "current_system": "fixture-system"}
         steps = {k: {} for k in gate.REQUIRED}
         steps.update({"service_comparison": {"unknown_properties_preserved": True},
+            "startup_generations": {"execution_authority": False, "data": {"freshness": "Current", "pointers": {"running_closure": "fixture-system", "bootloader_entry": None, "managed_transaction": None}}},
             "foreign_uid_denied": {"upstream_exit": 1, "native_unit": self.denial_unit()},
             "corruption_recovery": {"ledger_unchanged": True},
             "real_timer": {"elapsed_ns": 900_000_000_000, "status": {"model_invoked": False, "execution_authority": False}},
@@ -67,6 +68,17 @@ class GraphEvidenceTests(unittest.TestCase):
         value["schema_version"] = True
         self.assertFalse(gate.qualified(value, identity))
         value["schema_version"] = 1; value["unexpected"] = "field"
+        self.assertFalse(gate.qualified(value, identity))
+
+    def test_generation_gate_rejects_stale_foreign_or_inferred_provenance(self):
+        identity, value = self.fixture()
+        for field, other in (('freshness', 'Unknown'), ('freshness', 'Stale')):
+            altered = copy.deepcopy(value); altered['steps']['startup_generations']['data'][field] = other
+            self.assertFalse(gate.qualified(altered, identity))
+        for field, other in (('running_closure', 'foreign-system'), ('bootloader_entry', 'guessed-entry'), ('managed_transaction', 'guessed-transaction')):
+            altered = copy.deepcopy(value); altered['steps']['startup_generations']['data']['pointers'][field] = other
+            self.assertFalse(gate.qualified(altered, identity))
+        value['steps']['startup_generations']['execution_authority'] = True
         self.assertFalse(gate.qualified(value, identity))
 
 if __name__ == "__main__":
