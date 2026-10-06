@@ -165,6 +165,9 @@ or native bus proof, explicitly selected verified display, current immutable
 system closure and one prepared effect. It checks all bindings through native
 confirmation and both final delivery callbacks, then checks caller, handle
 lifetime, Stop and approval deadline again before returning to kernel delivery.
+Pre-effect setup failures emit only a fixed stage name and typed error code to
+the service journal. Diagnostics never include the goal, target, process
+identity, session locator, resource handle or approval material.
 
 Stop withdraws the actual prompt channel and cancels the effect verifier
 independently of native queries. After signal delivery, receipts preserve the

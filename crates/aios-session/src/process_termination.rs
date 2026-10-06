@@ -8,6 +8,10 @@ use aios_system::processes::termination::{Prepared,Attempt,Receipt,Cancellation}
 use serde_json::Value;
 use std::sync::{Arc,atomic::{AtomicU8,Ordering}};
 type Result<T>=std::result::Result<T,ErrorCode>;
+fn stage<T>(name:&str,result:Result<T>)->Result<T>{
+    if let Err(code)=&result{eprintln!("aios-processd: termination {name} failed ({code:?})");}
+    result
+}
 fn closure()->Result<String>{
     let path=std::fs::canonicalize("/run/current-system").map_err(|_|ErrorCode::TargetChanged)?;
     if path.parent()!=Some(std::path::Path::new("/nix/store")){return Err(ErrorCode::TargetChanged);}
@@ -53,24 +57,27 @@ impl NativeTerminationTask {
         if mode!=policy::Mode::Act{return Err(ErrorCode::PermissionDenied);}
         if !crate::uuid(&request_id){return Err(ErrorCode::InvalidArgument);}
         if control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
-        origin.verify()?;selection.verify(&origin.peer()?)?;display.verify()?;
+        stage("origin identity",origin.verify())?;
+        stage("process identity",selection.verify(&origin.peer()?))?;
+        stage("display identity",display.verify())?;
         let subject=origin.peer()?.policy_subject()?;
         if display.session.uid!=subject.uid || display.boot_id!=subject.boot_id{return Err(ErrorCode::PermissionDenied);}
-        let native=selection.native.inspect()?.identity;
-        let prepared=selection.native.prepare_termination(30_000)?;
-        let signal_cancel=prepared.cancellation();let current_closure=closure()?;
+        let native=stage("native process inspection",selection.native.inspect())?.identity;
+        let prepared=stage("retained process preparation",selection.native.prepare_termination(30_000))?;
+        let signal_cancel=prepared.cancellation();let current_closure=stage("system closure",closure())?;
         let policy=policy::Policy::new(subject.boot_id.clone(),policy::registry_revision())?;
-        let proposal=policy.propose_termination(policy.authenticated_user_intent(subject.clone(),request_id.clone(),goal,mode)?,
+        let intent=stage("authenticated intent",policy.authenticated_user_intent(subject.clone(),request_id.clone(),goal,mode))?;
+        let proposal=stage("policy proposal",policy.propose_termination(intent,
             NativeDesktop{uid:display.session.uid,boot_id:display.boot_id.clone(),session_id:display.session.id.clone(),
                 identity_sha256:policy::digest(&display)?,socket_name:display.socket_name.clone()},
             TerminationPresentation{target,profile,goal:goal.into(),evidence:vec![]},selection.id.clone(),
             ProcessIdentity{pid:native.pid,uid:native.uid,start_time_ticks:native.start_time_ticks,
-                boot_id:native.boot_id,executable_identity:native.executable_identity},current_closure.clone(),30_000,90_000)?;
+                boot_id:native.boot_id,executable_identity:native.executable_identity},current_closure.clone(),30_000,90_000))?;
         if proposal.native_preview_digest()?!=policy::digest(prepared.preview())?{return Err(ErrorCode::PlanChanged);}
-        let pending=proposal.launch(&policy,&subject,&Resources{selection:&selection,origin:&origin,display:&display,closure:&current_closure})?;
+        let pending=stage("native confirmation launch",proposal.launch(&policy,&subject,&Resources{selection:&selection,origin:&origin,display:&display,closure:&current_closure}))?;
         let mut task=Self{broker:None,origin,selection,display,closure:current_closure,policy,request_id,control,
             pending:Some(pending),delivery:None,prepared:Some(prepared),attempt:None,signal_cancel,terminal:None,failure:None};
-        task.check()?;Ok(task)
+        stage("initial bound state",task.check())?;Ok(task)
     }
     /// The managed transport is retained only as native lifetime evidence.
     /// It cannot be reconstructed from a serialized PID or service name.
