@@ -152,4 +152,14 @@ impl NativeReadTask {
         self.check_origin()?;
         match snapshot {Ok(snapshot)=>Ok(snapshot),Err(error)=>{self.revoke();Err(error)}}
     }
+    /// Observation re-resolution requires the original live grant and caller.
+    /// Neither a public snapshot nor a node UUID authorizes semantic input.
+    pub fn verify_snapshot_node(&mut self,snapshot:&Snapshot,node_handle:&str)->Result<()> {
+        self.check_origin()?;
+        if let Err(error)=self.check_grant(){self.revoke();return Err(error);}
+        let result=self.window.verify_snapshot_node(snapshot,node_handle,&self.control);
+        if let Err(error)=self.check_grant(){self.revoke();return Err(error);}
+        self.check_origin()?;
+        if result.is_err(){self.revoke();}result
+    }
 }

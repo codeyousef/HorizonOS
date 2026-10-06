@@ -84,6 +84,15 @@ The first issuer permits only `ui.snapshot`; derived snapshot/node lineage is
 required before `ui.find` can be enabled. It cannot authorize writes or roots.
 Headless `grant_reads` continues to reject graphical capabilities.
 
+Native accessibility snapshots retain private bus/process/window identity,
+object and ancestor paths, snapshot generation, role, full bounded name, native
+state and advertised action names. These fields are not serialized as client
+authority. Read-only node re-resolution checks the captured ancestor chain and
+live properties within two seconds; changed generation, owner, parent or
+properties refuse the observation. Protected nodes have no resolvable lineage.
+The read-task wrapper also checks the original connection and live read grant
+before and after resolution. This does not enable `ui.find` or semantic input.
+
 The native transport launches the compile-pinned immutable Qt wrapper with a
 cleared environment and the selected Wayland socket. Its pollable supervisor
 requires the actual pinned native child executable, successful exit and one

@@ -78,13 +78,23 @@ fn native_selected_kate_snapshot_and_stale_owner(){
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(log).spawn().unwrap();
     let mut kate=Kate{child,directory,native:None};
     let until=Instant::now()+Duration::from_secs(10);
+    let mut discovery_timeouts=0;
     let window=loop {
         if kate.child.try_wait().unwrap().is_some_and(|s|s.success()){kate.track_native(&document);}
         if let Some(exit)=kate.child.try_wait().unwrap().filter(|s|!s.success()){
             let mut output=String::new();fs::File::open(&diagnostic).unwrap().take(4096).read_to_string(&mut output).unwrap();
             panic!("owned synthetic-document Kate exited before registration: {exit}; {output}");
         }
-        let mut windows=WindowBinding::discover(&display,&control).expect("native reviewed-app discovery");
+        let mut windows=match WindowBinding::discover(&display,&control) {
+            Ok(windows)=>windows,
+            Err(ErrorCode::DeadlineExceeded) if Instant::now()<until=>{
+                // Startup registration can be busy. This is a fresh bounded
+                // metadata observation, never a retry of semantic input.
+                discovery_timeouts+=1;kate.track_native(&document);
+                std::thread::sleep(Duration::from_millis(50));continue;
+            },
+            Err(error)=>panic!("native reviewed-app discovery: {error:?}"),
+        };
         if !windows.is_empty(){
             assert_eq!(windows.len(),1,"ambiguous owned window");
             let w=windows.remove(0);assert!(w.title.contains("horizon-native-fixture.txt"));kate.track_native(&document);break w;
@@ -98,10 +108,20 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     if std::env::var("AIOS_NATIVE_BRIDGE_SCENARIO").ok().as_deref()==Some("disposable-provider-v1"){
         qualify_broker_bridge(&display,&window);
     }
-    let snapshot=window.snapshot(&control).expect("real selected-window snapshot");
+    let mut snapshot=window.snapshot(&control).expect("real selected-window snapshot");
     assert_eq!(snapshot.window_handle,window.handle);assert!(!snapshot.nodes.is_empty());assert!(snapshot.nodes.len()<=300);
     assert!(snapshot.nodes.iter().map(|n|n.name.len()+n.actions.iter().map(String::len).sum::<usize>()).sum::<usize>()<=16384);
     aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.snapshot","data").unwrap(),&serde_json::to_value(&snapshot).unwrap()).unwrap();
+    let selected_node=snapshot.nodes[0].node_handle.clone();
+    window.verify_snapshot_node(&snapshot,&selected_node,&control).expect("actual native owner/object/window/generation re-resolution");
+    let original_generation=snapshot.snapshot_id.clone();snapshot.snapshot_id=uuid::Uuid::new_v4().to_string();
+    assert_eq!(window.verify_snapshot_node(&snapshot,&selected_node,&control),Err(ErrorCode::TargetChanged));
+    snapshot.snapshot_id=original_generation;
+    assert_eq!(window.verify_snapshot_node(&snapshot,&uuid::Uuid::new_v4().to_string(),&control),Err(ErrorCode::TargetNotFound));
+    let cancelled_node=AtomicU8::new(1);
+    assert_eq!(window.verify_snapshot_node(&snapshot,&selected_node,&cancelled_node),Err(ErrorCode::Cancelled));
+    std::thread::sleep(Duration::from_millis(2100));
+    assert_eq!(window.verify_snapshot_node(&snapshot,&selected_node,&control),Err(ErrorCode::DeadlineExceeded));
     let cancelled=AtomicU8::new(1);
     assert!(matches!(window.snapshot(&cancelled),Err(ErrorCode::Cancelled)));
     // The real originating kernel peer and actual selected Kate/display scope
@@ -147,6 +167,7 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     drop(peer_socket);
     assert!(matches!(task.poll_confirmation(),Err(ErrorCode::Cancelled)),"disconnected original peer retained pending consent");
     assert!(matches!(task.snapshot(),Err(ErrorCode::Cancelled)));
+    assert_eq!(task.verify_snapshot_node(&snapshot,&selected_node),Err(ErrorCode::Cancelled));
     let (proof,peer_socket)=std::os::unix::net::UnixStream::pair().unwrap();
     let origin=aios_session::ui_read::OriginatingClient::authenticate(proof).unwrap();
     let mut task=aios_session::ui_read::NativeReadTask::begin(origin,window.clone(),"Explain the selected synthetic document",aios_policy::Mode::Ask,
@@ -161,7 +182,10 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     let stale=window.verify();assert!(stale.is_err(),"closed native app owner was accepted");
     println!("NATIVE_KATE_SNAPSHOT={}",json!({"evidence_kind":"real-native-app-and-synthetic-document-no-policy-grant","display":display,"window":native,
         "window_identity_sha256":window.identity_sha256().unwrap(),"node_count":snapshot.nodes.len(),"truncated":snapshot.truncated,"snapshot_id":snapshot.snapshot_id,
-        "cancelled_before_query":true,"closed_owner_denial":format!("{:?}",stale.unwrap_err())}));
+        "cancelled_before_query":true,"closed_owner_denial":format!("{:?}",stale.unwrap_err()),
+        "native_node_lineage_rechecked":true,"unknown_node_denied":true,"node_cancel_denied":true,"actual_node_expiry_wait_ms":2100,
+        "changed_snapshot_generation_denied":true,"disconnected_grant_node_denied":true,"startup_metadata_timeouts":discovery_timeouts,
+        "semantic_effect_performed":false}));
     println!("NATIVE_POLICY_CONSENT={}",json!({"evidence_kind":"real-native-client-display-window-and-production-consent-transport-no-allow-or-grant",
         "uid":uid,"origin_pid":subject.pid,"origin_start_ticks":subject.start_ticks,"session_id":display.session.id,
         "native_window_identity_sha256":window.identity_sha256().unwrap(),"expiry_denial":format!("{native_expiry:?}"),"withdrawal_ms":withdrawal_ms,

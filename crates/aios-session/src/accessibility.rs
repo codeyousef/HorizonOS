@@ -9,6 +9,11 @@ use zbus::{blocking::{Connection,Proxy},zvariant::OwnedObjectPath};
 use uuid::Uuid;
 type Result<T> = std::result::Result<T,ErrorCode>;
 type Object = (String,OwnedObjectPath);
+#[derive(Clone)]
+struct NodeLineage {
+    handle:String,path:OwnedObjectPath,parent:OwnedObjectPath,role:u32,
+    name:String,states:Vec<u32>,actions:Vec<String>,
+}
 const ACCESSIBLE:&str="org.a11y.atspi.Accessible";
 const ROOT:&str="/org/a11y/atspi/accessible/root";
 fn error(e:zbus::Error)->ErrorCode{
@@ -139,7 +144,8 @@ impl WindowBinding {
     pub fn snapshot(&self,control:&AtomicU8)->Result<Snapshot>{
         let deadline=Instant::now()+Duration::from_secs(2);check(deadline,control)?;
         let bus=self.current()?;
-        let snapshot_id=Uuid::new_v4().to_string();let mut nodes=Vec::new();
+        let captured=Instant::now();
+        let snapshot_id=Uuid::new_v4().to_string();let mut nodes=Vec::new();let mut lineage=Vec::new();
         let mut queue=VecDeque::from([(self.path.clone(),0u8,OwnedObjectPath::try_from(ROOT).map_err(|_|ErrorCode::TargetChanged)?)]);let mut visited=HashSet::new();
         let mut bytes=0;let mut truncated=false;
         while let Some((path,depth,parent))=queue.pop_front(){
@@ -149,7 +155,7 @@ impl WindowBinding {
             let p=bus.accessible(&self.app.owner,path.as_str())?;
             // A same-process object reference alone does not prove membership
             // in the selected window. Verify each native parent before content.
-            if p.get_property::<Object>("Parent").map_err(error)?!=(self.app.owner.clone(),parent){return Err(ErrorCode::TargetChanged);}
+            if p.get_property::<Object>("Parent").map_err(error)?!=(self.app.owner.clone(),parent.clone()){return Err(ErrorCode::TargetChanged);}
             let role:u32=p.call("GetRole",&()).map_err(error)?;
             // Do not even query protected names, text, actions or children.
             if matches!(role,16|40|60){
@@ -157,10 +163,10 @@ impl WindowBinding {
             }
             let mut name=text(p.get_property("Name").map_err(error)?,16384)?;
             if bytes+name.len()>16384{truncated=true;break;}
-            bytes+=name.len();name=name.chars().take(256).collect();
-            let states:Vec<u32>=p.call("GetState",&()).map_err(error)?;
-            if states.len()>2{return Err(ErrorCode::PartialResult);}
-            let states=(0u32..64).filter(|i|states.get((i/32)as usize).is_some_and(|word|word&(1u32<<(i%32))!=0)).take(16).map(|i|format!("atspi:{i}")).collect();
+            bytes+=name.len();let native_name=name.clone();name=name.chars().take(256).collect();
+            let native_states:Vec<u32>=p.call("GetState",&()).map_err(error)?;
+            if native_states.len()>2{return Err(ErrorCode::PartialResult);}
+            let states=(0u32..64).filter(|i|native_states.get((i/32)as usize).is_some_and(|word|word&(1u32<<(i%32))!=0)).take(16).map(|i|format!("atspi:{i}")).collect();
             let interfaces:Vec<String>=p.call("GetInterfaces",&()).map_err(error)?;
             if interfaces.len()>16{return Err(ErrorCode::PartialResult);}
             let mut actions=Vec::new();
@@ -175,7 +181,9 @@ impl WindowBinding {
                     bytes+=name.len();actions.push(name);
                 }
             }
-            nodes.push(Node{node_handle:Uuid::new_v4().to_string(),role:format!("atspi:{role}"),name,states,actions});
+            let node_handle=Uuid::new_v4().to_string();
+            lineage.push(NodeLineage{handle:node_handle.clone(),path:path.clone(),parent,role,name:native_name,states:native_states,actions:actions.clone()});
+            nodes.push(Node{node_handle,role:format!("atspi:{role}"),name,states,actions});
             let children:i32=p.get_property("ChildCount").map_err(error)?;
             if children<0 || children>100000{return Err(ErrorCode::PartialResult);}
             if depth>=8 && children>0{truncated=true;continue;}
@@ -189,7 +197,54 @@ impl WindowBinding {
             }
         }
         check(deadline,control)?;self.verify()?;check(deadline,control)?;
-        Ok(Snapshot{snapshot_id,window_handle:self.handle.clone(),nodes,truncated})
+        Ok(Snapshot{generation:snapshot_id.clone(),snapshot_id,window_handle:self.handle.clone(),nodes,truncated,lineage,
+            window_identity:self.identity_sha256()?,captured})
+    }
+
+    /// Native read-only re-resolution. The snapshot's private lineage stays in
+    /// its owner; public UUIDs/JSON cannot manufacture an accessible object.
+    /// This verifies an observation, never grants permission or performs input.
+    pub fn verify_snapshot_node(&self,snapshot:&Snapshot,node_handle:&str,control:&AtomicU8)->Result<()> {
+        let deadline=snapshot.captured+Duration::from_secs(2);
+        check(deadline,control)?;
+        if snapshot.snapshot_id!=snapshot.generation || snapshot.window_handle!=self.handle || snapshot.window_identity!=self.identity_sha256()? {
+            return Err(ErrorCode::TargetChanged);
+        }
+        let node=snapshot.lineage.iter().find(|n|n.handle==node_handle).ok_or(ErrorCode::TargetNotFound)?;
+        let bus=self.current()?;check(deadline,control)?;
+        // Reparenting a container can move its unchanged child into another
+        // window. Recheck the complete captured ancestry, not just one parent.
+        let mut ancestor=node;
+        for depth in 0..=8 {
+            check(deadline,control)?;
+            let parent=bus.accessible(&self.app.owner,ancestor.path.as_str())?;
+            if parent.get_property::<Object>("Parent").map_err(error)?!=(self.app.owner.clone(),ancestor.parent.clone()) {
+                return Err(ErrorCode::TargetChanged);
+            }
+            if ancestor.path==self.path {break;}
+            if depth==8{return Err(ErrorCode::TargetChanged);}
+            ancestor=snapshot.lineage.iter().find(|n|n.path==ancestor.parent).ok_or(ErrorCode::TargetChanged)?;
+        }
+        let p=bus.accessible(&self.app.owner,node.path.as_str())?;
+        if p.get_property::<Object>("Parent").map_err(error)?!=(self.app.owner.clone(),node.parent.clone()) {
+            return Err(ErrorCode::TargetChanged);
+        }
+        let role:u32=p.call("GetRole",&()).map_err(error)?;check(deadline,control)?;
+        if role!=node.role || matches!(role,16|40|60){return Err(ErrorCode::TargetChanged);}
+        let name=text(p.get_property("Name").map_err(error)?,16384)?;
+        let states:Vec<u32>=p.call("GetState",&()).map_err(error)?;check(deadline,control)?;
+        if name!=node.name || states!=node.states{return Err(ErrorCode::TargetChanged);}
+        let interfaces:Vec<String>=p.call("GetInterfaces",&()).map_err(error)?;
+        if interfaces.len()>16{return Err(ErrorCode::PartialResult);}
+        let mut actions=Vec::new();
+        if interfaces.iter().any(|i|i=="org.a11y.atspi.Action") {
+            let action=display::proxy(&bus.connection,&self.app.owner,node.path.as_str(),"org.a11y.atspi.Action")?;
+            let count:i32=action.get_property("NActions").map_err(error)?;
+            if !(0..=16).contains(&count){return Err(ErrorCode::PartialResult);}
+            for i in 0..count {check(deadline,control)?;actions.push(text(action.call("GetName",&(i,)).map_err(error)?,128)?);}
+        }
+        if actions!=node.actions{return Err(ErrorCode::TargetChanged);}
+        check(deadline,control)?;self.verify()?;check(deadline,control)
     }
 }
 fn protected_title(title:&str)->bool{
@@ -197,7 +252,13 @@ fn protected_title(title:&str)->bool{
     ["id_ed25519","id_rsa","private key","keyring","password","authorization","authentication","wallet","horizon os — needs permission"].iter().any(|w|name.contains(w))
 }
 #[derive(Serialize)]
-pub struct Snapshot {pub snapshot_id:String,pub window_handle:String,pub nodes:Vec<Node>,pub truncated:bool}
+pub struct Snapshot {
+    pub snapshot_id:String,pub window_handle:String,pub nodes:Vec<Node>,pub truncated:bool,
+    #[serde(skip)] lineage:Vec<NodeLineage>,
+    #[serde(skip)] window_identity:String,
+    #[serde(skip)] captured:Instant,
+    #[serde(skip)] generation:String,
+}
 #[derive(Serialize)]
 pub struct Node {pub node_handle:String,pub role:String,pub name:String,pub states:Vec<String>,pub actions:Vec<String>}
 #[cfg(test)]mod tests{
