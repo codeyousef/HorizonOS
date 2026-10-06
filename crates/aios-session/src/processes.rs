@@ -3,13 +3,30 @@ use crate::{State, ReadResources, Mode, identity::{self, Peer}};
 use aios_protocol::contracts::{Action, ErrorCode};
 use aios_system::processes::{OwnProcess, Observation};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::{collections::HashMap,sync::{Arc,atomic::{AtomicBool,Ordering}}};
 use uuid::Uuid;
 
 type Result<T> = std::result::Result<T, ErrorCode>;
 const LIFETIME_MS: u64 = 30_000;
-struct Process { owner: Peer, expires: u64, native: OwnProcess, digest: String }
+struct Process { owner: Peer, expires: u64, native: OwnProcess, digest: String, revoked:Arc<AtomicBool> }
 struct Cursor { owner: Peer, expires: u64, query: String, ids: Vec<String>, offset: usize, access_denied: bool }
+/// Native owner-bound selection for one termination task. No request/JSON
+/// constructor; detaching retains identity and the original handle expiry.
+pub(crate) struct SelectedProcess { pub(crate) id:String, owner:Peer, expires:u64, pub(crate) native:OwnProcess, digest:String, revoked:Arc<AtomicBool> }
+impl Drop for Process {fn drop(&mut self){self.revoked.store(true,Ordering::Release);}}
+impl SelectedProcess {
+    pub(crate) fn verify_lifetime(&self,peer:&Peer)->Result<()> {
+        if self.revoked.load(Ordering::Acquire){return Err(ErrorCode::Cancelled);}
+        current(&self.owner,peer,self.expires)
+    }
+    pub(crate) fn verify(&self,peer:&Peer)->Result<()> {
+        self.verify_lifetime(peer)?;
+        identity::verify_peer(peer)?;
+        let observation=self.native.inspect()?;
+        if aios_policy::digest(&observation.identity)?!=self.digest {return Err(ErrorCode::TargetChanged);}
+        identity::verify_peer(peer)?;self.verify_lifetime(peer)
+    }
+}
 #[derive(Default)]
 pub(super) struct Handles { processes: HashMap<String, Process>, cursors: HashMap<String, Cursor> }
 fn expiry() -> Result<u64> { aios_policy::boottime_ms()?.checked_add(LIFETIME_MS).ok_or(ErrorCode::ResourceExhausted) }
@@ -58,7 +75,7 @@ impl Handles {
             let observation = process.inspect()?;
             if observation.identity.uid != peer.uid || observation.identity.boot_id != peer.boot_id { return Err(ErrorCode::TargetChanged); }
             let digest = aios_policy::digest(&observation.identity)?;
-            pending.push((Uuid::new_v4().to_string(), Process { owner: peer.clone(), expires, native: process, digest }));
+            pending.push((Uuid::new_v4().to_string(), Process { owner: peer.clone(), expires, native: process, digest, revoked:Arc::new(AtomicBool::new(false)) }));
         }
         identity::verify_peer(peer)?;
         let ids = pending.iter().map(|(id, _)| id.clone()).collect();
@@ -102,6 +119,13 @@ fn result(data: Value, next_cursor: Option<String>, access_denied: bool) -> Valu
         "evidence_ids":[],"complete":complete,"next_cursor":next_cursor,"data":data,"error":error})
 }
 impl State {
+    pub(crate) fn select_process_termination(&self,peer:&Peer,id:&str)->Result<SelectedProcess>{
+        identity::verify_peer(peer)?;
+        let process=self.processes.process(peer,id)?;
+        let selected=SelectedProcess{id:id.into(),owner:process.owner.clone(),expires:process.expires,
+            native:process.native.retain()?,digest:process.digest.clone(),revoked:process.revoked.clone()};
+        selected.verify(peer)?;Ok(selected)
+    }
     pub(super) fn process_observe_selected(&self,peer:&Peer,id:&str)->Result<Value>{
         identity::verify_peer(peer)?;
         let value=self.processes.observe(peer,id)?;
@@ -180,8 +204,61 @@ mod tests {
         let native = OwnProcess::open(pid).unwrap();
         let digest = aios_policy::digest(&native.inspect().unwrap().identity).unwrap();
         let id = Uuid::new_v4().to_string();
-        state.processes.processes.insert(id.clone(), Process { owner:peer.clone(), expires:expiry().unwrap(), native, digest });
+        state.processes.processes.insert(id.clone(), Process { owner:peer.clone(), expires:expiry().unwrap(), native, digest, revoked:Arc::new(AtomicBool::new(false)) });
         id
+    }
+    #[test]
+    fn native_termination_selection_retains_exact_objects_and_owner_lifetime() {
+        let peer=native_peer();let mut state=State::default();
+        let mut child=std::process::Command::new("/run/current-system/sw/bin/sleep").arg("1").spawn().unwrap();
+        let id=retained(&mut state,&peer,child.id());
+        let selected=state.select_process_termination(&peer,&id).unwrap();
+        assert_eq!(selected.native.inspect().unwrap().identity.pid,child.id());
+        let mut foreign=peer.clone();foreign.connection_id=Some(Uuid::new_v4().to_string());
+        assert!(matches!(state.select_process_termination(&foreign,&id),Err(ErrorCode::PermissionDenied)));
+        assert_eq!(selected.verify(&foreign),Err(ErrorCode::PermissionDenied));
+        state.disconnect(&peer);
+        assert_eq!(selected.verify(&peer),Err(ErrorCode::Cancelled));
+        // Revocation is authority only; it never signals this actual child.
+        assert!(!selected.native.exited().unwrap());
+        child.wait().unwrap();assert!(selected.native.exited().unwrap());
+    }
+    #[test]
+    fn native_termination_selection_expiry_and_exit_do_not_refresh_or_retarget() {
+        let peer=native_peer();let mut state=State::default();
+        let mut child=std::process::Command::new("/run/current-system/sw/bin/sleep").arg("1").spawn().unwrap();
+        let id=retained(&mut state,&peer,child.id());
+        let mut selected=state.select_process_termination(&peer,&id).unwrap();
+        assert_eq!(selected.expires,state.processes.processes[&id].expires);
+        selected.expires=0;assert_eq!(selected.verify(&peer),Err(ErrorCode::TargetNotFound));
+        assert!(!selected.native.exited().unwrap());
+        let live=state.select_process_termination(&peer,&id).unwrap();
+        child.wait().unwrap();assert_eq!(live.verify(&peer),Err(ErrorCode::TargetNotFound));
+    }
+    #[test]
+    fn native_worker_refuses_read_modes_bad_request_and_stop_before_desktop_or_signal() {
+        use std::{os::unix::net::UnixStream,sync::atomic::AtomicU8};
+        let (_client,server)=UnixStream::pair().unwrap();
+        let origin=crate::ui_read::OriginatingClient::authenticate(server).unwrap();
+        let peer=origin.peer().unwrap();let mut state=State::default();
+        let mut child=std::process::Command::new("/run/current-system/sw/bin/sleep").arg("1").spawn().unwrap();
+        let id=retained(&mut state,&peer,child.id());
+        for field in 0..5 {
+            // Invalid display sentinel; these refusals must occur before any
+            // native display query/renderer. Not graphical identity evidence.
+            let display=crate::display::DisplayBinding{
+                session:crate::identity::GraphicalSession{id:"absent".into(),uid:peer.uid,remote:false,kind:"wayland".into(),class:"user".into(),state:"active".into(),active:true,locked:false},
+                runtime_inode:0,socket_name:"wayland-invalid".into(),socket_inode:0,manager_pid:0,manager_start_usec:0,manager_invocation:vec![],manager_owner:String::new(),
+                compositor_pid:0,compositor_start:0,compositor_executable:String::new(),boot_id:peer.boot_id.clone()};
+            let mode=match field{0=>aios_policy::Mode::Ask,1=>aios_policy::Mode::Diagnose,2=>aios_policy::Mode::Automate,_=>aios_policy::Mode::Act};
+            let request=if field==3{"invalid".into()}else{Uuid::new_v4().to_string()};
+            let control=Arc::new(AtomicU8::new(if field==4{1}else{0}));
+            let result=crate::process_termination::NativeTerminationTask::begin(origin.try_clone().unwrap(),state.select_process_termination(&peer,&id).unwrap(),display,
+                request,"Stop this selected process",mode,"This VM".into(),"Local CPU".into(),control);
+            let expected=if field<3{ErrorCode::PermissionDenied}else if field==3{ErrorCode::InvalidArgument}else{ErrorCode::Cancelled};
+            assert!(matches!(result,Err(code) if code==expected));assert!(!child.try_wait().unwrap().is_some());
+        }
+        child.wait().unwrap();
     }
     #[test]
     fn native_process_handle_inspect_refuses_reconnect_expiry_disconnect_and_exit() {

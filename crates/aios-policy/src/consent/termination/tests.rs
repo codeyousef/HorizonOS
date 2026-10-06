@@ -96,3 +96,18 @@ fn expired_approval_and_policy_replacement_report_the_actual_reason() {
     assert_eq!(delivery.revalidate(&changed,&s,&request,&preview,&resources),Err(ErrorCode::PolicyChanged));
     assert_eq!(delivery.revalidate(&p,&s,&request,&preview,&resources),Err(ErrorCode::ApprovalExpired));
 }
+#[test]
+fn final_clock_check_cannot_renew_exhausted_or_expired_delivery() {
+    let s=subject();let p=policy(&s);let r=proposal(&p,&s);
+    let resources=Resources(r.scope.resources.iter().cloned().collect());
+    let request=r.intent.request_id.clone();let preview=r.native_preview_digest().unwrap();
+    let mut delivery=p.consume_termination(decision(r),&s,&resources).unwrap();
+    for _ in 0..2 {delivery.revalidate(&p,&s,&request,&preview,&resources).unwrap();}
+    delivery.check_deadline().unwrap();
+    assert_eq!(delivery.revalidate(&p,&s,&request,&preview,&resources),Err(ErrorCode::ApprovalExpired));
+    let r=proposal(&p,&s);let resources=Resources(r.scope.resources.iter().cloned().collect());
+    let mut delivery=p.consume_termination(decision(r),&s,&resources).unwrap();
+    delivery.proposal.expires_ms=boottime_ms().unwrap();
+    assert_eq!(delivery.check_deadline(),Err(ErrorCode::ApprovalExpired));
+    assert!(delivery.cancelled.load(Ordering::Acquire));assert_eq!(delivery.remaining,0);
+}

@@ -8,6 +8,7 @@ mod graphical;
 pub mod managed_service;
 pub mod ui_bridge;
 pub mod process_bridge;
+pub(crate) mod process_termination;
 pub mod native_startup;
 pub mod bus;
 pub mod inference;

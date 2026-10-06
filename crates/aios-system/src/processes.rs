@@ -113,6 +113,16 @@ pub fn inventory() -> Result<Inventory> {
     Ok(Inventory { processes: result, access_denied })
 }
 impl OwnProcess {
+    /// Duplicate the retained native objects, never reopen a numeric PID.
+    /// The new owner receives the same identity and independently rechecks it.
+    pub fn retain(&self)->Result<Self> {
+        self.inspect()?;
+        let directory=self.directory.try_clone().map_err(error)?;
+        let fd=unsafe{libc::fcntl(self.pidfd.as_raw_fd(),libc::F_DUPFD_CLOEXEC,3)};
+        if fd<0{return Err(error(std::io::Error::last_os_error()));}
+        let native=Self{directory,pidfd:unsafe{OwnedFd::from_raw_fd(fd)},identity:self.identity.clone()};
+        native.inspect()?;Ok(native)
+    }
     pub fn open(pid:u32)->Result<Self> {
         let uid=unsafe{libc::geteuid()};
         if uid==0 || pid<=1 || pid>i32::MAX as u32{return Err(ErrorCode::PermissionDenied);}

@@ -154,3 +154,22 @@ registry remains contract-only until native consent and original task ownership
 are connected and installed verification succeeds. A pidfd prevents PID reuse;
 process executable identity is rechecked before delivery, without promising
 atomic exclusion of an unsandboxed same-UID concurrent exec.
+
+The native process task worker joins that adapter to the exact native policy
+confirmation. A detached selection duplicates the retained proc/pidfd objects,
+preserves the original owner and handle expiry, and shares a revocation flag
+with its source handle. Removing that handle revokes detached selections; it
+never signals the process. The worker retains the original kernel connection
+or native bus proof, explicitly selected verified display, current immutable
+system closure and one prepared effect. It checks all bindings through native
+confirmation and both final delivery callbacks, then checks caller, handle
+lifetime, Stop and approval deadline again before returning to kernel delivery.
+
+Stop withdraws the actual prompt channel and cancels the effect verifier
+independently of native queries. After signal delivery, receipts preserve the
+sent signal and report independently observed exit or partial effects;
+Stop or original-client disconnect cannot falsely report no mutation.
+The worker never retries an effect and returns stable terminal receipts. It runs
+outside global task state. Trusted orchestration must enforce task admission and
+connect public lifecycle controls; this worker is not yet wired into public
+broker/helper IPC or qualified as an installed termination provider.

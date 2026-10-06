@@ -7,7 +7,7 @@
 use super::{OwnProcess, Identity, Result, error};
 use aios_protocol::contracts::ErrorCode;
 use serde::Serialize;
-use std::{os::fd::{AsRawFd, FromRawFd, OwnedFd}, sync::{Arc,atomic::{AtomicBool,Ordering}}};
+use std::{os::fd::AsRawFd, sync::{Arc,atomic::{AtomicBool,Ordering}}};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Preview {
@@ -47,11 +47,7 @@ impl OwnProcess {
         // A provider cannot terminate itself (including its control threads).
         if self.identity.pid==std::process::id(){return Err(ErrorCode::PermissionDenied);}
         let identity=self.inspect()?.identity;
-        let directory=self.directory.try_clone().map_err(error)?;
-        let fd=unsafe{libc::fcntl(self.pidfd.as_raw_fd(),libc::F_DUPFD_CLOEXEC,3)};
-        if fd<0{return Err(error(std::io::Error::last_os_error()));}
-        let native=OwnProcess{directory,pidfd:unsafe{OwnedFd::from_raw_fd(fd)},identity:identity.clone()};
-        native.inspect()?;
+        let native=self.retain()?;
         Ok(Prepared{native,preview:Preview{identity,signal:"SIGTERM",verification_timeout_ms,
             reversible:false,automatic_escalation:false},cancel:Cancellation(Arc::new(AtomicBool::new(false)))})
     }

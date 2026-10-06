@@ -23,7 +23,7 @@ pub fn digest<T: Serialize>(value: &T) -> Result<String> {
 }
 pub fn registry_revision() -> String {
     // Includes the policy implementation contract and the fixed generated registry.
-    format!("{:x}", Sha256::digest(format!("aios-policy-v3-native-process-consent\n{}", aios_protocol::contracts::REGISTRY_SOURCE)))
+    format!("{:x}", Sha256::digest(format!("aios-policy-v4-native-process-task\n{}", aios_protocol::contracts::REGISTRY_SOURCE)))
 }
 fn hash(value: &str) -> bool { value.len() == 64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) }
 fn uuid(value: &str) -> bool { Uuid::parse_str(value).is_ok_and(|v| !v.is_nil() && v.to_string() == value) }

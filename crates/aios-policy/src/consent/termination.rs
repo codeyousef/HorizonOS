@@ -112,6 +112,16 @@ impl TerminationConfirmation {
 }
 impl TerminationDelivery {
     pub fn revoke(&self){self.cancelled.store(true,Ordering::Release);}
+    /// Final nonrenewing clock/Stop check after native caller reauthentication.
+    /// It cannot consume a new decision or refill delivery checks.
+    pub fn check_deadline(&mut self)->Result<()> {
+        let result=(||{
+            if self.cancelled.load(Ordering::Acquire){return Err(ErrorCode::Cancelled);}
+            let now=boottime_ms()?;
+            if now<self.proposal.issued_ms || now>=self.proposal.expires_ms{return Err(ErrorCode::ApprovalExpired);}Ok(())
+        })();
+        if result.is_err(){self.remaining=0;self.revoke();}result
+    }
     /// Trusted broker reauthenticates the original native caller before each
     /// callback, resolves native resources, and supplies the retained adapter's
     /// canonical preview digest. No prompt or model output can renew authority.
