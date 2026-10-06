@@ -10,16 +10,23 @@ import snapshot
 
 def sandbox():
     argv = ["/run/current-system/sw/bin/systemctl", "show", "aios-execd.service",
-        "--property=MainPID,ProtectHome,ProtectSystem,NoNewPrivileges,PrivateNetwork,BindReadOnlyPaths"]
+        "--property=MainPID,ProtectHome,ProtectSystem,NoNewPrivileges,PrivateNetwork,BindReadOnlyPaths,CapabilityBoundingSet"]
     result = subprocess.run(argv, capture_output=True, timeout=10, check=False)
     if result.returncode or len(result.stdout)>65536 or len(result.stderr)>4096:
         raise RuntimeError("installed observer sandbox observation failed")
     values = dict(line.split("=",1) for line in result.stdout.decode().splitlines())
-    expected = {"ProtectHome":"tmpfs", "ProtectSystem":"strict", "NoNewPrivileges":"yes", "PrivateNetwork":"yes"}
+    expected = {"ProtectHome":"tmpfs", "ProtectSystem":"strict", "NoNewPrivileges":"yes", "PrivateNetwork":"yes",
+        "CapabilityBoundingSet":"cap_dac_override cap_sys_ptrace"}
     if any(values.get(key)!=value for key,value in expected.items()) or int(values.get("MainPID","0"))<=1:
         raise RuntimeError("installed observer sandbox differs from the required profile")
     if values.get("BindReadOnlyPaths") not in ("/run/user", "/run/user:/run/user", "/run/user:/run/user:rbind"):
         raise RuntimeError("installed observer requires the fixed read-only runtime parent binding")
+    status = Path("/proc") / values["MainPID"] / "status"
+    capabilities = dict(line.split(":",1) for line in status.read_text().splitlines() if line.startswith(("CapEff:","CapBnd:")))
+    for name in ("CapEff","CapBnd"):
+        if capabilities.get(name,"").strip() != "0000000000080002":
+            raise RuntimeError("installed observer kernel capabilities differ from the required profile")
+        values[name] = capabilities[name].strip()
     return values
 
 

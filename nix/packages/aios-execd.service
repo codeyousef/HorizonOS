@@ -21,7 +21,9 @@ StandardOutput=journal+console
 StandardError=journal+console
 NoNewPrivileges=true
 # Native peer/service executable identity requires readonly proc inspection.
-CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+# Pathname Unix connect requires socket write permission. Runtime filesystem
+# writes remain denied by the read-only mount; only fixed native RPC is exposed.
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SYS_PTRACE
 AmbientCapabilities=
 PrivateUsers=false
 PrivateTmp=true

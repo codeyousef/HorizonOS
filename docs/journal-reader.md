@@ -78,7 +78,13 @@ Each resolution/recheck has a five-second caller deadline and a maximum of
 four native workers. Timed-out workers retain their slot until they finish.
 The installed observer keeps empty home-directory views and a read-only
 binding of `/run/user`. Binding the fixed parent permits user managers to start
-after the observer. Runtime paths are derived only from the authenticated UID;
+after the observer. Its fixed `CAP_DAC_OVERRIDE CAP_SYS_PTRACE` set allows the
+Linux pathname socket write-permission check for this connection; the runtime
+filesystem remains read-only. Qualification checks both declared and actual
+kernel capability bits before and after the native run. Permission failures
+at socket connection produce a fixed diagnostic stage/code and an explicit
+permission error rather than an unsupported-feature claim. Runtime paths are
+derived only from the authenticated UID;
 the bus connection permits fixed unit-property observations, with no arbitrary
 path or D-Bus method in the request. This sandbox exception is documented in
 [the threat model](threat-model.md).

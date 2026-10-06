@@ -108,7 +108,15 @@ fn connect(uid: u32, manager_pid: u32) -> Result<(UnixStream, direct::Bus)> {
     // This is systemd's native point-to-point manager endpoint, not a session
     // application bus. Its actual kernel peer must be the root-managed PID.
     // No alternate endpoint, claimed auth UID, fallback or mutation RPC exists.
-    let proof = UnixStream::connect(format!("/run/user/{uid}/systemd/private")).map_err(|_| ErrorCode::UnsupportedCapability)?;
+    let proof = UnixStream::connect(format!("/run/user/{uid}/systemd/private")).map_err(|error| {
+        let code = match error.kind() {
+            std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
+            std::io::ErrorKind::NotFound => ErrorCode::TargetNotFound,
+            std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset => ErrorCode::TargetChanged,
+            _ => ErrorCode::PartialResult,
+        };
+        diagnostic("runtime-socket-connect", code)
+    })?;
     peer(&proof, uid, manager_pid)?;
     proof.set_read_timeout(Some(Duration::from_secs(2))).map_err(|_| ErrorCode::TargetChanged)?;
     proof.set_write_timeout(Some(Duration::from_secs(2))).map_err(|_| ErrorCode::TargetChanged)?;

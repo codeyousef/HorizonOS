@@ -94,6 +94,13 @@ and a read-only binding of the fixed `/run/user` directory. The binding must
 include runtime directories created after observer startup; individually
 binding absent user sockets would not support later logins. This explicitly
 exposes user runtime metadata and Unix sockets to the trusted root component.
+Its fixed capability set is `CAP_DAC_OVERRIDE CAP_SYS_PTRACE`. Linux pathname
+socket connection checks write permission even for read-only D-Bus methods;
+`CAP_DAC_READ_SEARCH` alone cannot connect to the user's owner-only manager
+socket. The broader DAC capability is an explicit root-component exception,
+not a grant to the requester. `ProtectSystem=strict`, empty home views and the
+read-only runtime mount still deny filesystem writes there. Only the existing
+root-owned candidate/transaction directories and private scratch remain writable.
 It does not expose home directories or provide a caller-selected file or bus
 endpoint. Only immutable configured normal readers may resolve user units.
 The adapter derives the UID from the native originating system-bus sender,

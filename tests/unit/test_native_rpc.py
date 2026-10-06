@@ -63,7 +63,8 @@ class NativeRpcTests(unittest.TestCase):
         batch_unchecked={**proof,"batch_evidence_boot_verified":False}
         drifted={**proof,"boot_id":"another-boot"}
         properties={"MainPID":"50","ProtectHome":"tmpfs","ProtectSystem":"strict","NoNewPrivileges":"yes",
-            "PrivateNetwork":"yes","BindReadOnlyPaths":"/run/user:/run/user:rbind"}
+            "PrivateNetwork":"yes","BindReadOnlyPaths":"/run/user:/run/user:rbind",
+            "CapabilityBoundingSet":"cap_dac_override cap_sys_ptrace","CapEff":"0000000000080002","CapBnd":"0000000000080002"}
         capsule={"before":properties,"after":properties,"empty_homes_and_readonly_runtime_binding_verified":True}
         capsule_line=b"AIOS_INSTALLED_JOURNAL_SANDBOX="+json.dumps(capsule).encode()+b"\n"
         cases=((b"",ExitCode.VERIFICATION_FAILURE),
@@ -85,6 +86,13 @@ class NativeRpcTests(unittest.TestCase):
                     {**capsule,"before":{**properties,"ProtectHome":"no"},"after":{**properties,"ProtectHome":"no"}},
                     {**capsule,"before":{**properties,"BindReadOnlyPaths":"/home"},"after":{**properties,"BindReadOnlyPaths":"/home"}}):
             cases.append((proof_line+b"AIOS_INSTALLED_JOURNAL_SANDBOX="+json.dumps(bad).encode()+b"\n",ExitCode.VERIFICATION_FAILURE))
+        for key in ("CapabilityBoundingSet","CapEff","CapBnd"):
+            for value in (None,"cap_dac_read_search cap_sys_ptrace","0000000000080004","0000000000280002"):
+                changed=dict(properties)
+                if value is None:changed.pop(key)
+                else:changed[key]=value
+                bad={**capsule,"before":changed,"after":changed}
+                cases.append((proof_line+b"AIOS_INSTALLED_JOURNAL_SANDBOX="+json.dumps(bad).encode()+b"\n",ExitCode.VERIFICATION_FAILURE))
         for output,expected in cases:
             with patch.object(native_rpc.acceptance,"STORAGE_ROOT",self.root), \
                  patch.object(native_rpc.guest,"enrolled_identity",return_value=({"host_key_fingerprint":"fixture-pin"},IDENTITY)), \

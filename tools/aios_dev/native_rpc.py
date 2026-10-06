@@ -156,7 +156,8 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False):
                 and isinstance(journal_sandbox.get("before"),dict)
                 and journal_sandbox["before"].get("MainPID")==str(observation["observer_pid"])
                 and all(journal_sandbox["before"].get(key)==value for key,value in
-                    {"ProtectHome":"tmpfs","ProtectSystem":"strict","NoNewPrivileges":"yes","PrivateNetwork":"yes"}.items())
+                    {"ProtectHome":"tmpfs","ProtectSystem":"strict","NoNewPrivileges":"yes","PrivateNetwork":"yes",
+                     "CapabilityBoundingSet":"cap_dac_override cap_sys_ptrace","CapEff":"0000000000080002","CapBnd":"0000000000080002"}.items())
                 and journal_sandbox["before"].get("BindReadOnlyPaths") in
                     ("/run/user","/run/user:/run/user","/run/user:/run/user:rbind"))
         else:
