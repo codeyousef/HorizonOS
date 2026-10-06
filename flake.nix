@@ -73,6 +73,7 @@
         buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
       });
       executor = (productPackage "aios-exec" "aios-exec" "aios-execd").overrideAttrs (old: {
+        AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";
         nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
         buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
         postInstall = (old.postInstall or "") + ''

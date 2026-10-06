@@ -1,0 +1,157 @@
+//! Own-user unit identity from the root-managed native user manager.
+//! No UID, endpoint, bus owner or method is accepted from a request.
+use super::NativeUser;
+use aios_protocol::contracts::ErrorCode;
+use serde::Serialize;
+use std::{fs, os::{fd::AsRawFd, unix::{fs::{MetadataExt, FileTypeExt}, net::UnixStream}}, path::PathBuf,
+    sync::{atomic::{AtomicUsize, Ordering}, mpsc}, time::{Duration, Instant}};
+use zbus::{blocking::{Connection, Proxy}, zvariant::OwnedObjectPath};
+type Result<T> = std::result::Result<T, ErrorCode>;
+static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+struct Admission(&'static AtomicUsize);
+impl Admission {
+    fn acquire(counter: &'static AtomicUsize) -> Result<Self> {
+        counter.fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| if value < 4 { Some(value + 1) } else { None })
+            .map_err(|_| ErrorCode::ResourceExhausted)?; Ok(Self(counter))
+    }
+}
+impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); } }
+fn bounded(user: NativeUser, name: String) -> Result<Identity> {
+    let admission = Admission::acquire(&ACTIVE)?;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::Builder::new().name("journal-user-unit".into()).spawn(move || {
+        let _admission = admission; let _ = sender.send(observe(&user, &name));
+    }).map_err(|_| ErrorCode::ResourceExhausted)?;
+    // A daemon can stall even during D-Bus authentication, before method
+    // timeouts apply. Abandoned work retains its slot until it actually ends.
+    receiver.recv_timeout(Duration::from_secs(5)).map_err(|error| match error {
+        mpsc::RecvTimeoutError::Timeout => ErrorCode::DeadlineExceeded,
+        mpsc::RecvTimeoutError::Disconnected => ErrorCode::PartialResult,
+    })?
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct Manager { root_owner: String, pid: u32, started_usec: u64, invocation: Vec<u8> }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct Endpoint { runtime_inode: u64, device: u64, inode: u64, mode: u32 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Identity { uid: u32, boot_id: String, name: String, manager: Manager, endpoint: Endpoint, owner: String, path: String, invocation: Vec<u8> }
+/// Opaque native binding. Wire data cannot reconstruct it.
+#[derive(Clone, Debug)]
+pub struct UserUnit { user: NativeUser, identity: Identity }
+fn proxy<'a>(bus: &Connection, owner: &'a str, path: &'a str, interface: &'a str) -> Result<Proxy<'a>> {
+    zbus::blocking::proxy::Builder::new(bus).destination(owner).map_err(crate::services::dbus_error)?
+        .path(path).map_err(crate::services::dbus_error)?.interface(interface).map_err(crate::services::dbus_error)?
+        .cache_properties(zbus::proxy::CacheProperties::No).build().map_err(crate::services::dbus_error)
+}
+fn manager(uid: u32) -> Result<Manager> {
+    let bus = crate::services::system_connection()?;
+    let owner = crate::services::root_owner(&bus, "org.freedesktop.systemd1")?;
+    let native = proxy(&bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus")?;
+    if native.call::<_, _, u32>("GetConnectionUnixProcessID", &(owner.as_str(),)).map_err(crate::services::dbus_error)? != 1 { return Err(ErrorCode::PermissionDenied); }
+    let m = proxy(&bus, &owner, "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager")?;
+    let name = format!("user@{uid}.service");
+    let path: OwnedObjectPath = m.call("GetUnit", &(name.as_str(),)).map_err(crate::services::dbus_error)?;
+    let unit = proxy(&bus, &owner, path.as_str(), "org.freedesktop.systemd1.Unit")?;
+    let service = proxy(&bus, &owner, path.as_str(), "org.freedesktop.systemd1.Service")?;
+    let id: String = unit.get_property("Id").map_err(crate::services::dbus_error)?;
+    let active: String = unit.get_property("ActiveState").map_err(crate::services::dbus_error)?;
+    let group: String = service.get_property("ControlGroup").map_err(crate::services::dbus_error)?;
+    let pid: u32 = service.get_property("MainPID").map_err(crate::services::dbus_error)?;
+    let started_usec: u64 = service.get_property("ExecMainStartTimestampMonotonic").map_err(crate::services::dbus_error)?;
+    let invocation: Vec<u8> = unit.get_property("InvocationID").map_err(crate::services::dbus_error)?;
+    type Commands = Vec<(String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32)>;
+    let commands: Commands = service.get_property("ExecStart").map_err(crate::services::dbus_error)?;
+    let expected = option_env!("AIOS_USER_MANAGER").ok_or(ErrorCode::UnsupportedCapability)?;
+    if id != name || active != "active" || pid <= 1 || started_usec == 0 || invocation.len() != 16 || invocation.iter().all(|v| *v == 0)
+        || group != format!("/user.slice/user-{uid}.slice/user@{uid}.service")
+        || commands.len() != 1 || commands[0].0 != expected || !commands[0].1.iter().any(|v| v == "--user") || commands[0].2 {
+        return Err(ErrorCode::PermissionDenied);
+    }
+    if crate::services::root_owner(&bus, "org.freedesktop.systemd1")? != owner { return Err(ErrorCode::TargetChanged); }
+    Ok(Manager { root_owner: owner.clone(), pid, started_usec, invocation })
+}
+fn endpoint(uid: u32) -> Result<Endpoint> {
+    let directory = PathBuf::from(format!("/run/user/{uid}"));
+    let runtime = fs::symlink_metadata(&directory).map_err(|_| ErrorCode::TargetNotFound)?;
+    if !runtime.is_dir() || runtime.uid() != uid || runtime.mode() & 0o077 != 0 || directory.canonicalize().map_err(|_| ErrorCode::TargetChanged)? != directory {
+        return Err(ErrorCode::PermissionDenied);
+    }
+    let bus = fs::symlink_metadata(directory.join("bus")).map_err(|_| ErrorCode::TargetNotFound)?;
+    if !bus.file_type().is_socket() || bus.uid() != uid { return Err(ErrorCode::PermissionDenied); }
+    Ok(Endpoint { runtime_inode: runtime.ino(), device: bus.dev(), inode: bus.ino(), mode: bus.mode() })
+}
+fn peer(stream: &UnixStream, uid: u32, pid: u32) -> Result<()> {
+    let mut credentials = std::mem::MaybeUninit::<libc::ucred>::uninit();
+    let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    if unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, credentials.as_mut_ptr().cast(), &mut size) } != 0
+        || size as usize != std::mem::size_of::<libc::ucred>() { return Err(ErrorCode::PermissionDenied); }
+    let credentials = unsafe { credentials.assume_init() };
+    if credentials.uid != uid || u32::try_from(credentials.pid).ok() != Some(pid) { return Err(ErrorCode::PermissionDenied); }
+    let mut poll = libc::pollfd { fd: stream.as_raw_fd(), events: libc::POLLRDHUP, revents: 0 };
+    if unsafe { libc::poll(&mut poll, 1, 0) } < 0 || poll.revents & (libc::POLLRDHUP | libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 { return Err(ErrorCode::TargetChanged); }
+    Ok(())
+}
+fn bus_owner(bus: &Connection, uid: u32, pid: u32) -> Result<String> {
+    let native = proxy(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus")?;
+    let owner: String = native.call("GetNameOwner", &("org.freedesktop.systemd1",)).map_err(crate::services::dbus_error)?;
+    if !owner.starts_with(':')
+        || native.call::<_, _, u32>("GetConnectionUnixUser", &(owner.as_str(),)).map_err(crate::services::dbus_error)? != uid
+        || native.call::<_, _, u32>("GetConnectionUnixProcessID", &(owner.as_str(),)).map_err(crate::services::dbus_error)? != pid { return Err(ErrorCode::PermissionDenied); }
+    Ok(owner)
+}
+fn observe(user: &NativeUser, name: &str) -> Result<Identity> {
+    crate::services::validate_service_name(name)?; user.verify()?;
+    let started = Instant::now(); let uid = user.uid(); let before = manager(uid)?; let socket = endpoint(uid)?;
+    let proof = UnixStream::connect(format!("/run/user/{uid}/bus")).map_err(|_| ErrorCode::UnsupportedCapability)?;
+    peer(&proof, uid, before.pid)?;
+    proof.set_read_timeout(Some(Duration::from_secs(2))).map_err(|_| ErrorCode::TargetChanged)?;
+    proof.set_write_timeout(Some(Duration::from_secs(2))).map_err(|_| ErrorCode::TargetChanged)?;
+    let bus = zbus::blocking::connection::Builder::async_io_unix_stream(proof.try_clone().map_err(|_| ErrorCode::TargetChanged)?)
+        .method_timeout(Duration::from_millis(250)).build().map_err(crate::services::dbus_error)?;
+    let owner = bus_owner(&bus, uid, before.pid)?;
+    let m = proxy(&bus, &owner, "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager")?;
+    let path: OwnedObjectPath = m.call("GetUnit", &(name,)).map_err(crate::services::dbus_error)?;
+    let unit = proxy(&bus, &owner, path.as_str(), "org.freedesktop.systemd1.Unit")?;
+    let id: String = unit.get_property("Id").map_err(crate::services::dbus_error)?;
+    let load: String = unit.get_property("LoadState").map_err(crate::services::dbus_error)?;
+    let invocation: Vec<u8> = unit.get_property("InvocationID").map_err(crate::services::dbus_error)?;
+    if id != name || load != "loaded" || invocation.len() != 16 { return Err(ErrorCode::TargetChanged); }
+    if manager(uid)? != before || endpoint(uid)? != socket || bus_owner(&bus, uid, before.pid)? != owner { return Err(ErrorCode::TargetChanged); }
+    peer(&proof, uid, before.pid)?; user.verify()?;
+    if unit.get_property::<String>("Id").map_err(crate::services::dbus_error)? != id
+        || unit.get_property::<String>("LoadState").map_err(crate::services::dbus_error)? != load
+        || unit.get_property::<Vec<u8>>("InvocationID").map_err(crate::services::dbus_error)? != invocation {
+        return Err(ErrorCode::TargetChanged);
+    }
+    if started.elapsed() >= Duration::from_secs(5) { return Err(ErrorCode::DeadlineExceeded); }
+    Ok(Identity { uid, boot_id: user.boot.clone(), name: name.into(), manager: before, endpoint: socket, owner: owner.clone(), path: path.to_string(), invocation })
+}
+impl NativeUser {
+    pub fn resolve_unit(&self, name: &str) -> Result<UserUnit> {
+        crate::services::validate_service_name(name)?;
+        Ok(UserUnit { user: self.clone(), identity: bounded(self.clone(), name.into())? })
+    }
+}
+impl UserUnit {
+    pub fn name(&self) -> &str { &self.identity.name }
+    pub fn identity(&self) -> &Identity { &self.identity }
+    pub fn verify(&self) -> Result<()> {
+        if bounded(self.user.clone(), self.name().into())? != self.identity { return Err(ErrorCode::TargetChanged); } Ok(())
+    }
+}
+
+#[cfg(test)] mod tests {
+    use super::*;
+    #[test] fn abandoned_observations_keep_bounded_admission_until_native_work_ends() {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let workers = (0..4).map(|_| Admission::acquire(&COUNTER).unwrap()).collect::<Vec<_>>();
+        assert!(matches!(Admission::acquire(&COUNTER), Err(ErrorCode::ResourceExhausted)));
+        let (sender, receiver) = mpsc::sync_channel::<()>(1);
+        assert!(matches!(receiver.recv_timeout(Duration::from_millis(1)), Err(mpsc::RecvTimeoutError::Timeout)));
+        assert_eq!(COUNTER.load(Ordering::Acquire), 4);
+        drop(receiver); assert!(sender.send(()).is_err());
+        assert_eq!(COUNTER.load(Ordering::Acquire), 4);
+        drop(workers); assert_eq!(COUNTER.load(Ordering::Acquire), 0);
+        assert!(Admission::acquire(&COUNTER).is_ok());
+    }
+}

@@ -42,7 +42,20 @@ struct Cursor {
     owner:CallerIdentity, arguments_sha256:String, query:Query,
     continuation:journal::Continuation, expires:u64,
 }
-struct Service { owner:CallerIdentity, unit:String, expires:u64 }
+#[derive(Clone)]
+enum NativeService { System(String), User(journal::user::unit::UserUnit) }
+impl NativeService {
+    fn verify(&self,id:&str)->Result<()> {
+        match self { Self::System(name)=>{aios_system::services::read_service_status(name,id)?;}, Self::User(unit)=>unit.verify()? }
+        Ok(())
+    }
+    fn query_unit(&self)->Unit { match self { Self::System(name)=>Unit::System(name.clone()), Self::User(unit)=>Unit::User(unit.name().into()) } }
+    fn source(&self)->Source { match self { Self::System(_)=>Source::System, Self::User(_)=>Source::User } }
+    fn digest(&self)->Result<String> {
+        match self { Self::System(name)=>Ok(aios_policy::digest(name)?), Self::User(unit)=>Ok(aios_policy::digest(unit.identity())?) }
+    }
+}
+struct Service { owner:CallerIdentity, unit:NativeService, expires:u64 }
 struct Evidence {
     owner:CallerIdentity, expires:u64, payload:Value, cursor:String, boot:String, hash:String,
 }
@@ -80,8 +93,19 @@ impl JournalState {
         }
         let id=uuid::Uuid::new_v4().to_string();
         aios_system::services::read_service_status(unit,&id)?;
-        self.services.insert(id.clone(),Service{owner:caller.identity().clone(),unit:unit.into(),expires:aios_policy::boottime_ms()?.checked_add(30000).ok_or(ErrorCode::ResourceExhausted)?});
+        self.services.insert(id.clone(),Service{owner:caller.identity().clone(),unit:NativeService::System(unit.into()),expires:aios_policy::boottime_ms()?.checked_add(30000).ok_or(ErrorCode::ResourceExhausted)?});
         Ok(super::envelope("resolve_log_service",json!({"service_id":id,"expires_after_ms":30000,"scope":"system"})))
+    }
+    pub(super) fn resolve_user_service(&mut self,caller:&VerifiedCaller,name:&str)->Result<Value> {
+        self.cleanup()?;let owner=caller.identity();reader(owner.uid)?;
+        aios_system::services::validate_service_name(name)?;
+        if self.services.len()>=4096 || self.services.values().filter(|s|s.owner.uid==owner.uid).count()>=256 { return Err(ErrorCode::ResourceExhausted.into()); }
+        let native=NativeUser::observe(&owner.sender,&owner.bus_id)?;
+        if native.uid()!=owner.uid {return Err(ErrorCode::TargetChanged.into());}
+        let unit=native.resolve_unit(name)?;native.verify()?;reader(owner.uid)?;
+        let id=uuid::Uuid::new_v4().to_string();
+        self.services.insert(id.clone(),Service{owner:owner.clone(),unit:NativeService::User(unit),expires:aios_policy::boottime_ms()?.checked_add(30000).ok_or(ErrorCode::ResourceExhausted)?});
+        Ok(super::envelope("resolve_user_log_service",json!({"service_id":id,"expires_after_ms":30000,"scope":"user"})))
     }
     pub(super) fn logs(&mut self,caller:&VerifiedCaller,action:&Action)->Result<Value> {
         self.cleanup()?;let owner=caller.identity();reader(owner.uid)?;
@@ -96,12 +120,12 @@ impl JournalState {
         let service=if let Some(id)=arguments["service_id"].as_str() {
             let service=self.services.get(id).ok_or(ErrorCode::TargetNotFound)?;
             if service.owner!=*owner { return Err(ErrorCode::PermissionDenied.into()); }
-            aios_system::services::read_service_status(&service.unit,id)?;
+            service.unit.verify(id)?;
             Some(service.unit.clone())
         } else {None};
         let source=match arguments["source"].as_str() {
             Some("user")=>Source::User,Some("system")=>Source::System,Some("kernel")=>Source::Kernel,
-            None if service.is_some()=>Source::System,
+            None if service.is_some()=>service.as_ref().unwrap().source(),
             _=>return Err(ErrorCode::InvalidArgument.into()),
         };
         let query=if let Some(id)=&reference {
@@ -112,7 +136,7 @@ impl JournalState {
         } else {
             let until=match arguments["until"].as_str(){Some(t)=>micros(t)?,None=>u64::try_from(OffsetDateTime::now_utc().unix_timestamp_nanos()/1000).map_err(|_|ErrorCode::InvalidArgument)?};
             let since=match arguments["since"].as_str(){Some(t)=>micros(t)?,None=>until.saturating_sub(600_000_000)};
-            Query::for_native_user(&native,source,service.as_ref().map(|u|Unit::System(u.clone())),arguments["boot_id"].as_str().unwrap_or("current"),
+            Query::for_native_user(&native,source,service.as_ref().map(NativeService::query_unit),arguments["boot_id"].as_str().unwrap_or("current"),
                 since,until,arguments["priority_max"].as_u64().unwrap_or(7) as u8,
                 arguments["max_entries"].as_u64().unwrap_or(20) as usize)?
         };
@@ -122,7 +146,7 @@ impl JournalState {
         }
         if let Some(id)=&reference { resources.push(Resource{field:"cursor".into(),kind:"query-bound-cursor".into(),handle:id.clone(),identity_sha256:digest.clone()}); }
         if let (Some(unit),Some(id))=(&service,arguments["service_id"].as_str()) {
-            resources.push(Resource{field:"service_id".into(),kind:"scope-owner-expiry".into(),handle:id.into(),identity_sha256:aios_policy::digest(unit)?});
+            resources.push(Resource{field:"service_id".into(),kind:"scope-owner-expiry".into(),handle:id.into(),identity_sha256:unit.digest()?});
         }
         let resources=Resources(resources);
         let policy=aios_policy::Policy::new(owner.boot_id.clone(),aios_policy::registry_revision())?;
@@ -141,7 +165,7 @@ impl JournalState {
         }
         if let (Some(unit),Some(id))=(&service,arguments["service_id"].as_str()) {
             if self.services.get(id).is_none_or(|s|s.expires<=aios_policy::boottime_ms().unwrap_or(u64::MAX)) { return Err(ErrorCode::ApprovalExpired.into()); }
-            aios_system::services::read_service_status(unit,id)?;
+            unit.verify(id)?;
         }
         policy.check_read(&grant,&subject(owner),&request_id,action,&resources,aios_policy::boottime_ms()?)?;
         let expires=aios_policy::boottime_ms()?.checked_add(30000).ok_or(ErrorCode::ResourceExhausted)?;

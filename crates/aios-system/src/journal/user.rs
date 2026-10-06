@@ -4,6 +4,7 @@ use aios_protocol::contracts::ErrorCode;
 use std::{fs, os::unix::fs::MetadataExt, path::Path};
 use zbus::blocking::Proxy;
 use super::Target;
+pub mod unit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeUser {

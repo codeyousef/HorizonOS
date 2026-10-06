@@ -187,6 +187,10 @@ surface!(System,Scope::System,"org.aios.System1",[(info,"system.info"),(services
         if !crate::uuid(evidence_id) {return Err(ErrorCode::InvalidArgument.into());}
         self.executor.call(header,Operation::JournalEvidence(evidence_id.into())).await
     }
+    async fn resolve_user_log_service(&self,unit_name:&str,#[zbus(header)]header:Header<'_>)->Result<String> {
+        if unit_name.len()>255 {return Err(ErrorCode::InvalidArgument.into());}
+        self.executor.call(header,Operation::JournalResolveUserService(unit_name.into())).await
+    }
 );
 surface!(Packages,Scope::Packages,"org.aios.Packages1",[(search,"packages.search"),(info,"packages.info"),
     (installed,"packages.installed"),(install,"packages.install"),(remove,"packages.remove"),(upgrade_plan,"packages.upgrade_plan")],);

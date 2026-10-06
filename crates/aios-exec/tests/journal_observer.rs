@@ -49,6 +49,85 @@ fn verify_records(proxy:&Proxy<'_>,original:&[Value],result:&Value,boot:&str,uid
     assert!(!result.to_string().contains("fake-private-value"));
 }
 
+// Only a UUID-named own-user transient unit is created. Keep its actual
+// invocation for cleanup; a substituted/restarted unit is never stopped.
+struct UserUnitFixture { name:String, invocation:String }
+fn user_command(program:&str)->Command {
+    let uid=unsafe{libc::geteuid()};let mut command=Command::new(format!("/run/current-system/sw/bin/{program}"));
+    command.env("XDG_RUNTIME_DIR",format!("/run/user/{uid}"))
+        .env("DBUS_SESSION_BUS_ADDRESS",format!("unix:path=/run/user/{uid}/bus"));command
+}
+impl UserUnitFixture {
+    fn invocation(&self)->String {
+        let output=user_command("systemctl").args(["--user","show","--value","--property=InvocationID",&self.name]).output().unwrap();
+        assert!(output.status.success());let value=String::from_utf8(output.stdout).unwrap().trim().to_owned();
+        assert_eq!(value.len(),32);assert!(value.bytes().all(|b|b.is_ascii_hexdigit()));assert_ne!(value,"0".repeat(32));value
+    }
+    fn stop(&mut self) {
+        if self.invocation.is_empty(){return;}
+        assert_eq!(self.invocation(),self.invocation,"owned fixture invocation changed; cleanup refused");
+        assert!(user_command("systemctl").args(["--user","stop",&self.name]).status().unwrap().success());
+        self.invocation.clear();
+    }
+}
+impl Drop for UserUnitFixture {
+    fn drop(&mut self) {
+        if !self.invocation.is_empty() {
+            let cleanup=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||self.stop()));
+            if cleanup.is_err(){eprintln!("OWNED_USER_UNIT_CLEANUP_REFUSED {}",self.name);}
+        }
+    }
+}
+fn user_unit_records(proxy:&Proxy<'_>,foreign:&Proxy<'_>,boot:&str,uid:u32)->String {
+    let mut fixture=UserUnitFixture{name:format!("horizon-journal-fixture-{}.service",uuid::Uuid::new_v4().simple()),invocation:String::new()};
+    let tag=format!("horizon-observer-userunit-{}",uuid::Uuid::new_v4().simple());
+    let messages=[format!("{tag} user {uid} startup failed."),format!("{tag} PASSWORD=fake-private-value"),format!("{tag} user {uid} retry scheduled.")];
+    let script=format!("for value in {}: print(value)",serde_json::to_string(&messages).unwrap());
+    let since=now();
+    // The oneshot start job completes after the logger exits. RemainAfterExit
+    // keeps the unit loaded for identity checks; --wait would wait for stop.
+    let output=user_command("systemd-run").args(["--user","--quiet","--unit",&fixture.name,
+        "--property=Type=oneshot","--property=RemainAfterExit=yes","/run/current-system/sw/bin/systemd-cat",
+        "--priority=notice","--identifier",&tag,"/run/current-system/sw/bin/python3","-c",&script]).output().unwrap();
+    assert!(output.status.success(),"owned user fixture creation failed");fixture.invocation=fixture.invocation();
+    let deadline=Instant::now()+Duration::from_secs(5);
+    let original:Vec<Value>=loop {
+        let output=Command::new("/run/current-system/sw/bin/journalctl").args(["--quiet","--no-pager","--output=json",
+            "--output-fields=MESSAGE,__CURSOR,__REALTIME_TIMESTAMP,_UID,_SYSTEMD_USER_UNIT,_BOOT_ID,PRIORITY",
+            "--boot","--identifier",&tag,"--lines=3",&format!("_UID={uid}"),&format!("_SYSTEMD_USER_UNIT={}",fixture.name)])
+            .stdin(Stdio::null()).output().unwrap();
+        assert!(output.status.success());assert!(output.stdout.len()<131072 && output.stderr.len()<4096);
+        let rows:Vec<Value>=String::from_utf8(output.stdout).unwrap().lines().map(|s|serde_json::from_str(s).unwrap()).collect();
+        if rows.len()==3{break rows;}assert!(Instant::now()<deadline);thread::sleep(Duration::from_millis(20));
+    };
+    assert!(original.iter().all(|row|row["_SYSTEMD_USER_UNIT"]==fixture.name));
+    let until=now();let resolved=call(proxy,"ResolveUserLogService",(fixture.name.as_str(),));
+    assert_eq!(resolved["data"]["scope"],"user");let handle=resolved["data"]["service_id"].as_str().unwrap();
+    let args=json!({"service_id":handle,"boot_id":boot,"since":timestamp(since),"until":timestamp(until),"max_entries":200});
+    let observed=logs(proxy,args.clone());verify_records(proxy,&original,&observed,boot,uid);
+    assert!(observed["data"]["entries"].as_array().unwrap().iter().all(|row|row["service_id"]==handle));
+    denied(foreign,"Logs",(request(args.clone()),),"PERMISSION_DENIED");
+    denied(foreign,"GetJournalEvidence",(observed["evidence_ids"][0].as_str().unwrap(),),"PERMISSION_DENIED");
+    let mut wrong=args;wrong["source"]=json!("system");denied(proxy,"Logs",(request(wrong),),"INVALID_ARGUMENT");
+    denied(proxy,"ResolveUserLogService",("../sshd.service",),"INVALID_ARGUMENT");
+    denied(proxy,"ResolveUserLogService",("horizon-missing-unit-11111111111111111111111111111111.service",),"TARGET_NOT_FOUND");
+    // Restart our own fixed fixture only. The old invocation-bound read scope
+    // must fail, and a fresh explicit resolution may authorize the new unit.
+    assert_eq!(fixture.invocation(),fixture.invocation);
+    assert!(user_command("systemctl").args(["--user","restart",&fixture.name]).status().unwrap().success());
+    let previous=fixture.invocation.clone();fixture.invocation=fixture.invocation();assert_ne!(fixture.invocation,previous);
+    denied(proxy,"Logs",(request(json!({"service_id":handle})),),"TARGET_CHANGED");
+    let renewed=call(proxy,"ResolveUserLogService",(fixture.name.as_str(),));
+    let fresh=renewed["data"]["service_id"].as_str().unwrap().to_owned();assert_ne!(fresh,handle);
+    assert!(!logs(proxy,json!({"service_id":fresh}))["data"]["entries"].as_array().unwrap().is_empty());
+    fixture.stop();
+    println!("AIOS_INSTALLED_JOURNAL_USER_UNIT={}",json!({"uid":uid,"name":fixture.name,"controlled_messages":3,
+        "own_user_manager_and_kernel_socket_bound":true,"native_user_unit_filter":true,"redacted_evidence_verified":true,
+        "foreign_sender_handle_and_evidence_refused":true,"source_mismatch_refused":true,"changed_invocation_refused":true,
+        "fresh_resolution_distinct":true,"owned_cleanup_complete":true}));
+    fresh
+}
+
 #[test]
 #[ignore="requires the newly installed root System1 observer in an enrolled NixOS guest"]
 fn installed_journal_filters_private_cursors_and_sanitized_evidence() {
@@ -120,6 +199,7 @@ fn installed_journal_filters_private_cursors_and_sanitized_evidence() {
     let second_evidence=call(&proxy,"GetJournalEvidence",(second["data"]["entries"][0]["evidence_id"].as_str().unwrap(),));
     assert_ne!(first_evidence["data"]["source_locator"]["cursor"],second_evidence["data"]["source_locator"]["cursor"]);
     let other=Connection::system().unwrap();let foreign=Proxy::new(&other,"org.aios.System1","/org/aios/System1","org.aios.System1").unwrap();
+    let user_service=user_unit_records(&proxy,&foreign,&boot,uid);
     denied(&foreign,"Logs",(request(page.clone()),),"PERMISSION_DENIED");
     denied(&foreign,"GetJournalEvidence",(first["data"]["entries"][0]["evidence_id"].as_str().unwrap(),),"PERMISSION_DENIED");
     let expiring_page=page.clone();
@@ -142,11 +222,13 @@ fn installed_journal_filters_private_cursors_and_sanitized_evidence() {
     denied(&proxy,"Logs",(request(expiring_page),),"TARGET_NOT_FOUND");
     denied(&proxy,"GetJournalEvidence",(first["data"]["entries"][0]["evidence_id"].as_str().unwrap(),),"TARGET_NOT_FOUND");
     denied(&proxy,"Logs",(request(json!({"service_id":id,"source":"system"})),),"TARGET_NOT_FOUND");
+    denied(&proxy,"Logs",(request(json!({"service_id":user_service})),),"TARGET_NOT_FOUND");
     println!("AIOS_INSTALLED_JOURNAL={}",json!({"evidence_kind":"real-installed-native-journal-observer","installed_executable":installed,
         "observer_uid":observer_uid,"observer_pid":observer_pid,"uid":uid,"boot_id":boot,"controlled_messages":3,
         "own_uid_filter":true,"system_unit_filter":true,"kernel_source":true,"time_filter":true,"priority_filter":true,
         "entry_limit":true,"cursor_continuation":true,"cross_connection_refused":true,"query_drift_refused":true,
         "missing_boot_refused":true,"claimed_uid_refused":true,"redaction_before_evidence":true,"evidence_hash_verified":true,
         "expiry_refused":true,"historical_boot_filter":true,"historical_boot_id":historical_boot,
-        "historical_controlled_messages":3,"batch_evidence_boot_verified":true}));
+        "historical_controlled_messages":3,"batch_evidence_boot_verified":true,"user_unit_filter":true,
+        "native_user_manager_bound":true,"unit_change_refused":true,"user_unit_expiry_refused":true}));
 }

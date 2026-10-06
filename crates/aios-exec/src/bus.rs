@@ -370,6 +370,7 @@ impl Runtime {
             Operation::SystemAction(scope, expected, request) => self.reads.dispatch(caller, scope, expected, &request),
             Operation::JournalEvidence(id) => self.reads.journal.evidence(caller,&id),
             Operation::JournalResolveService(unit) => self.reads.journal.resolve_service(caller,&unit),
+            Operation::JournalResolveUserService(unit) => self.reads.journal.resolve_user_service(caller,&unit),
             Operation::Capabilities => Ok(envelope(
                 "capabilities",
                 json!({"interface":NAME,"prepare":true,"private_plans":true,
@@ -431,6 +432,7 @@ impl Runtime {
 enum Operation {
     JournalEvidence(String),
     JournalResolveService(String),
+    JournalResolveUserService(String),
     SystemCapabilities(system::Scope),
     SystemAction(system::Scope, &'static str, String),
     Capabilities,

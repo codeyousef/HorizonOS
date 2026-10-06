@@ -50,7 +50,10 @@ class NativeRpcTests(unittest.TestCase):
             "historical_boot_id":"11111111-1111-4111-8111-111111111111","historical_controlled_messages":3}
         for key in ("own_uid_filter","system_unit_filter","kernel_source","time_filter","priority_filter","entry_limit",
             "cursor_continuation","cross_connection_refused","query_drift_refused","missing_boot_refused","claimed_uid_refused",
-            "redaction_before_evidence","evidence_hash_verified","expiry_refused","historical_boot_filter","batch_evidence_boot_verified"):proof[key]=True
+            "redaction_before_evidence","evidence_hash_verified","expiry_refused","historical_boot_filter","batch_evidence_boot_verified","user_unit_filter",
+            "native_user_manager_bound","unit_change_refused","user_unit_expiry_refused"):proof[key]=True
+        user_unit_missing={key:value for key,value in proof.items() if key!="user_unit_filter"}
+        unit_change_unchecked={**proof,"unit_change_refused":False}
         incomplete={**proof,"redaction_before_evidence":False}
         expired_unchecked={**proof,"expiry_refused":False}
         expiry_missing={key:value for key,value in proof.items() if key!="expiry_refused"}
@@ -60,6 +63,8 @@ class NativeRpcTests(unittest.TestCase):
         batch_unchecked={**proof,"batch_evidence_boot_verified":False}
         drifted={**proof,"boot_id":"another-boot"}
         for output,expected in ((b"",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(user_unit_missing).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
+            (b"AIOS_INSTALLED_JOURNAL="+json.dumps(unit_change_unchecked).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(incomplete).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(expired_unchecked).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),
             (b"AIOS_INSTALLED_JOURNAL="+json.dumps(expiry_missing).encode()+b"\n",ExitCode.VERIFICATION_FAILURE),

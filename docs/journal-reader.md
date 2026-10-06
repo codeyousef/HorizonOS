@@ -61,8 +61,19 @@ Its scope checks run before and after native I/O. Wire cursors preserve the
 original normalized query and are bound to the complete authenticated peer,
 argument hash and 30-second expiry. A changed query, reconnect, expired
 reference or disappeared native cursor fails explicitly. There are at most
-4,096 live service/cursor handles each, with 256 per UID. User-unit handle
-resolution is not exposed by this system-service resolver.
+4,096 live service/cursor handles each, with 256 per UID.
+
+`ResolveUserLogService` resolves a service only through the authenticated
+caller's native user manager. The root system manager must identify the active
+`user@UID.service` and its compiled systemd executable, PID, start time and
+invocation. The fixed runtime bus socket must belong to that UID, and its
+kernel peer and systemd bus owner must match the root-managed process. The
+handle binds the unit object and invocation, manager identity and socket
+identity. Restarting the unit or manager invalidates it; callers must resolve
+a fresh handle. User handles infer the user source and reject a system or
+kernel source. No request selects a UID, bus endpoint or arbitrary method.
+Each resolution/recheck has a five-second caller deadline and a maximum of
+four native workers. Timed-out workers retain their slot until they finish.
 
 `GetJournalEvidence` accepts an observer-issued evidence ID. It returns only
 sanitized payloads, their content hash and native boot/cursor locators to the

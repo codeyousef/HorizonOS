@@ -143,7 +143,8 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False):
                 and all(observation.get(key) is True for key in ("own_uid_filter","system_unit_filter","kernel_source",
                     "time_filter","priority_filter","entry_limit","cursor_continuation","cross_connection_refused",
                     "query_drift_refused","missing_boot_refused","claimed_uid_refused","redaction_before_evidence","evidence_hash_verified","expiry_refused",
-                    "historical_boot_filter","batch_evidence_boot_verified")))
+                    "historical_boot_filter","batch_evidence_boot_verified","user_unit_filter","native_user_manager_bound",
+                    "unit_change_refused","user_unit_expiry_refused")))
         else:
             valid = (isinstance(observation,dict) and type(observation.get("uid")) is int and observation["uid"] >= 1000
             and type(observation.get("root_bus_owner_uid")) is int and observation["root_bus_owner_uid"] == 0 and type(observation.get("root_bus_owner_pid")) is int
@@ -163,7 +164,7 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False):
             "Does not qualify in-flight expiry/disconnection, cross-UID callers, signals or PID reuse."] if bus_task else ["Actual installed original Unix task, local CPU model, independent native process identity and cited observation.",
             "Does not qualify persistent bus tasks, in-flight expiry/revocation/disconnection, cross-UID callers, signals or PID reuse."] if process_task else ["Actual installed user broker, controlled naturally exiting child, independent native proc/pidfd identity.",
             "Does not qualify graceful termination, original model task grants, cross-UID callers or actual PID reuse."] if process else ["Controlled public messages; actual installed native journal, root service and authenticated user.",
-            "Does not qualify model task grants, cross-UID reads, user-unit resolution, rotation or hard native-call interruption."] if journal else
+            "Does not qualify model task grants, cross-UID reads, rotation or hard native-call interruption."] if journal else
             ["Typed fixture intent; actual native root service, user, bus and ledger.",
             "Does not grant trusted graphical consent or qualify activation."])}
     provision.write_new(directory / "log.txt", log.encode())
