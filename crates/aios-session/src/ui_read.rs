@@ -170,4 +170,12 @@ impl NativeReadTask {
         self.check_origin()?;
         if result.is_err(){self.revoke();}result
     }
+    pub fn find_snapshot_nodes(&mut self,snapshot:&Snapshot,selector:&serde_json::Value)->Result<serde_json::Value>{
+        self.check_origin()?;
+        if let Err(error)=self.check_grant(){self.revoke();return Err(error);}
+        let result=self.window.find_snapshot_nodes(snapshot,selector,&self.control);
+        if let Err(error)=self.check_grant(){self.revoke();return Err(error);}
+        self.check_origin()?;
+        if result.is_err(){self.revoke();}result
+    }
 }

@@ -12,7 +12,7 @@ type Object = (String,OwnedObjectPath);
 #[derive(Clone)]
 struct NodeLineage {
     handle:String,path:OwnedObjectPath,parent:OwnedObjectPath,role:u32,
-    name:String,states:Vec<u32>,actions:Vec<String>,children:u32,
+    name:String,observed_name:String,states:Vec<u32>,actions:Vec<String>,children:u32,
 }
 const ACCESSIBLE:&str="org.a11y.atspi.Accessible";
 const ROOT:&str="/org/a11y/atspi/accessible/root";
@@ -210,7 +210,7 @@ impl WindowBinding {
             }
             let node_handle=Uuid::new_v4().to_string();
             ancestry.push((path.clone(),parent.clone()));
-            lineage.push(NodeLineage{handle:node_handle.clone(),path:path.clone(),parent,role,name:native_name,states:native_states,actions:actions.clone(),children:0});
+            lineage.push(NodeLineage{handle:node_handle.clone(),path:path.clone(),parent,role,name:native_name,observed_name:name.clone(),states:native_states,actions:actions.clone(),children:0});
             nodes.push(Node{node_handle,role:format!("atspi:{role}"),name,states,actions});
             let children:i32=p.get_property("ChildCount").map_err(error)?;
             if children<0 || children>100000{return Err(ErrorCode::PartialResult);}
@@ -277,6 +277,18 @@ impl WindowBinding {
         if actions!=node.actions{return Err(ErrorCode::TargetChanged);}
         check(deadline,control)?;self.verify()?;check(deadline,control)
     }
+    /// Read-only selector resolution within this exact observed page. A match
+    /// is not input authority, and multiple matches are never auto-selected.
+    pub fn find_snapshot_nodes(&self,snapshot:&Snapshot,selector:&serde_json::Value,control:&AtomicU8)->Result<serde_json::Value>{
+        let result=snapshot.find_nodes(selector,control)?;
+        let root=snapshot.nodes.first().ok_or(ErrorCode::TargetNotFound)?;
+        self.verify_snapshot_node(snapshot,&root.node_handle,control)?;
+        for handle in result["matches"].as_array().ok_or(ErrorCode::InvalidArgument)? {
+            self.verify_snapshot_node(snapshot,handle.as_str().ok_or(ErrorCode::InvalidArgument)?,control)?;
+        }
+        check(snapshot.captured+Duration::from_secs(2),control)?;
+        Ok(result)
+    }
 }
 fn protected_title(title:&str)->bool{
     let name=title.to_lowercase();
@@ -298,11 +310,84 @@ impl Snapshot {
         if self.captured.elapsed()>=Duration::from_secs(2){return Err(ErrorCode::DeadlineExceeded);}
         Ok(self.lineage.iter().filter(|n|n.children>0).map(|n|n.handle.clone()).collect())
     }
+    fn find_nodes(&self,selector:&serde_json::Value,control:&AtomicU8)->Result<serde_json::Value>{
+        let deadline=self.captured+Duration::from_secs(2);check(deadline,control)?;
+        if self.snapshot_id!=self.generation{return Err(ErrorCode::TargetChanged);}
+        let arguments=serde_json::json!({"snapshot_id":self.snapshot_id,"selector":selector});
+        aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.find","arguments").ok_or(ErrorCode::UnsupportedSchema)?,&arguments)?;
+        // Snapshot truncation cannot establish either absence or uniqueness.
+        // Select another observed container page instead of guessing.
+        if self.truncated{return Err(ErrorCode::PartialResult);}
+        let role=selector.get("role").and_then(serde_json::Value::as_str);
+        let name=selector.get("name").and_then(serde_json::Value::as_str);
+        let states=selector.get("states").and_then(serde_json::Value::as_array);
+        for value in role.into_iter().chain(name).chain(states.into_iter().flatten().filter_map(serde_json::Value::as_str)){
+            text(value.to_owned(),1024).map_err(|_|ErrorCode::InvalidArgument)?;
+        }
+        let contains=selector.get("name_match").and_then(serde_json::Value::as_str)==Some("contains");
+        let mut matches=Vec::new();
+        // Match private native lineage, never caller-mutated serialized nodes.
+        // Protected nodes have no lineage and cannot become selector results.
+        for node in &self.lineage {
+            check(deadline,control)?;
+            if role.is_some_and(|role|role!=format!("atspi:{}",node.role)){continue;}
+            if name.is_some_and(|name|if contains{!node.observed_name.contains(name)}else{node.observed_name!=name}){continue;}
+            if states.is_some_and(|states|states.iter().any(|state|{
+                !(0..128u32).filter(|i|node.states.get((i/32) as usize).is_some_and(|word|word&(1u32<<(i%32))!=0)).take(16)
+                    .any(|i|state.as_str()==Some(format!("atspi:{i}").as_str()))
+            })){continue;}
+            if matches.len()==100{return Err(ErrorCode::ResourceExhausted);}
+            matches.push(node.handle.clone());
+        }
+        check(deadline,control)?;
+        Ok(serde_json::json!({"snapshot_id":self.snapshot_id,"ambiguous":matches.len()>1,"matches":matches}))
+    }
 }
 #[derive(Serialize)]
 pub struct Node {pub node_handle:String,pub role:String,pub name:String,pub states:Vec<String>,pub actions:Vec<String>}
 #[cfg(test)]mod tests{
     use super::*;
+    fn selector_fixture()->Snapshot{
+        let lineage=[("first","ملف Horizon",61), ("second","ملف Horizon",61), ("third","Save",43)].into_iter().map(|(handle,name,role)|NodeLineage{
+            handle:handle.into(),path:OwnedObjectPath::try_from(format!("/fixture/{handle}")).unwrap(),parent:OwnedObjectPath::try_from("/fixture/window").unwrap(),
+            role,name:name.into(),observed_name:name.into(),states:vec![1<<7],actions:vec![],children:0,
+        }).collect();
+        Snapshot{snapshot_id:"fixture-generation".into(),generation:"fixture-generation".into(),window_handle:"fixture-window".into(),window_identity:"fixture-private-identity".into(),
+            captured:Instant::now(),truncated:false,nodes:vec![],ancestry:vec![],lineage}
+    }
+    #[test]fn selectors_preserve_ambiguity_native_states_unicode_and_private_lineage(){
+        let mut snapshot=selector_fixture();let control=AtomicU8::new(0);
+        let result=snapshot.find_nodes(&serde_json::json!({"role":"atspi:61","name":"ملف Horizon","states":["atspi:7"]}),&control).unwrap();
+        assert_eq!(result["matches"],serde_json::json!(["first","second"]));assert_eq!(result["ambiguous"],true);
+        aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.find","data").unwrap(),&result).unwrap();
+        let unique=snapshot.find_nodes(&serde_json::json!({"name":"av","name_match":"contains","role":"atspi:43"}),&control).unwrap();
+        assert_eq!(unique["matches"],serde_json::json!(["third"]));assert_eq!(unique["ambiguous"],false);
+        for selector in [serde_json::json!({"name":"av"}),serde_json::json!({"states":["atspi:8"]}),serde_json::json!({"states":["atspi:128"]})]{
+            assert_eq!(snapshot.find_nodes(&selector,&control).unwrap()["matches"],serde_json::json!([]));
+        }
+        // Serialized metadata cannot add an object to the private page.
+        snapshot.nodes.push(Node{node_handle:"forged-protected".into(),role:"atspi:40".into(),name:"secret".into(),states:vec![],actions:vec![]});
+        assert_eq!(snapshot.find_nodes(&serde_json::json!({"name":"secret"}),&control).unwrap()["matches"],serde_json::json!([]));
+        snapshot.lineage[0].name.push_str(" private native suffix");
+        assert_eq!(snapshot.find_nodes(&serde_json::json!({"name":"private native suffix","name_match":"contains"}),&control).unwrap()["matches"],serde_json::json!([]));
+        snapshot.lineage[0].states=vec![u32::MAX];
+        assert_eq!(snapshot.find_nodes(&serde_json::json!({"name":"ملف Horizon","states":["atspi:16"]}),&control).unwrap()["matches"],serde_json::json!([]));
+    }
+    #[test]fn selectors_refuse_malformed_incomplete_stale_cancelled_and_overflow_results(){
+        let mut snapshot=selector_fixture();let control=AtomicU8::new(0);
+        for selector in [serde_json::json!({}),serde_json::json!({"object_path":"/fixture/third"}),serde_json::json!({"name":"spoof\u{202e}text"}),
+            serde_json::json!({"name":"x".repeat(257)}),serde_json::json!({"states":[true]}),serde_json::json!({"name_match":"regex"})]{
+            assert_eq!(snapshot.find_nodes(&selector,&control),Err(ErrorCode::InvalidArgument));
+        }
+        let selector=serde_json::json!({"role":"atspi:61"});
+        snapshot.truncated=true;assert_eq!(snapshot.find_nodes(&selector,&control),Err(ErrorCode::PartialResult));snapshot.truncated=false;
+        snapshot.snapshot_id="different-generation".into();assert_eq!(snapshot.find_nodes(&selector,&control),Err(ErrorCode::TargetChanged));snapshot.snapshot_id=snapshot.generation.clone();
+        control.store(1,Ordering::Release);assert_eq!(snapshot.find_nodes(&selector,&control),Err(ErrorCode::Cancelled));control.store(0,Ordering::Release);
+        snapshot.captured=Instant::now()-Duration::from_secs(3);assert_eq!(snapshot.find_nodes(&selector,&control),Err(ErrorCode::DeadlineExceeded));snapshot.captured=Instant::now();
+        let node=snapshot.lineage[0].clone();snapshot.lineage=(0..100).map(|i|NodeLineage{handle:format!("fixture-{i}"),..node.clone()}).collect();
+        assert_eq!(snapshot.find_nodes(&selector,&control).unwrap()["matches"].as_array().unwrap().len(),100);
+        snapshot.lineage.push(node);assert_eq!(snapshot.find_nodes(&selector,&control),Err(ErrorCode::ResourceExhausted));
+    }
     #[test]fn vanished_accessible_objects_are_target_changes_not_partial_inventories(){
         for e in [zbus::fdo::Error::UnknownObject("synthetic vanished node".into()),zbus::fdo::Error::UnknownInterface("synthetic changed interface".into())]{
             assert_eq!(error(zbus::Error::FDO(Box::new(e))),ErrorCode::TargetChanged);
@@ -320,7 +405,7 @@ pub struct Node {pub node_handle:String,pub role:String,pub name:String,pub stat
         let mut snapshot=Snapshot{snapshot_id:"fixture-generation".into(),generation:"fixture-generation".into(),window_handle:"fixture-window".into(),
             window_identity:"fixture-private-identity".into(),captured:Instant::now(),truncated:false,nodes:vec![],ancestry:vec![],
             lineage:vec![NodeLineage{handle:"fixture-container".into(),path:OwnedObjectPath::try_from("/fixture/container").unwrap(),
-                parent:OwnedObjectPath::try_from("/fixture/window").unwrap(),role:23,name:"private full bounded name".into(),states:vec![1],actions:vec![],children:1}]};
+                parent:OwnedObjectPath::try_from("/fixture/window").unwrap(),role:23,name:"private full bounded name".into(),observed_name:"bounded name".into(),states:vec![1],actions:vec![],children:1}]};
         assert_eq!(snapshot.container_handles().unwrap(),vec!["fixture-container"]);
         let value=serde_json::to_value(&snapshot).unwrap();
         assert_eq!(value.as_object().unwrap().len(),4);

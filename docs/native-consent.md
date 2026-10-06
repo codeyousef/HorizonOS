@@ -113,6 +113,22 @@ The task's original 90-second deadline bounds grant and private-data retention.
 Installed acceptance must exercise this provider route with actual native
 consent; direct reader tests alone do not qualify the transport.
 
+The native reader also resolves the existing `ui.find` role/name/state selector
+contract against private snapshot lineage's immutable observed fields. Full
+native names/states remain only for change detection; selectors cannot search
+beyond the bounded name or first sixteen observed state identifiers. Names use exact matching by default
+or an explicit literal `contains`; role/state identifiers retain the observed
+`atspi:N` spelling. The result contains opaque matching handles and an explicit
+ambiguity flag. Matches are scoped to that page, not the whole application.
+An incomplete page refuses with `PartialResult`, and more than 100 matches
+refuses with `ResourceExhausted`; neither silently selects or drops candidates.
+The reader revalidates the selected-window root and every matching node under
+the original two-second snapshot deadline and independent cancellation. The
+task wrapper checks the original caller and live grant around this observation.
+Serialized metadata cannot add searchable objects or protected-node lineage.
+This native method does not expose a public selector RPC, advertise `ui.find`,
+or enable input; those routes require their own scope and installed verification.
+
 The native transport launches the compile-pinned immutable Qt wrapper with a
 cleared environment and the selected Wayland socket. Its pollable supervisor
 requires the actual pinned native child executable, successful exit and one

@@ -125,6 +125,11 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     assert!(page.nodes.iter().map(|n|n.name.len()+n.actions.iter().map(String::len).sum::<usize>()).sum::<usize>()<=16384);
     aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.snapshot","data").unwrap(),&serde_json::to_value(&page).unwrap()).unwrap();
     window.verify_snapshot_node(&page,&page.nodes[0].node_handle,&control).expect("paged root retains selected-window ancestors");
+    let selector=json!({"role":page.nodes[0].role,"name":page.nodes[0].name});
+    let found=window.find_snapshot_nodes(&page,&selector,&control).expect("actual page-local native selector");
+    assert!(found["matches"].as_array().unwrap().iter().any(|h|h==&page.nodes[0].node_handle));
+    aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.find","data").unwrap(),&found).unwrap();
+    assert_eq!(window.find_snapshot_nodes(&page,&selector,&AtomicU8::new(1)),Err(ErrorCode::Cancelled));
     assert!(matches!(window.snapshot_container(&page,&uuid::Uuid::new_v4().to_string(),&control),Err(ErrorCode::TargetNotFound)));
     assert!(matches!(window.snapshot_container(&page,&page.nodes[0].node_handle,&AtomicU8::new(1)),Err(ErrorCode::Cancelled)));
     let mut snapshot=window.snapshot(&control).expect("real selected-window snapshot");
@@ -135,12 +140,14 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     window.verify_snapshot_node(&snapshot,&selected_node,&control).expect("actual native owner/object/window/generation re-resolution");
     let original_generation=snapshot.snapshot_id.clone();snapshot.snapshot_id=uuid::Uuid::new_v4().to_string();
     assert_eq!(window.verify_snapshot_node(&snapshot,&selected_node,&control),Err(ErrorCode::TargetChanged));
+    assert_eq!(window.find_snapshot_nodes(&snapshot,&selector,&control),Err(ErrorCode::TargetChanged));
     snapshot.snapshot_id=original_generation;
     assert_eq!(window.verify_snapshot_node(&snapshot,&uuid::Uuid::new_v4().to_string(),&control),Err(ErrorCode::TargetNotFound));
     let cancelled_node=AtomicU8::new(1);
     assert_eq!(window.verify_snapshot_node(&snapshot,&selected_node,&cancelled_node),Err(ErrorCode::Cancelled));
     std::thread::sleep(Duration::from_millis(2100));
     assert_eq!(window.verify_snapshot_node(&snapshot,&selected_node,&control),Err(ErrorCode::DeadlineExceeded));
+    assert_eq!(window.find_snapshot_nodes(&snapshot,&selector,&control),Err(ErrorCode::DeadlineExceeded));
     assert_eq!(snapshot.container_handles(),Err(ErrorCode::DeadlineExceeded));
     assert!(matches!(window.snapshot_container(&snapshot,&selected_node,&control),Err(ErrorCode::DeadlineExceeded)));
     let cancelled=AtomicU8::new(1);
@@ -185,11 +192,18 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     let origin=aios_session::ui_read::OriginatingClient::authenticate(proof).unwrap();
     let mut task=aios_session::ui_read::NativeReadTask::begin(origin,window.clone(),"Explain the selected synthetic document",aios_policy::Mode::Ask,
         "This disposable NixOS VM".into(),"Local CPU, no model invoked in this scenario".into(),std::sync::Arc::new(AtomicU8::new(0))).unwrap();
+    assert_eq!(task.find_snapshot_nodes(&page,&selector),Err(ErrorCode::AuthRequired),"unconfirmed selector reached native page resolution");
+    drop(task);drop(peer_socket);
+    let (proof,peer_socket)=std::os::unix::net::UnixStream::pair().unwrap();
+    let origin=aios_session::ui_read::OriginatingClient::authenticate(proof).unwrap();
+    let mut task=aios_session::ui_read::NativeReadTask::begin(origin,window.clone(),"Explain the selected synthetic document",aios_policy::Mode::Ask,
+        "This disposable NixOS VM".into(),"Local CPU, no model invoked in this scenario".into(),std::sync::Arc::new(AtomicU8::new(0))).unwrap();
     drop(peer_socket);
     assert!(matches!(task.poll_confirmation(),Err(ErrorCode::Cancelled)),"disconnected original peer retained pending consent");
     assert!(matches!(task.snapshot(),Err(ErrorCode::Cancelled)));
     assert_eq!(task.verify_snapshot_node(&snapshot,&selected_node),Err(ErrorCode::Cancelled));
     assert!(matches!(task.snapshot_container(&snapshot,&selected_node),Err(ErrorCode::Cancelled)));
+    assert_eq!(task.find_snapshot_nodes(&page,&selector),Err(ErrorCode::Cancelled));
     let (proof,peer_socket)=std::os::unix::net::UnixStream::pair().unwrap();
     let origin=aios_session::ui_read::OriginatingClient::authenticate(proof).unwrap();
     let mut task=aios_session::ui_read::NativeReadTask::begin(origin,window.clone(),"Explain the selected synthetic document",aios_policy::Mode::Ask,
@@ -198,6 +212,7 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     let start=Instant::now();stop.stop();let independent_stop_ms=start.elapsed().as_millis();
     assert!(independent_stop_ms<100);
     assert!(matches!(task.poll_confirmation(),Err(ErrorCode::Cancelled)));
+    assert_eq!(task.find_snapshot_nodes(&page,&selector),Err(ErrorCode::Cancelled));
     assert!(matches!(task.snapshot(),Err(ErrorCode::Cancelled)));drop(peer_socket);
     kate.stop_native();
     if kate.child.try_wait().unwrap().is_none(){kate.child.kill().unwrap();}kate.child.wait().unwrap();
@@ -209,6 +224,7 @@ fn native_selected_kate_snapshot_and_stale_owner(){
         "changed_snapshot_generation_denied":true,"disconnected_grant_node_denied":true,"startup_metadata_timeouts":discovery_timeouts,
         "native_non_window_container_page_nodes":page.nodes.len(),"container_page_snapshot_id":page.snapshot_id,
         "container_page_ancestors_revalidated":true,"expired_container_denied":true,"container_cancel_denied":true,
+        "native_page_selector":found,"selector_cancel_generation_expiry_denied":true,"unconfirmed_selector_denied":true,"disconnected_selector_denied":true,
         "semantic_effect_performed":false}));
     println!("NATIVE_POLICY_CONSENT={}",json!({"evidence_kind":"real-native-client-display-window-and-production-consent-transport-no-allow-or-grant",
         "uid":uid,"origin_pid":subject.pid,"origin_start_ticks":subject.start_ticks,"session_id":display.session.id,
