@@ -23,7 +23,7 @@ pub fn digest<T: Serialize>(value: &T) -> Result<String> {
 }
 pub fn registry_revision() -> String {
     // Includes the policy implementation contract and the fixed generated registry.
-    format!("{:x}", Sha256::digest(format!("aios-policy-v4-native-process-task\n{}", aios_protocol::contracts::REGISTRY_SOURCE)))
+    format!("{:x}", Sha256::digest(format!("aios-policy-v5-native-derived-selector\n{}", aios_protocol::contracts::REGISTRY_SOURCE)))
 }
 fn hash(value: &str) -> bool { value.len() == 64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) }
 fn uuid(value: &str) -> bool { Uuid::parse_str(value).is_ok_and(|v| !v.is_nil() && v.to_string() == value) }
@@ -180,6 +180,37 @@ impl Policy {
         Ok(ReadGrant { subject: intent.subject, request_id: intent.request_id, goal_sha256: intent.goal_sha256,
             mode: intent.mode, scope, plan_sha256, policy_revision: self.revision.clone(), incarnation: self.incarnation,
             nonce: Uuid::new_v4(), issued_ms: now_ms, expires_ms, revoked: Arc::new(AtomicBool::new(false)) })
+    }
+    /// Check one selector against a native provider's current private snapshot.
+    /// The initial native presentation must explicitly authorize ui.find. The
+    /// provider supplies the opaque snapshot identity from private lineage and
+    /// resolves it only under this selected window; request JSON is not proof.
+    /// This adds no persistent resources, exports no grant, and extends neither
+    /// the original expiry nor the original subject/client/boot bindings.
+    pub fn check_graphical_selector(&self, grant: &ReadGrant, subject: &Subject,
+        request_id: &str, window: &Action, snapshot: &Resource, selector: &Action,
+        current: &impl CurrentResources, now_ms: u64) -> Result<()> {
+        if window.action_id() != "ui.snapshot" || selector.action_id() != "ui.find"
+            || snapshot.field != "snapshot_id" || snapshot.kind != "scope-owner-expiry"
+            || !uuid(&snapshot.handle) || !hash(&snapshot.identity_sha256) {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        self.check_read(grant,subject,request_id,window,current,now_ms)?;
+        if !grant.scope.actions.contains("ui.find")
+            || !grant.scope.resources.iter().any(|r|r.kind=="graphical-session") {
+            return Err(ErrorCode::PermissionDenied);
+        }
+        if requirement("ui.find",grant.mode,Risk::R0)? != Requirement::ReadScope {return Err(ErrorCode::PermissionDenied);}
+        let mut scope=grant.scope.clone();
+        scope.resources.insert(snapshot.clone());scope.validate()?;
+        let result=registry::validate_references(selector,&ScopedResolver{scope:&scope,current});
+        if let Err(error)=result {
+            if error==ErrorCode::TargetChanged {grant.revoke();}
+            return Err(error);
+        }
+        // Native resolution may block: recheck actual suspend-inclusive expiry,
+        // Stop and every selected window/display after the derived lookup.
+        self.check_read(grant,subject,request_id,window,current,boottime_ms()?)
     }
     pub fn check_read(&self, grant: &ReadGrant, subject: &Subject, request_id: &str, action: &Action,
         current: &impl CurrentResources, now_ms: u64) -> Result<()> {

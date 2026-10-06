@@ -75,3 +75,11 @@ fn paging_rejects_serialized_authority_paths_and_duplicate_generations(){
         r#"{"kind":"snapshot_containers","task_id":"t","snapshot_id":"s","grant":{}}"#,
     ]{assert!(matches!(parse(raw),Err(ErrorCode::InvalidArgument)));}
 }
+
+#[test]
+fn selectors_reject_duplicate_nested_fields_and_forged_authority(){
+    let id="11111111-1111-4111-8111-111111111111";
+    let raw=format!("{{\"kind\":\"find_nodes\",\"task_id\":\"{id}\",\"snapshot_id\":\"{id}\",\"selector\":{{\"name\":\"Document\"}}}}");
+    assert!(parse(&raw).is_ok());
+    for altered in [raw.replace("Document\"","Document\",\"name\":\"other\""),raw.replace("\"kind\":","\"approved\":true,\"kind\":")] {assert!(matches!(parse(&altered),Err(ErrorCode::InvalidArgument)));}
+}

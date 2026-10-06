@@ -67,6 +67,16 @@ impl Policy {
     /// contract; ui.find and mutations cannot borrow this authority.
     pub fn propose_graphical_read(&self, intent: Intent, desktop: NativeDesktop,
         presentation: ReadPresentation, expiry_ms: u64) -> Result<ReadProposal> {
+        self.propose_window_read(intent,desktop,presentation,expiry_ms,false)
+    }
+    /// Explicit native read consent for snapshots and selectors derived from
+    /// those same selected windows. No semantic input is authorized.
+    pub fn propose_graphical_selector_read(&self, intent: Intent, desktop: NativeDesktop,
+        presentation: ReadPresentation, expiry_ms: u64) -> Result<ReadProposal> {
+        self.propose_window_read(intent,desktop,presentation,expiry_ms,true)
+    }
+    fn propose_window_read(&self, intent: Intent, desktop: NativeDesktop,
+        presentation: ReadPresentation, expiry_ms: u64, selectors: bool) -> Result<ReadProposal> {
         if !matches!(intent.mode, Mode::Ask | Mode::Diagnose) || intent.subject.uid == 0
             || intent.subject.uid != desktop.uid || intent.subject.boot_id != desktop.boot_id
             || desktop.boot_id != self.boot_id { return Err(ErrorCode::PermissionDenied); }
@@ -79,6 +89,10 @@ impl Policy {
             || presentation.evidence.len() > 16 || presentation.evidence.iter().any(|s| !text(s,128))
             || expiry_ms == 0 || expiry_ms > MAX_EXPIRY_MS { return Err(ErrorCode::InvalidArgument); }
         let mut scope = Scope { actions: ["ui.snapshot".into()].into(), ..Default::default() };
+        if selectors {
+            if requirement("ui.find",intent.mode,Risk::R0)? != Requirement::ReadScope {return Err(ErrorCode::PolicyChanged);}
+            scope.actions.insert("ui.find".into());
+        }
         scope.resources.insert(Resource { field: "selected_session".into(), kind: "graphical-session".into(),
             handle: desktop.session_id.clone(), identity_sha256: desktop.identity_sha256.clone() });
         for window in &presentation.windows {

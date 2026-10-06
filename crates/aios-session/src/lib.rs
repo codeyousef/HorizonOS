@@ -54,6 +54,7 @@ pub enum Operation {
     TakeUiSnapshot { task_id: String },
     GetUiSnapshotContainers { task_id:String,snapshot_id:String },
     PageUiSnapshot { task_id:String,snapshot_id:String,container_handle:String },
+    FindUiNodes { task_id:String,snapshot_id:String,selector:Box<RawValue> },
     CancelUiRead { task_id: String },
     ForgetUiRead { task_id: String },
     ResolveService { unit_name: String },
@@ -109,6 +110,11 @@ fn parse_operation(raw: &str) -> Result<Operation, ErrorCode> {
         "take_ui_snapshot" => fields!(TakeUiSnapshot { task_id: String }),
         "get_ui_snapshot_containers" => fields!(GetUiSnapshotContainers { task_id:String,snapshot_id:String }),
         "page_ui_snapshot" => fields!(PageUiSnapshot { task_id:String,snapshot_id:String,container_handle:String }),
+        "find_ui_nodes" => {
+            let operation=fields!(FindUiNodes { task_id:String,snapshot_id:String,selector:Box<RawValue> })?;
+            if let Operation::FindUiNodes{snapshot_id,selector,..}=&operation {parse_ui_selector(snapshot_id,selector.get())?;}
+            Ok(operation)
+        },
         "cancel_ui_read" => fields!(CancelUiRead { task_id: String }),
         "forget_ui_read" => fields!(ForgetUiRead { task_id: String }),
         "resolve_service" => fields!(ResolveService { unit_name: String }),
@@ -129,6 +135,15 @@ pub struct Response {
     pub data: Option<Value>, pub error: Option<ProviderError>,
 }
 
+// Preserve original selector bytes through strict tool-call parsing so nested
+// duplicate fields cannot be collapsed by Value before authorization.
+pub(crate) fn parse_ui_selector(snapshot_id:&str,raw:&str)->Result<Value,ErrorCode>{
+    if !uuid(snapshot_id){return Err(ErrorCode::InvalidArgument);}
+    let encoded=serde_json::to_string(snapshot_id).map_err(|_|ErrorCode::InvalidArgument)?;
+    let call=format!("{{\"kind\":\"tool_call\",\"action_id\":\"ui.find\",\"arguments\":{{\"snapshot_id\":{encoded},\"selector\":{raw}}}}}");
+    parse_tool_call(call.as_bytes())?;
+    serde_json::from_str(raw).map_err(|_|ErrorCode::InvalidArgument)
+}
 #[derive(Clone, Serialize)]
 pub struct TaskStatus {
     pub schema_version: u32, pub operation: String,
@@ -428,7 +443,7 @@ impl State {
                     "expires_after_ms":30000,"confirmation_required":true,"ui_authorized":false}))
             },
             Operation::ListUiWindows { .. } | Operation::StartUiRead { .. } | Operation::GetUiReadStatus { .. }
-                | Operation::GetUiSnapshotContainers { .. } | Operation::PageUiSnapshot { .. } | Operation::TakeUiSnapshot { .. } | Operation::CancelUiRead { .. } | Operation::ForgetUiRead { .. } => {
+                | Operation::FindUiNodes { .. } | Operation::GetUiSnapshotContainers { .. } | Operation::PageUiSnapshot { .. } | Operation::TakeUiSnapshot { .. } | Operation::CancelUiRead { .. } | Operation::ForgetUiRead { .. } => {
                 // Graphical forwarding requires the actual original Unix FD.
                 // A claimed subject or plain State dispatch is insufficient.
                 Err(ErrorCode::AuthRequired)
@@ -609,6 +624,7 @@ fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut O
         Operation::TakeUiSnapshot{task_id}=>json!({"kind":"take_snapshot","task_id":task_id}),
         Operation::GetUiSnapshotContainers{task_id,snapshot_id}=>json!({"kind":"snapshot_containers","task_id":task_id,"snapshot_id":snapshot_id}),
         Operation::PageUiSnapshot{task_id,snapshot_id,container_handle}=>json!({"kind":"page_snapshot","task_id":task_id,"snapshot_id":snapshot_id,"container_handle":container_handle}),
+        Operation::FindUiNodes{task_id,snapshot_id,selector}=>json!({"kind":"find_nodes","task_id":task_id,"selector":parse_ui_selector(&snapshot_id,selector.get())?,"snapshot_id":snapshot_id}),
         Operation::CancelUiRead{task_id}=>json!({"kind":"cancel","task_id":task_id}),
         Operation::ForgetUiRead{task_id}=>json!({"kind":"forget","task_id":task_id}),
         Operation::Submit{request} if request.selected_session_handle.is_some() || request.selected_app_handle.is_some()=>{
@@ -757,6 +773,16 @@ mod tests {
             r#"{"kind":"page_ui_snapshot","task_id":"t","snapshot_id":"s","snapshot_id":"other","container_handle":"h"}"#,
             r#"{"kind":"get_ui_snapshot_containers","task_id":"t","snapshot_id":"s","uid":0}"#,
         ]{assert_eq!(parse_operation(raw).unwrap_err(),ErrorCode::InvalidArgument);}
+    }
+    #[test]
+    fn selectors_preserve_strict_nested_fields_and_original_transport(){
+        let id="11111111-1111-4111-8111-111111111111";
+        for selector in [r#"{"name":"a","name":"b"}"#,r#"{"role":"atspi:61","approved":true}"#,r#"{"states":["a","b","c","d","e","f","g","h","i"]}"#,r#"{"name_match":"regex"}"#,r#"{}"#] {
+            assert_eq!(parse_ui_selector(id,selector),Err(ErrorCode::InvalidArgument));
+        }
+        let raw=format!("{{\"kind\":\"find_ui_nodes\",\"task_id\":\"{id}\",\"snapshot_id\":\"{id}\",\"selector\":{{\"name\":\"Document\"}}}}");
+        let mut state=State::default();assert_eq!(state.dispatch(&peer_fixture(),parse_operation(&raw).unwrap()),Err(ErrorCode::AuthRequired));
+        for altered in [raw.replace("Document\"","Document\",\"name\":\"other\""),raw.replace("\"kind\":","\"approved\":true,\"kind\":")] {assert!(parse_operation(&altered).is_err());}
     }
     #[test]
     fn unavailable_model_modes_nonce_conflict_and_quota_fixture() {

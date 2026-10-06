@@ -277,6 +277,14 @@ impl WindowBinding {
         if actions!=node.actions{return Err(ErrorCode::TargetChanged);}
         check(deadline,control)?;self.verify()?;check(deadline,control)
     }
+    /// A native scope identity for this private page under this exact window.
+    /// It cannot be constructed from serialized snapshot fields alone.
+    pub(crate) fn snapshot_resource(&self,snapshot:&Snapshot,control:&AtomicU8)->Result<aios_policy::Resource>{
+        let root=snapshot.lineage.first().ok_or(ErrorCode::TargetNotFound)?;
+        self.verify_snapshot_node(snapshot,&root.handle,control)?;
+        Ok(aios_policy::Resource{field:"snapshot_id".into(),kind:"scope-owner-expiry".into(),handle:snapshot.generation.clone(),
+            identity_sha256:aios_policy::digest(&(&snapshot.generation,&snapshot.window_identity,&root.path,&snapshot.ancestry))?})
+    }
     /// Read-only selector resolution within this exact observed page. A match
     /// is not input authority, and multiple matches are never auto-selected.
     pub fn find_snapshot_nodes(&self,snapshot:&Snapshot,selector:&serde_json::Value,control:&AtomicU8)->Result<serde_json::Value>{

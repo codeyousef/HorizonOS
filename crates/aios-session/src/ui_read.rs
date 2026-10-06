@@ -20,6 +20,23 @@ impl CurrentResources for Resources<'_>{
     }
     fn dynamic_arguments(&self,_:&str,_:&Value,_:&policy::Scope)->Result<()>{Err(ErrorCode::UnsupportedCapability)}
 }
+struct SnapshotResources<'a>{window:&'a WindowBinding,snapshot:&'a Snapshot,control:&'a AtomicU8}
+impl CurrentResources for SnapshotResources<'_>{
+    fn resolve(&self,field:&str,kind:&str,handle:&str)->Result<String>{
+        if field=="snapshot_id" && kind=="scope-owner-expiry" {
+            let resource=self.window.snapshot_resource(self.snapshot,self.control)?;
+            if handle!=resource.handle{return Err(ErrorCode::TargetChanged);}
+            Ok(resource.identity_sha256)
+        } else {Resources(self.window).resolve(field,kind,handle)}
+    }
+    fn dynamic_arguments(&self,id:&str,args:&Value,scope:&policy::Scope)->Result<()>{
+        if id!="ui.find" || args["snapshot_id"]!=self.snapshot.snapshot_id {return Err(ErrorCode::PermissionDenied);}
+        aios_protocol::validation::validate(aios_protocol::contracts::schema_source(id,"arguments").ok_or(ErrorCode::UnsupportedSchema)?,args)?;
+        let resource=self.window.snapshot_resource(self.snapshot,self.control)?;
+        if !scope.actions.contains(id) || !scope.resources.contains(&resource){return Err(ErrorCode::PermissionDenied);}
+        Ok(())
+    }
+}
 /// Constructed from the originating server-side connection FD. A provider
 /// bridge must authenticate the fixed broker before accepting this proof via
 /// SCM_RIGHTS; serialized PID/UID/session claims are never a substitute.
@@ -102,7 +119,7 @@ impl NativeReadTask {
         let policy=policy::Policy::new(subject.boot_id.clone(),policy::registry_revision())?;
         let intent=policy.authenticated_user_intent(subject.clone(),request_id.clone(),goal,mode)?;
         let display=window.selected_display();
-        let proposal=policy.propose_graphical_read(intent,NativeDesktop{uid:display.session.uid,boot_id:display.boot_id.clone(),
+        let proposal=policy.propose_graphical_selector_read(intent,NativeDesktop{uid:display.session.uid,boot_id:display.boot_id.clone(),
             session_id:display.session.id.clone(),identity_sha256:policy::digest(display)?,socket_name:display.socket_name.clone()},
             ReadPresentation{target,profile,goal:goal.into(),windows:vec![SelectedWindow{handle:window.handle.clone(),identity_sha256:window.identity_sha256()?,
                 name:window.name.clone(),window:window.title.clone()}],evidence:vec![]},90_000)?;
@@ -170,11 +187,22 @@ impl NativeReadTask {
         self.check_origin()?;
         if result.is_err(){self.revoke();}result
     }
-    pub fn find_snapshot_nodes(&mut self,snapshot:&Snapshot,selector:&serde_json::Value)->Result<serde_json::Value>{
+    fn check_selector(&self,snapshot:&Snapshot,selector:&Value)->Result<()> {
+        let encode=|id:&str,args:Value|parse_tool_call(&serde_json::to_vec(&json!({"kind":"tool_call","action_id":id,"arguments":args})).map_err(|_|ErrorCode::InvalidArgument)?);
+        let window=encode("ui.snapshot",json!({"window_handle":self.window.handle}))?;
+        let action=encode("ui.find",json!({"snapshot_id":snapshot.snapshot_id,"selector":selector}))?;
+        // Authenticate first, before native snapshot queries, including callers
+        // without a delivered native decision.
+        self.check_grant()?;
+        let resource=self.window.snapshot_resource(snapshot,&self.control)?;
+        self.policy.check_graphical_selector(self.grant.as_ref().ok_or(ErrorCode::AuthRequired)?,&self.origin.peer.policy_subject()?,&self.request_id,
+            &window,&resource,&action,&SnapshotResources{window:&self.window,snapshot,control:&self.control},policy::boottime_ms()?)
+    }
+    pub fn find_snapshot_nodes(&mut self,snapshot:&Snapshot,selector:&Value)->Result<Value>{
         self.check_origin()?;
-        if let Err(error)=self.check_grant(){self.revoke();return Err(error);}
+        if let Err(error)=self.check_selector(snapshot,selector){self.revoke();return Err(error);}
         let result=self.window.find_snapshot_nodes(snapshot,selector,&self.control);
-        if let Err(error)=self.check_grant(){self.revoke();return Err(error);}
+        if let Err(error)=self.check_selector(snapshot,selector){self.revoke();return Err(error);}
         self.check_origin()?;
         if result.is_err(){self.revoke();}result
     }

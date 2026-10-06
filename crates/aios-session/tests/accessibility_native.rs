@@ -317,12 +317,22 @@ fn qualify_broker_bridge(display:&DisplayBinding,window:&WindowBinding){
     let page=client.call(json!({"kind":"take_ui_snapshot","task_id":allowed_task})).unwrap();assert!(page.error.is_none(),"{page:?}");
     let page=page.data.unwrap();assert_eq!(page["snapshot_id"],page_id);assert_eq!(page["window_handle"],selected_window);
     aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.snapshot","data").unwrap(),&page).unwrap();
+    assert_eq!(page["truncated"],false,"selector success requires a complete page");
+    let selector=json!({"role":page["nodes"][0]["role"],"name":page["nodes"][0]["name"]});
+    let denied=reconnect.call(json!({"kind":"find_ui_nodes","task_id":allowed_task,"snapshot_id":page_id,"selector":selector})).unwrap();
+    assert_eq!(denied.error.unwrap().code,ErrorCode::AuthRequired);
+    let found=client.call(json!({"kind":"find_ui_nodes","task_id":allowed_task,"snapshot_id":page_id,"selector":selector})).unwrap();
+    assert!(found.error.is_none(),"{found:?}");let found=found.data.unwrap();
+    aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.find","data").unwrap(),&found).unwrap();
+    assert_eq!(found["snapshot_id"],page_id);assert!(found["matches"].as_array().unwrap().contains(&page["nodes"][0]["node_handle"]));
+    let stale=client.call(json!({"kind":"find_ui_nodes","task_id":allowed_task,"snapshot_id":snapshot_id,"selector":selector})).unwrap();
+    assert_eq!(stale.error.unwrap().code,ErrorCode::TargetChanged);
     assert!(client.call(json!({"kind":"cancel_ui_read","task_id":allowed_task})).unwrap().error.is_none());
     let denied=client.call(json!({"kind":"take_ui_snapshot","task_id":allowed_task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::Cancelled);
     assert!(client.call(json!({"kind":"forget_ui_read","task_id":allowed_task})).unwrap().error.is_none());
     println!("NATIVE_PROVIDER_BRIDGE={}",json!({"evidence_kind":"real-exact-managed-broker-provider-original-fd-scoped-snapshot-with-owned-native-input-fixture",
         "session_id":display.session.id,"uid":display.session.uid,"metadata":discovered,"original_fd_bound":true,"unconfirmed_snapshot_denied":true,
-        "forged_decision_denied":true,"reconnect_denied":true,"cancellation_ms":cancellation_ms,"cancelled_snapshot_denied":true,"forget_verified":true,
+        "forged_decision_denied":true,"reconnect_denied":true,"cancellation_ms":cancellation_ms,"cancelled_snapshot_denied":true,"forget_verified":true,"public_selector":found,"selector_reconnect_denied":true,"selector_old_generation_denied":true,
         "permission_ui_excluded_from_production_discovery":true,"native_input_fixture":input,"completed_status":completed,
         "scoped_snapshot_id":scoped["snapshot_id"],"scoped_node_count":nodes.len(),"one_shot_snapshot_verified":true,
         "reconnected_snapshot_denied":true,"post_completion_stop_revokes_snapshot":true}));

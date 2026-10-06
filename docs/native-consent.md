@@ -320,3 +320,16 @@ the exact managed services. Its positive native Allow/capture case deliberately
 has no installed model socket and must report `MODEL_UNAVAILABLE` after the
 scoped observation event. This checks honest failure and cancellation; it does
 not verify a model answer over desktop content or completion of the full OS.
+
+
+The native selected-window read presentation explicitly includes `ui.snapshot`
+and `ui.find` for tasks that support selectors. A snapshot-only proposal still
+cannot authorize selectors. The public `find_ui_nodes` request names the task,
+current snapshot UUID and a strict registry selector. Original bytes are checked
+before conversion to JSON values, including nested duplicate-field rejection.
+The provider retains the actual private page; its snapshot scope identity binds
+that page generation, selected window and native ancestry. It re-resolves the
+page under the original caller and delivered native read grant before and after
+matching. This derived check exports no grant and extends no expiry. A stale
+page, scope change, Stop or disconnected caller ends the read without retry.
+The selector route does not authorize input or advertise a model capability.

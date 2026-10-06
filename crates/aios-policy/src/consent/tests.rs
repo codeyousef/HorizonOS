@@ -76,3 +76,42 @@ fn independent_stop_revokes_both_a_delivered_decision_and_an_issued_grant() {
     cancelled.store(true,Ordering::Release);
     assert_eq!(p.check_read(&g,&s,&request,&action,&resources,boottime_ms().unwrap()),Err(ErrorCode::ApprovalExpired));
 }
+
+struct SelectorResources(Resources);
+impl CurrentResources for SelectorResources {
+    fn resolve(&self,field:&str,kind:&str,handle:&str)->Result<String>{self.0.resolve(field,kind,handle)}
+    fn dynamic_arguments(&self,id:&str,args:&Value,scope:&Scope)->Result<()> {
+        if id=="ui.find" && scope.actions.contains(id) && scope.resources.iter().any(|r|r.field=="snapshot_id" && args["snapshot_id"]==r.handle) {Ok(())}else{Err(ErrorCode::PermissionDenied)}
+    }
+}
+#[test]
+fn selectors_require_explicit_native_consent_and_exact_derived_snapshot() {
+    let s=subject();let p=policy(&s);
+    let window=parse_tool_call(br#"{"kind":"tool_call","action_id":"ui.snapshot","arguments":{"window_handle":"selected-window"}}"#).unwrap();
+    for enabled in [false,true] {
+        let r=proposal(&p,&s);
+        let r=if enabled {p.propose_graphical_selector_read(r.intent,r.desktop,r.presentation,90_000).unwrap()}else{r};
+        assert_eq!(r.wire(true)["actions"].as_array().unwrap().len(),if enabled{2}else{1});
+        let request=r.intent.request_id.clone();
+        let snapshot=Resource{field:"snapshot_id".into(),kind:"scope-owner-expiry".into(),handle:Uuid::new_v4().to_string(),identity_sha256:"f".repeat(64)};
+        let mut resources=SelectorResources(Resources(r.scope.resources.iter().cloned().collect()));resources.0.0.push(snapshot.clone());
+        let g=p.consume_graphical_read(NativeReadDecision{proposal:r,cancelled:Arc::new(AtomicBool::new(false))},&s,&resources).unwrap();
+        let find=|id:&str|parse_tool_call(&serde_json::to_vec(&serde_json::json!({"kind":"tool_call","action_id":"ui.find","arguments":{"snapshot_id":id,"selector":{"name":"Document"}}})).unwrap()).unwrap();
+        let action=find(&snapshot.handle);
+        assert_eq!(p.check_graphical_selector(&g,&s,&request,&window,&snapshot,&action,&resources,boottime_ms().unwrap()),if enabled{Ok(())}else{Err(ErrorCode::PermissionDenied)});
+        // A resource UUID by itself cannot make a selector usable via generic
+        // check_read, and a missing/mismatched handle cannot enter the scope.
+        assert_eq!(p.check_read(&g,&s,&request,&action,&resources,boottime_ms().unwrap()),Err(ErrorCode::PermissionDenied));
+        assert_eq!(p.check_graphical_selector(&g,&s,&request,&window,&snapshot,&find(&Uuid::new_v4().to_string()),&resources,boottime_ms().unwrap()),Err(ErrorCode::PermissionDenied));
+        if !enabled {continue;}
+        let mut foreign=s.clone();foreign.client=Client::Unix{connection_id:Uuid::new_v4().to_string()};
+        assert_eq!(p.check_graphical_selector(&g,&foreign,&request,&window,&snapshot,&action,&resources,boottime_ms().unwrap()),Err(ErrorCode::PermissionDenied));
+        assert_eq!(p.check_graphical_selector(&g,&s,&Uuid::new_v4().to_string(),&window,&snapshot,&action,&resources,boottime_ms().unwrap()),Err(ErrorCode::PermissionDenied));
+        assert_eq!(policy(&s).check_graphical_selector(&g,&s,&request,&window,&snapshot,&action,&resources,boottime_ms().unwrap()),Err(ErrorCode::ApprovalExpired));
+        let mut invalid=snapshot.clone();invalid.field="node_handle".into();
+        assert_eq!(p.check_graphical_selector(&g,&s,&request,&window,&invalid,&action,&resources,boottime_ms().unwrap()),Err(ErrorCode::InvalidArgument));
+        let mut drift=resources.0.0.clone();drift.last_mut().unwrap().identity_sha256="a".repeat(64);
+        assert_eq!(p.check_graphical_selector(&g,&s,&request,&window,&snapshot,&action,&SelectorResources(Resources(drift)),boottime_ms().unwrap()),Err(ErrorCode::TargetChanged));
+        assert_eq!(p.check_graphical_selector(&g,&s,&request,&window,&snapshot,&action,&resources,boottime_ms().unwrap()),Err(ErrorCode::ApprovalExpired));
+    }
+}

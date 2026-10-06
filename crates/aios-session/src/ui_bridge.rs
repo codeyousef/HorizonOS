@@ -51,7 +51,7 @@ enum Operation {
     Discover{session_id:String},StartRead{window_handle:String,goal:String,mode:String},
     StartTaskRead{window_handle:String,goal:String,mode:String,task_id:String},
     GetReadStatus{task_id:String},TakeSnapshot{task_id:String},
-    SnapshotContainers{task_id:String,snapshot_id:String},PageSnapshot{task_id:String,snapshot_id:String,container_handle:String},Cancel{task_id:String},Forget{task_id:String},
+    FindNodes{task_id:String,snapshot_id:String,selector:Box<RawValue>},SnapshotContainers{task_id:String,snapshot_id:String},PageSnapshot{task_id:String,snapshot_id:String,container_handle:String},Cancel{task_id:String},Forget{task_id:String},
 }
 fn parse(raw:&str)->Result<Operation>{
     #[derive(Deserialize)]struct Kind{kind:String}
@@ -67,6 +67,11 @@ fn parse(raw:&str)->Result<Operation>{
         "get_read_status"=>fields!(GetReadStatus{task_id:String}),"take_snapshot"=>fields!(TakeSnapshot{task_id:String}),
         "snapshot_containers"=>fields!(SnapshotContainers{task_id:String,snapshot_id:String}),
         "page_snapshot"=>fields!(PageSnapshot{task_id:String,snapshot_id:String,container_handle:String}),
+        "find_nodes"=>{
+            let operation=fields!(FindNodes{task_id:String,snapshot_id:String,selector:Box<RawValue>})?;
+            if let Operation::FindNodes{snapshot_id,selector,..}=&operation{crate::parse_ui_selector(snapshot_id,selector.get())?;}
+            Ok(operation)
+        },
         "cancel"=>fields!(Cancel{task_id:String}),"forget"=>fields!(Forget{task_id:String}),_=>Err(ErrorCode::InvalidArgument),
     }
 }
@@ -78,7 +83,7 @@ struct Bound{schema_version:u32,request_id:String,operation:String,origin_sha256
 struct Response{schema_version:u32,request_id:String,operation:String,data:Option<Value>,error:Option<ErrorCode>}
 #[derive(Clone,Serialize)]
 struct ReadStatus{schema_version:u32,task_id:String,state:String,error:Option<ErrorCode>,snapshot_ready:bool}
-enum PageRequest { Take,Containers{snapshot_id:String},Page{snapshot_id:String,container_handle:String} }
+enum PageRequest { Take,Find{snapshot_id:String,selector:Value},Containers{snapshot_id:String},Page{snapshot_id:String,container_handle:String} }
 struct PageCommand { request:PageRequest,response:mpsc::SyncSender<Result<Value>> }
 struct ReadWork{pages:mpsc::SyncSender<PageCommand>,status:ReadStatus,control:Arc<AtomicU8>,stop:Option<NativeReadStop>,snapshot:Option<Value>,deadline:u64}
 impl ReadWork {
@@ -136,6 +141,10 @@ impl Context{
                 serde_json::to_value(&task.status).map_err(|_|ErrorCode::InvalidArgument)
             },
             Operation::TakeSnapshot{task_id}=>self.page(&task_id,PageRequest::Take),
+            Operation::FindNodes{task_id,snapshot_id,selector}=>{
+                let selector=crate::parse_ui_selector(&snapshot_id,selector.get())?;
+                self.page(&task_id,PageRequest::Find{snapshot_id,selector})
+            },
             Operation::SnapshotContainers{task_id,snapshot_id}=>self.page(&task_id,PageRequest::Containers{snapshot_id}),
             Operation::PageSnapshot{task_id,snapshot_id,container_handle}=>self.page(&task_id,PageRequest::Page{snapshot_id,container_handle}),
             Operation::Cancel{task_id}=>{self.task(&task_id)?.lock().map_err(|_|ErrorCode::ResourceExhausted)?.cancel();Ok(json!({"task_id":task_id,"cancelled":true}))},
@@ -143,7 +152,7 @@ impl Context{
         }
     }
     fn page(&self,id:&str,request:PageRequest)->Result<Value>{
-        let (snapshot_id,container)=match &request{PageRequest::Take=>(None,None),PageRequest::Containers{snapshot_id}=>(Some(snapshot_id),None),
+        let (snapshot_id,container)=match &request{PageRequest::Take=>(None,None),PageRequest::Containers{snapshot_id}|PageRequest::Find{snapshot_id,..}=>(Some(snapshot_id),None),
             PageRequest::Page{snapshot_id,container_handle}=>(Some(snapshot_id),Some(container_handle))};
         if snapshot_id.is_some_and(|s|!crate::uuid(s)) || container.is_some_and(|h|!crate::uuid(h)){return Err(ErrorCode::InvalidArgument);}
         let work=self.task(id)?.clone();
@@ -209,7 +218,7 @@ fn run_read(work:Arc<Mutex<ReadWork>>,origin:OriginatingClient,window:WindowBind
             };
             let consuming=matches!(&command.request,PageRequest::Take);
             let answer=(||->Result<Value>{
-                let expected=match &command.request{PageRequest::Take=>None,PageRequest::Containers{snapshot_id}|PageRequest::Page{snapshot_id,..}=>Some(snapshot_id)};
+                let expected=match &command.request{PageRequest::Take=>None,PageRequest::Containers{snapshot_id}|PageRequest::Page{snapshot_id,..}|PageRequest::Find{snapshot_id,..}=>Some(snapshot_id)};
                 if expected.is_some_and(|id|id!=&snapshot.snapshot_id){return Err(ErrorCode::TargetChanged);}
                 match command.request {
                     PageRequest::Take=>{
@@ -221,6 +230,7 @@ fn run_read(work:Arc<Mutex<ReadWork>>,origin:OriginatingClient,window:WindowBind
                         let value=work.snapshot.take().ok_or(ErrorCode::TargetNotFound)?;
                         work.status.snapshot_ready=false;Ok(value)
                     },
+                    PageRequest::Find{selector,..}=>task.find_snapshot_nodes(&snapshot,&selector),
                     PageRequest::Containers{..}=>{
                         let root=snapshot.nodes.first().ok_or(ErrorCode::TargetNotFound)?.node_handle.clone();
                         task.verify_snapshot_node(&snapshot,&root)?;
