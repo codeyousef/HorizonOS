@@ -71,8 +71,20 @@ for at most 900 seconds. Retention does not convert expired evidence into a gran
 
 ## Rebuildable cache recovery
 
-A successful compatible open records the graph inode and scope in a private
-ownership marker. Corruption of a marked graph triggers quarantine of the
+A successful compatible open records the graph inode, scope and filesystem
+identity in a private version-2 ownership marker. On Btrfs, read-only descriptor
+ioctls bind the filesystem UUID, subvolume ID and subvolume UUID; transient mount
+device numbers are not persisted as durable identity. Same-boot pathname versus
+open-descriptor device/inode checks still reject substitution races. Recovery
+manifests use the same durable identity for every file and destination directory.
+
+On other filesystems, identity is explicitly bound to the boot ID and device
+number: these stores cannot reopen across boots. Version-1 ownership markers and
+recovery plans lack provable durable identity and are retained and refused as
+incompatible, with no automatic re-enrollment, reset or quarantine. This format
+version is independent of the SQLite schema version.
+
+Corruption of a marked graph triggers quarantine of the
 fixed database, WAL, SHM, rollback journal and marker. A durable bounded manifest
 binds their identities, lengths and SHA-256 hashes before any move. Renames never
 overwrite files; files and both directories are synced. Interrupted moves resume

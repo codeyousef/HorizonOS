@@ -10,6 +10,7 @@ mod evidence;
 mod reconcile;
 mod edges;
 mod recovery;
+mod identity;
 pub use recovery::RecoveryReceipt;
 pub use edges::{Relation, Certainty, EdgeInput, StoredEdge};
 pub use reconcile::{ProviderStatus, ProviderState, ProviderSnapshot, ProviderEvent, EventKind, ReconcileReason, ReconcilePlan};

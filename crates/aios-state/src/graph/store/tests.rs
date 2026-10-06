@@ -4,6 +4,64 @@ static NEXT:AtomicU64=AtomicU64::new(0);
 struct Temporary(std::path::PathBuf);
 impl Temporary {fn new()->Self{let path=std::env::temp_dir().join(format!("horizon-graph-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));fs::create_dir(&path).unwrap();fs::set_permissions(&path,fs::Permissions::from_mode(0o700)).unwrap();Self(path)}}
 impl Drop for Temporary {fn drop(&mut self){fs::remove_dir_all(&self.0).unwrap();}}
+#[test] fn native_descriptor_storage_identity_observation(){
+    let temp=Temporary::new();let file=OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(temp.0.join("owned")).unwrap();
+    let identity=identity::Identity::observe(&file).unwrap();let encoded=serde_json::to_value(&identity).unwrap();
+    assert_eq!(encoded["inode"],file.metadata().unwrap().ino());
+    assert_eq!(identity::Identity::directory(&temp.0).unwrap(),identity::Identity::directory(&temp.0).unwrap());
+}
+#[test] fn legacy_device_markers_and_plans_are_retained_without_guessing_identity(){
+    let temp=Temporary::new();drop(GraphStore::open(&temp.0,Scope::User(1000)).unwrap());
+    let db=temp.0.join("graph.sqlite3");let before=fs::read(&db).unwrap();let meta=fs::metadata(&db).unwrap();
+    let legacy=serde_json::to_vec(&serde_json::json!({"version":1,"scope":1000,"device":meta.dev(),"inode":meta.ino()})).unwrap();
+    fs::write(temp.0.join("graph.identity"),&legacy).unwrap();
+    assert!(matches!(GraphStore::open(&temp.0,Scope::User(1000)),Err(Error::Incompatible)));
+    assert_eq!(fs::read(&db).unwrap(),before);assert_eq!(fs::read(temp.0.join("graph.identity")).unwrap(),legacy);
+    fs::write(temp.0.join("graph.recovery"),b"{\"version\":1}").unwrap();fs::set_permissions(temp.0.join("graph.recovery"),fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(matches!(GraphStore::open(&temp.0,Scope::User(1000)),Err(Error::Incompatible)));
+    assert_eq!(fs::read(temp.0.join("graph.recovery")).unwrap(),b"{\"version\":1}");
+}
+#[test] fn changed_durable_marker_is_refused_before_database_mutation(){
+    let temp=Temporary::new();drop(GraphStore::open(&temp.0,Scope::User(1000)).unwrap());
+    let path=temp.0.join("graph.identity");let original=fs::read(&path).unwrap();let database=fs::read(temp.0.join("graph.sqlite3")).unwrap();
+    let value:Value=serde_json::from_slice(&original).unwrap();
+    let filesystem=&value["identity"]["filesystem"];
+    let fields=if filesystem["kind"]=="btrfs" {vec!["uuid","subvolume_id","subvolume_uuid"]}else{vec!["boot_id","device"]};
+    for field in fields {
+        let mut changed=value.clone();let slot=&mut changed["identity"]["filesystem"][field];
+        if slot.is_array(){slot[0]=Value::from(slot[0].as_u64().unwrap() ^ 1);}else if slot.is_string(){*slot=Value::from("11111111-1111-4111-8111-111111111111");}else{*slot=Value::from(slot.as_u64().unwrap()+1);}
+        fs::write(&path,serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert!(matches!(GraphStore::open(&temp.0,Scope::User(1000)),Err(Error::IdentityChanged)));
+        assert_eq!(fs::read(temp.0.join("graph.sqlite3")).unwrap(),database);assert!(!temp.0.join("graph.recovery").exists());
+    }
+    fs::write(&path,original).unwrap();drop(GraphStore::open(&temp.0,Scope::User(1000)).unwrap());
+}
+#[test] fn duplicate_identity_fields_are_preserved_and_refused(){
+    let temp=Temporary::new();drop(GraphStore::open(&temp.0,Scope::User(1000)).unwrap());
+    let path=temp.0.join("graph.identity");let original=fs::read_to_string(&path).unwrap();let before=fs::read(temp.0.join("graph.sqlite3")).unwrap();
+    for changed in [original.replacen("\"version\":2","\"version\":2,\"version\":2",1),original.replacen("\"scope\":1000","\"scope\":1000,\"scope\":1000",1)] {
+        assert_ne!(changed,original);fs::write(&path,changed.as_bytes()).unwrap();
+        assert!(matches!(GraphStore::open(&temp.0,Scope::User(1000)),Err(Error::Corrupt)));
+        assert_eq!(fs::read(&path).unwrap(),changed.as_bytes());assert_eq!(fs::read(temp.0.join("graph.sqlite3")).unwrap(),before);
+    }
+}
+#[test] fn pending_recovery_refuses_changed_durable_destination_before_any_move(){
+    let temp=Temporary::new();let before=corrupt_owned_graph(&temp);recovery::prepare(&temp.0,Scope::User(1000)).unwrap();
+    let path=temp.0.join("graph.recovery");let mut plan:Value=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let inode=plan["directory_identity"]["inode"].as_u64().unwrap();plan["directory_identity"]["inode"]=Value::from(inode+1);
+    let changed=serde_json::to_vec(&plan).unwrap();fs::write(&path,&changed).unwrap();
+    assert!(matches!(GraphStore::open(&temp.0,Scope::User(1000)),Err(Error::IdentityChanged)));
+    for (name,bytes) in before {assert_eq!(fs::read(temp.0.join(name)).unwrap(),bytes);}
+    assert_eq!(fs::read(path).unwrap(),changed);
+}
+#[test] #[ignore="requires a native Btrfs test directory"]
+fn native_btrfs_graph_marker_uses_filesystem_and_subvolume_not_device_number(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();store.upsert_nodes(vec![node("persistent")]).unwrap();drop(store);
+    let marker:Value=serde_json::from_slice(&fs::read(temp.0.join("graph.identity")).unwrap()).unwrap();
+    assert_eq!(marker["version"],2);let storage=&marker["identity"]["filesystem"];assert_eq!(storage["kind"],"btrfs");
+    assert!(storage.get("device").is_none());assert_ne!(storage["uuid"],serde_json::to_value([0u8;16]).unwrap());
+    let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();assert_eq!(store.nodes(vec!["persistent".into()]).unwrap().len(),1);assert!(store.recovery_receipt().is_none());
+}
 fn node(id:&str)->Node {Node{id:id.into(),kind:"service".into(),scope:Scope::User(1000),provider:"native-systemd".into(),stable_key:id.into(),properties:serde_json::json!({"active":false}),source_truth:SourceTruth::Running,realtime_ns:1}}
 #[test] fn native_sqlite_migration_wal_scope_and_reopen() {
     let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();
