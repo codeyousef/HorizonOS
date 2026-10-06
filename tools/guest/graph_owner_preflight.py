@@ -46,17 +46,23 @@ def device_proof_valid(value, identity):
         return False
 
 
+def event_status_ready(observed, boot):
+    try:
+        return (observed['boot'] == boot and observed['event_watcher_installed'] is True
+                and observed['event_watcher_error'] is None and observed['model_invoked'] is False
+                and observed['execution_authority'] is False
+                and all(type(observed[field]) is int and observed[field] >= 0
+                        for field in ('systemd_notifications', 'event_reconciliations')))
+    except (KeyError, TypeError):
+        return False
+
+
 def event_proof_valid(value, boot):
     try:
         before, after = value['before'], value['after']
         for observed in (before, after):
-            if (observed['boot'] != boot or observed['event_watcher_installed'] is not True
-                    or observed['event_watcher_error'] is not None or observed['model_invoked'] is not False
-                    or observed['execution_authority'] is not False):
+            if not event_status_ready(observed, boot):
                 return False
-            for field in ('systemd_notifications', 'event_reconciliations'):
-                if type(observed[field]) is not int or observed[field] < 0:
-                    return False
         captured = value['service']['properties']['captured']
         previous = before['last_attempt']
         return (after['systemd_notifications'] > before['systemd_notifications']
@@ -317,7 +323,18 @@ def main():
         proof['steps']['service_comparison'] = {'native': native, 'captured': cached['data']['properties']['captured'], 'unknown_properties_preserved': all(cached['data']['properties'][k] is None for k in ('main_pid', 'result', 'ordering_after'))}
         if not proof['steps']['service_comparison']['unknown_properties_preserved']:
             raise RuntimeError('unobserved service properties were invented')
-        event_before = graph(expected, executable, '--inspect')
+        # Boot notifications can deliberately exhaust the bounded drain and
+        # disconnect the watcher. Require recovery BEFORE taking the baseline
+        # and starting the fixed probe; older boot counters cannot prove it.
+        baseline_deadline = time.monotonic() + 30
+        while True:
+            event_before = graph(expected, executable, '--inspect')
+            if event_status_ready(event_before, expected['boot_id']):
+                break
+            if time.monotonic() >= baseline_deadline:
+                proof['failed_systemd_event_baseline'] = event_before
+                raise RuntimeError('native systemd watcher did not recover before the event probe')
+            time.sleep(0.2)
         proof['steps']['foreign_uid_denied'] = denied_probe(expected)
         deadline = time.monotonic() + 15
         while True:

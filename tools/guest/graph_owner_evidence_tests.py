@@ -2,7 +2,7 @@
 import copy
 import unittest
 import installed_graph_owner_smoke as gate
-from graph_owner_preflight import raw_timer_trigger, denied_probe_valid, event_proof_valid, device_proof_valid
+from graph_owner_preflight import raw_timer_trigger, denied_probe_valid, event_proof_valid, event_status_ready, device_proof_valid
 
 class GraphEvidenceTests(unittest.TestCase):
     def test_denial_requires_original_dev_process_exit(self):
@@ -47,6 +47,28 @@ class GraphEvidenceTests(unittest.TestCase):
             self.assertFalse(event_proof_valid(altered, 'fixture-boot'))
         altered = copy.deepcopy(value); altered['native']['ActiveState'] = 'failed'
         self.assertFalse(event_proof_valid(altered, 'fixture-boot'))
+
+    def test_event_baseline_requires_recovery_and_fresh_post_baseline_counters(self):
+        value = self.event_fixture()
+        unavailable = dict(value['before'], event_watcher_installed=False,
+                           event_watcher_error='BOUNDED_DRAIN_LOSS', systemd_notifications=63)
+        self.assertFalse(event_status_ready(unavailable, 'fixture-boot'))
+        recovered = dict(value['before'], systemd_notifications=130, event_reconciliations=9)
+        self.assertTrue(event_status_ready(recovered, 'fixture-boot'))
+        for field, other in [('boot', 'other'), ('event_watcher_installed', 1),
+                             ('event_watcher_error', 'disconnected'), ('systemd_notifications', True),
+                             ('event_reconciliations', -1), ('model_invoked', True),
+                             ('execution_authority', True)]:
+            self.assertFalse(event_status_ready(dict(recovered, **{field: other}), 'fixture-boot'))
+        self.assertFalse(event_status_ready({}, 'fixture-boot'))
+        value['before'] = recovered
+        value['after'] = dict(recovered)
+        # Recovery itself and old boot events cannot satisfy the new probe.
+        self.assertFalse(event_proof_valid(value, 'fixture-boot'))
+        value['after'] = dict(recovered, systemd_notifications=131, event_reconciliations=10)
+        self.assertTrue(event_proof_valid(value, 'fixture-boot'))
+        value['before'] = unavailable
+        self.assertFalse(event_proof_valid(value, 'fixture-boot'))
 
     def device_fixture(self):
         return {'execution_authority': False, 'native_syspath': '/sys/devices/fixture', 'native_devnum': [252, 0],
