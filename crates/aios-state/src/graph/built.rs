@@ -2,7 +2,7 @@
 //! Embedded managed data is built state, not an approval receipt, a live service
 //! observation, or a complete inventory of packages and user profiles.
 use super::{generations, native::{Error, NativeTime, Result}, store::{GraphStore, Node, ProviderSnapshot, ProviderState, Scope, SourceTruth}, ObservationTime, SourceRevision};
-use crate::{Catalog, ManagedState, MAX_CATALOG_BYTES, MAX_MANIFEST_BYTES};
+use crate::{Catalog, CatalogEntry, ManagedState, MAX_CATALOG_BYTES, MAX_MANIFEST_BYTES};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{fs::{self, OpenOptions}, io::Read, os::unix::fs::{MetadataExt, OpenOptionsExt}, path::Path};
@@ -22,6 +22,7 @@ pub struct BuiltConfiguration {
     pub lock_sha256: String,
     pub installation_state_version: String,
     pub platform: String,
+    pub catalog_packages: Vec<CatalogEntry>,
     pub configuration: ManagedState,
 }
 fn changed() -> Error { Error::Native(aios_protocol::contracts::ErrorCode::TargetChanged) }
@@ -75,7 +76,7 @@ fn decode(running: String, profile: Option<String>, manifest: &[u8], catalog: &[
         manifest_sha256:hash(manifest),catalog_sha256:hash(catalog),catalog_revision:parsed.revision().into(),
         template_revision:content.base_template_revision.clone(),nixpkgs_revision:content.nixpkgs_revision.clone(),
         lock_sha256:content.lock_sha256.clone(),installation_state_version:content.installation_state_version.clone(),
-        platform:content.platform.clone(),configuration:compiled.state})
+        platform:content.platform.clone(),catalog_packages:content.packages.clone(),configuration:compiled.state})
 }
 /// No caller path or deserialized observation is accepted as native provenance.
 pub fn observe() -> Result<(ObservationTime, BuiltConfiguration)> {
@@ -116,11 +117,25 @@ impl NativeBuiltSnapshot {
                 "complete_package_inventory_verified":false,"execution_authority":false});
             let mut nodes=vec![Node{id:NODE.into(),kind:"configuration".into(),scope:Scope::System,provider:PROVIDER.into(),
                 stable_key:NODE.into(),properties,source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns}];
+            for package in &self.data.catalog_packages {
+                let id=format!("catalog:package:{}",package.id);
+                let selected=self.data.configuration.system_packages.contains(&package.id);
+                nodes.push(Node{id:id.clone(),kind:"package_catalog_entry".into(),scope:Scope::System,provider:PROVIDER.into(),stable_key:id,
+                    properties:serde_json::json!({"metadata":package,"catalog_revision":self.data.catalog_revision,
+                        "catalog_sha256":self.data.catalog_sha256,"nixpkgs_revision":self.data.nixpkgs_revision,
+                        "lock_sha256":self.data.lock_sha256,"platform":self.data.platform,"declared_selected":selected,
+                        "realized_package_closure":null,"binary_paths_verified":false,"desktop_entries_verified":false,
+                        "runtime_available":null,"source_permissions":"root-owned-immutable-nix-store",
+                        "catalog_complete":true,"execution_authority":false}),
+                    source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns});
+            }
             for package in &self.data.configuration.system_packages {
                 let id=format!("configuration:built-package:{package}");
                 nodes.push(Node{id:id.clone(),kind:"configuration".into(),scope:Scope::System,provider:PROVIDER.into(),stable_key:id,
-                    properties:serde_json::json!({"catalog_id":package,"running_closure":self.data.running_closure,"manifest_sha256":self.data.manifest_sha256,
-                        "catalog_revision":self.data.catalog_revision,"captured":self.captured,"runtime_available":null,"realized_package_closure":null}),
+                    properties:serde_json::json!({"catalog_id":package,"catalog_entry_id":format!("catalog:package:{package}"),
+                        "running_closure":self.data.running_closure,"manifest_sha256":self.data.manifest_sha256,
+                        "catalog_revision":self.data.catalog_revision,"captured":self.captured,"runtime_available":null,
+                        "realized_package_closure":null,"binary_paths_verified":false,"desktop_entries_verified":false}),
                     source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns});
             }
             let state=store.apply_provider_snapshot(ProviderSnapshot{provider:PROVIDER.into(),expected_token:self.token.clone(),source_truth:SourceTruth::Built,
@@ -147,6 +162,8 @@ impl NativeBuiltSnapshot {
         let result=decode("fixture-realized-closure".into(),None,&canonical,&bytes).unwrap();
         assert_eq!(result.manifest_sha256,hash(&canonical));assert_eq!(result.catalog_sha256,hash(&bytes));
         assert_eq!(result.configuration,catalog.defaults());
+        assert_eq!(result.catalog_packages.len(),1);
+        assert_eq!(result.catalog_packages[0],*catalog.entry("postgresql-17").unwrap());
         let mut value:serde_json::Value=serde_json::from_slice(&canonical).unwrap();
         value["base_template_revision"]=serde_json::json!("4".repeat(64));
         assert!(decode("fixture".into(),None,&serde_json::to_vec(&value).unwrap(),&bytes).is_err());

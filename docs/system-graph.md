@@ -196,6 +196,13 @@ package inventory. A declared package does not supply an observed package
 closure or prove runtime availability. Service and power declarations likewise
 do not prove runtime postconditions. Approval receipts, a current approved
 intended manifest and managed-transaction provenance remain separate authority.
+Every reviewed catalog entry is exposed as a separate built
+`package_catalog_entry` node with its exact package metadata revision,
+catalog/lock/nixpkgs revisions, declared binaries, desktop IDs, platform and
+capability class. The node explicitly reports whether the managed manifest
+selects it. Realized package closures, binary availability and desktop-entry
+presence remain unknown until independent native providers verify them; catalog
+membership or a store object never becomes an installation claim.
 The root-private `--metadata` diagnostic compares the cache with fresh native
 metadata and returns capture time and freshness without execution authority.
 
