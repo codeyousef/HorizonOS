@@ -141,16 +141,24 @@ impl<R: CurrentResources> ResourceResolver for ScopedResolver<'_, R> {
     fn dynamic_arguments(&self, id: &str, args: &Value) -> Result<()> { self.current.dynamic_arguments(id, args, self.scope) }
 }
 
-/// Opaque, process-local authority: no serde, Debug, token export or persistence.
-/// Stop/Forget/disconnect revoke it immediately. A new broker incarnation cannot
-/// validate a retained grant, even within the same boot/policy revision.
-pub struct ReadGrant {
+/// Opaque, process-local authority shared by typed grants. There is no serde,
+/// Debug, token export or persistence. A new broker incarnation cannot validate
+/// retained authority, even within the same boot and policy revision.
+struct GrantCore {
     subject: Subject, request_id: String, mode: Mode, goal_sha256: String, scope: Scope,
     plan_sha256: String, policy_revision: String, incarnation: Uuid, nonce: Uuid,
     issued_ms: u64, expires_ms: u64, revoked: Arc<AtomicBool>,
 }
-impl ReadGrant { pub fn revoke(&self) { self.revoked.store(true, Ordering::Release); } }
+impl GrantCore { fn revoke(&self) { self.revoked.store(true, Ordering::Release); } }
+/// Read-only authority. Stop/Forget/disconnect revoke it immediately.
+pub struct ReadGrant(GrantCore);
+impl ReadGrant { pub fn revoke(&self) { self.0.revoked.store(true, Ordering::Release); } }
 impl Drop for ReadGrant { fn drop(&mut self) { self.revoke(); } }
+/// R1 action authority from one direct authenticated Act request. Read APIs do
+/// not accept this type, so a mutation grant cannot be reused for observation.
+pub struct TaskGrant(GrantCore);
+impl TaskGrant { pub fn revoke(&self) { self.0.revoked.store(true, Ordering::Release); } }
+impl Drop for TaskGrant { fn drop(&mut self) { self.revoke(); } }
 pub struct Policy { boot_id: String, revision: String, incarnation: Uuid }
 impl Policy {
     /// Revision must come from installed policy, never a request's claimed value.
@@ -177,9 +185,24 @@ impl Policy {
         }
         let expires_ms = now_ms.checked_add(expiry_ms).ok_or(ErrorCode::InvalidArgument)?;
         let plan_sha256 = digest(&(&intent.subject, &intent.request_id, &intent.goal_sha256, intent.mode, &scope, &self.revision, now_ms, expires_ms))?;
-        Ok(ReadGrant { subject: intent.subject, request_id: intent.request_id, goal_sha256: intent.goal_sha256,
+        Ok(ReadGrant(GrantCore { subject: intent.subject, request_id: intent.request_id, goal_sha256: intent.goal_sha256,
             mode: intent.mode, scope, plan_sha256, policy_revision: self.revision.clone(), incarnation: self.incarnation,
-            nonce: Uuid::new_v4(), issued_ms: now_ms, expires_ms, revoked: Arc::new(AtomicBool::new(false)) })
+            nonce: Uuid::new_v4(), issued_ms: now_ms, expires_ms, revoked: Arc::new(AtomicBool::new(false)) }))
+    }
+    /// Mint an R1-only task grant from direct authenticated Act intent. R0 reads
+    /// remain on `ReadGrant`; R2/R3 require their separate exact/elevated paths.
+    pub fn grant_task(&self, intent: Intent, scope: Scope, now_ms: u64, expiry_ms: u64) -> Result<TaskGrant> {
+        scope.validate()?;
+        if intent.subject.boot_id != self.boot_id { return Err(ErrorCode::TargetChanged); }
+        if intent.mode != Mode::Act || expiry_ms == 0 || expiry_ms > MAX_EXPIRY_MS { return Err(ErrorCode::InvalidArgument); }
+        for id in &scope.actions {
+            if requirement(id, intent.mode, Risk::R0)? != Requirement::TaskConsent { return Err(ErrorCode::AuthRequired); }
+        }
+        let expires_ms = now_ms.checked_add(expiry_ms).ok_or(ErrorCode::InvalidArgument)?;
+        let plan_sha256 = digest(&(&intent.subject, &intent.request_id, &intent.goal_sha256, intent.mode, &scope, &self.revision, now_ms, expires_ms))?;
+        Ok(TaskGrant(GrantCore { subject: intent.subject, request_id: intent.request_id, goal_sha256: intent.goal_sha256,
+            mode: intent.mode, scope, plan_sha256, policy_revision: self.revision.clone(), incarnation: self.incarnation,
+            nonce: Uuid::new_v4(), issued_ms: now_ms, expires_ms, revoked: Arc::new(AtomicBool::new(false)) }))
     }
     /// Check one selector against a native provider's current private snapshot.
     /// The initial native presentation must explicitly authorize ui.find. The
@@ -190,12 +213,13 @@ impl Policy {
     pub fn check_graphical_selector(&self, grant: &ReadGrant, subject: &Subject,
         request_id: &str, window: &Action, snapshot: &Resource, selector: &Action,
         current: &impl CurrentResources, now_ms: u64) -> Result<()> {
+        let grant=&grant.0;
         if window.action_id() != "ui.snapshot" || selector.action_id() != "ui.find"
             || snapshot.field != "snapshot_id" || snapshot.kind != "scope-owner-expiry"
             || !uuid(&snapshot.handle) || !hash(&snapshot.identity_sha256) {
             return Err(ErrorCode::InvalidArgument);
         }
-        self.check_read(grant,subject,request_id,window,current,now_ms)?;
+        self.check_core(grant,subject,request_id,window,current,now_ms,Requirement::ReadScope)?;
         if !grant.scope.actions.contains("ui.find")
             || !grant.scope.resources.iter().any(|r|r.kind=="graphical-session") {
             return Err(ErrorCode::PermissionDenied);
@@ -205,15 +229,24 @@ impl Policy {
         scope.resources.insert(snapshot.clone());scope.validate()?;
         let result=registry::validate_references(selector,&ScopedResolver{scope:&scope,current});
         if let Err(error)=result {
-            if error==ErrorCode::TargetChanged {grant.revoke();}
+            if error==ErrorCode::TargetChanged {grant.revoked.store(true,Ordering::Release);}
             return Err(error);
         }
-        // Native resolution may block: recheck actual suspend-inclusive expiry,
-        // Stop and every selected window/display after the derived lookup.
-        self.check_read(grant,subject,request_id,window,current,boottime_ms()?)
+        self.check_core(grant,subject,request_id,window,current,boottime_ms()?,Requirement::ReadScope)
     }
     pub fn check_read(&self, grant: &ReadGrant, subject: &Subject, request_id: &str, action: &Action,
         current: &impl CurrentResources, now_ms: u64) -> Result<()> {
+        self.check_core(&grant.0,subject,request_id,action,current,now_ms,Requirement::ReadScope)
+    }
+    pub fn check_task(&self, grant: &TaskGrant, subject: &Subject, request_id: &str, action: &Action,
+        impact: Risk, current: &impl CurrentResources, now_ms: u64) -> Result<()> {
+        if requirement(action.action_id(),Mode::Act,impact)? != Requirement::TaskConsent {
+            return Err(ErrorCode::PermissionDenied);
+        }
+        self.check_core(&grant.0,subject,request_id,action,current,now_ms,Requirement::TaskConsent)
+    }
+    fn check_core(&self, grant: &GrantCore, subject: &Subject, request_id: &str, action: &Action,
+        current: &impl CurrentResources, now_ms: u64, expected: Requirement) -> Result<()> {
         subject.validate()?;
         // Foreign clients cannot revoke the legitimate owner's authority.
         if subject != &grant.subject || request_id != grant.request_id { return Err(ErrorCode::PermissionDenied); }
@@ -225,7 +258,7 @@ impl Policy {
         if digest(&(&grant.subject, &grant.request_id, &grant.goal_sha256, grant.mode, &grant.scope,
             &grant.policy_revision, grant.issued_ms, grant.expires_ms))? != grant.plan_sha256 { grant.revoke(); return Err(ErrorCode::PlanChanged); }
         if !grant.scope.actions.contains(action.action_id()) { return Err(ErrorCode::PermissionDenied); }
-        if requirement(action.action_id(), grant.mode, Risk::R0)? != Requirement::ReadScope { return Err(ErrorCode::PermissionDenied); }
+        if requirement(action.action_id(), grant.mode, Risk::R0)? != expected { return Err(ErrorCode::PermissionDenied); }
         if grant.scope.resources.iter().any(|r| r.kind == "graphical-session") {
             // Interactive authority retains every selected window and display
             // binding, even when this particular action references only one.

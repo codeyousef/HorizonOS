@@ -122,9 +122,9 @@ impl Policy {
         if decision.cancelled.load(Ordering::Acquire) {return Err(ErrorCode::Cancelled);}
         let plan_sha256 = digest(&(&p.intent.subject, &p.intent.request_id, &p.intent.goal_sha256,
             p.intent.mode, &p.scope, &p.revision, p.issued_ms, p.expires_ms))?;
-        Ok(ReadGrant { subject: p.intent.subject, request_id: p.intent.request_id, mode: p.intent.mode,
+        Ok(ReadGrant(GrantCore { subject: p.intent.subject, request_id: p.intent.request_id, mode: p.intent.mode,
             goal_sha256: p.intent.goal_sha256, scope: p.scope, plan_sha256, policy_revision: p.revision,
-            incarnation: p.incarnation, nonce: p.nonce, issued_ms: p.issued_ms, expires_ms: p.expires_ms, revoked: decision.cancelled })
+            incarnation: p.incarnation, nonce: p.nonce, issued_ms: p.issued_ms, expires_ms: p.expires_ms, revoked: decision.cancelled }))
     }
 }
 impl ReadProposal {

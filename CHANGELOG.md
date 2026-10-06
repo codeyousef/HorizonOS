@@ -7,4 +7,6 @@
   revoking the failed read without retry.
 - Add privacy-safe fixed-stage diagnostics for native process-termination setup
   failures without logging task or target data.
+- Add opaque R1 task grants bound to authenticated subject, exact scope, policy,
+  plan, live resources, broker incarnation, volatile nonce and expiry.
 - Initial Rust protocol framing and NixOS engineering scaffold.

@@ -15,6 +15,16 @@ the response. A changed resource, disconnected client, cancelled task, expired
 proposal or changed policy requires denial and a fresh proposal. The component
 does not authorize effects merely by rendering a proposal. Read and process
 termination use distinct fixed proposal types and distinct opaque decisions.
+Low-impact R1 session actions use a separate opaque `TaskGrant` minted only
+from the authenticated client's direct Act request. It binds the complete
+subject/session/client identity, exact action and resource scope, canonical plan
+digest, installed policy revision, broker incarnation, volatile nonce and
+suspend-inclusive expiry. R0 reads, R2 exact approvals and R3 elevated approvals
+cannot enter that grant. Read APIs accept only `ReadGrant`, so a mutation grant
+cannot be reused to obtain unrelated observations. Execution revalidates the
+registered risk floor, deterministic concrete impact and every referenced live
+resource; elevation to R2/R3 is denied and must use its distinct approval path.
+
 
 The `process_termination` presentation is an exact R2 preview in Act mode. It
 contains one selected owner-bound process handle, native PID/UID/start/boot and
