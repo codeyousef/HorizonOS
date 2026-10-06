@@ -93,6 +93,16 @@ properties refuse the observation. Protected nodes have no resolvable lineage.
 The read-task wrapper also checks the original connection and live read grant
 before and after resolution. This does not enable `ui.find` or semantic input.
 
+Native container pages accept only a fresh snapshot's opaque node handle from
+the same selected window. The reader validates the previous lineage, captures
+a new snapshot generation and checks the paged root again. Each page has a
+two-second total query bound, depth eight, at most 300 nodes and 16 KiB observed
+text. Captured ancestors stay private; ancestor validation is capped at 64
+objects and cannot refresh old node handles into a new page. The read-task
+wrapper rechecks the original live window grant and connection around paging.
+Public task/provider paging routes still require explicit integration; this
+native reader does not turn serialized paths or model UUIDs into authority.
+
 The native transport launches the compile-pinned immutable Qt wrapper with a
 cleared environment and the selected Wayland socket. Its pollable supervisor
 requires the actual pinned native child executable, successful exit and one

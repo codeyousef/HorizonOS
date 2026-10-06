@@ -12,7 +12,7 @@ type Object = (String,OwnedObjectPath);
 #[derive(Clone)]
 struct NodeLineage {
     handle:String,path:OwnedObjectPath,parent:OwnedObjectPath,role:u32,
-    name:String,states:Vec<u32>,actions:Vec<String>,
+    name:String,states:Vec<u32>,actions:Vec<String>,children:u32,
 }
 const ACCESSIBLE:&str="org.a11y.atspi.Accessible";
 const ROOT:&str="/org/a11y/atspi/accessible/root";
@@ -142,11 +142,32 @@ impl WindowBinding {
     /// Trusted broker calls this only after native consent and shared-policy
     /// authorization of this exact window handle. There is no direct IPC route.
     pub fn snapshot(&self,control:&AtomicU8)->Result<Snapshot>{
-        let deadline=Instant::now()+Duration::from_secs(2);check(deadline,control)?;
-        let bus=self.current()?;
+        self.snapshot_from(control,Instant::now(),self.path.clone(),OwnedObjectPath::try_from(ROOT).map_err(|_|ErrorCode::TargetChanged)?,vec![])
+    }
+    /// A container is selected only by private lineage from an unexpired native
+    /// snapshot of this exact window. No object path or bus name is input.
+    pub fn snapshot_container(&self,previous:&Snapshot,container_handle:&str,control:&AtomicU8)->Result<Snapshot>{
         let captured=Instant::now();
+        self.verify_snapshot_node(previous,container_handle,control)?;
+        let container=previous.lineage.iter().find(|n|n.handle==container_handle).ok_or(ErrorCode::TargetNotFound)?;
+        let mut ancestry=Vec::new();let mut path=container.parent.clone();
+        while container.path!=self.path && path!=OwnedObjectPath::try_from(ROOT).map_err(|_|ErrorCode::TargetChanged)? {
+            if ancestry.len()>=64{return Err(ErrorCode::ResourceExhausted);}
+            let entry=previous.ancestry.iter().find(|(p,_)|p==&path).ok_or(ErrorCode::TargetChanged)?;
+            ancestry.push(entry.clone());
+            if path==self.path{break;}path=entry.1.clone();
+        }
+        let snapshot=self.snapshot_from(control,captured,container.path.clone(),container.parent.clone(),ancestry)?;
+        let root=snapshot.lineage.first().ok_or(ErrorCode::TargetChanged)?;
+        self.verify_snapshot_node(&snapshot,&root.handle,control)?;
+        Ok(snapshot)
+    }
+    fn snapshot_from(&self,control:&AtomicU8,captured:Instant,root:OwnedObjectPath,parent:OwnedObjectPath,
+        mut ancestry:Vec<(OwnedObjectPath,OwnedObjectPath)>)->Result<Snapshot>{
+        let deadline=captured+Duration::from_secs(2);check(deadline,control)?;
+        let bus=self.current()?;
         let snapshot_id=Uuid::new_v4().to_string();let mut nodes=Vec::new();let mut lineage=Vec::new();
-        let mut queue=VecDeque::from([(self.path.clone(),0u8,OwnedObjectPath::try_from(ROOT).map_err(|_|ErrorCode::TargetChanged)?)]);let mut visited=HashSet::new();
+        let mut queue=VecDeque::from([(root,0u8,parent)]);let mut visited=HashSet::new();
         let mut bytes=0;let mut truncated=false;
         while let Some((path,depth,parent))=queue.pop_front(){
             check(deadline,control)?;
@@ -182,10 +203,12 @@ impl WindowBinding {
                 }
             }
             let node_handle=Uuid::new_v4().to_string();
-            lineage.push(NodeLineage{handle:node_handle.clone(),path:path.clone(),parent,role,name:native_name,states:native_states,actions:actions.clone()});
+            ancestry.push((path.clone(),parent.clone()));
+            lineage.push(NodeLineage{handle:node_handle.clone(),path:path.clone(),parent,role,name:native_name,states:native_states,actions:actions.clone(),children:0});
             nodes.push(Node{node_handle,role:format!("atspi:{role}"),name,states,actions});
             let children:i32=p.get_property("ChildCount").map_err(error)?;
             if children<0 || children>100000{return Err(ErrorCode::PartialResult);}
+            lineage.last_mut().ok_or(ErrorCode::TargetChanged)?.children=children as u32;
             if depth>=8 && children>0{truncated=true;continue;}
             let capacity=300usize.saturating_sub(nodes.len()+queue.len());
             let count=(children as usize).min(capacity);if count<children as usize{truncated=true;}
@@ -197,7 +220,7 @@ impl WindowBinding {
             }
         }
         check(deadline,control)?;self.verify()?;check(deadline,control)?;
-        Ok(Snapshot{generation:snapshot_id.clone(),snapshot_id,window_handle:self.handle.clone(),nodes,truncated,lineage,
+        Ok(Snapshot{generation:snapshot_id.clone(),snapshot_id,window_handle:self.handle.clone(),nodes,truncated,lineage,ancestry,
             window_identity:self.identity_sha256()?,captured})
     }
 
@@ -214,16 +237,18 @@ impl WindowBinding {
         let bus=self.current()?;check(deadline,control)?;
         // Reparenting a container can move its unchanged child into another
         // window. Recheck the complete captured ancestry, not just one parent.
-        let mut ancestor=node;
-        for depth in 0..=8 {
+        let mut path=node.path.clone();let mut expected_parent=node.parent.clone();
+        for depth in 0..64 {
             check(deadline,control)?;
-            let parent=bus.accessible(&self.app.owner,ancestor.path.as_str())?;
-            if parent.get_property::<Object>("Parent").map_err(error)?!=(self.app.owner.clone(),ancestor.parent.clone()) {
+            let parent=bus.accessible(&self.app.owner,path.as_str())?;
+            if parent.get_property::<Object>("Parent").map_err(error)?!=(self.app.owner.clone(),expected_parent.clone()) {
                 return Err(ErrorCode::TargetChanged);
             }
-            if ancestor.path==self.path {break;}
-            if depth==8{return Err(ErrorCode::TargetChanged);}
-            ancestor=snapshot.lineage.iter().find(|n|n.path==ancestor.parent).ok_or(ErrorCode::TargetChanged)?;
+            drop(parent);
+            if path==self.path {break;}
+            if depth==63{return Err(ErrorCode::ResourceExhausted);}
+            let ancestor=snapshot.ancestry.iter().find(|(p,_)|p==&expected_parent).ok_or(ErrorCode::TargetChanged)?;
+            path=ancestor.0.clone();expected_parent=ancestor.1.clone();
         }
         let p=bus.accessible(&self.app.owner,node.path.as_str())?;
         if p.get_property::<Object>("Parent").map_err(error)?!=(self.app.owner.clone(),node.parent.clone()) {
@@ -258,6 +283,15 @@ pub struct Snapshot {
     #[serde(skip)] window_identity:String,
     #[serde(skip)] captured:Instant,
     #[serde(skip)] generation:String,
+    #[serde(skip)] ancestry:Vec<(OwnedObjectPath,OwnedObjectPath)>,
+}
+impl Snapshot {
+    /// Opaque observed containers only. This is not a grant or a live query.
+    pub fn container_handles(&self)->Result<Vec<String>>{
+        if self.snapshot_id!=self.generation{return Err(ErrorCode::TargetChanged);}
+        if self.captured.elapsed()>=Duration::from_secs(2){return Err(ErrorCode::DeadlineExceeded);}
+        Ok(self.lineage.iter().filter(|n|n.children>0).map(|n|n.handle.clone()).collect())
+    }
 }
 #[derive(Serialize)]
 pub struct Node {pub node_handle:String,pub role:String,pub name:String,pub states:Vec<String>,pub actions:Vec<String>}
@@ -270,5 +304,18 @@ pub struct Node {pub node_handle:String,pub role:String,pub name:String,pub stat
     #[test]fn protected_titles_and_directional_names_never_enter_content(){
         for v in ["id_ed25519 — Kate","Password — Kate","Authentication","Horizon OS — Needs permission"]{assert!(protected_title(v));}
         assert!(!protected_title("fixture.txt — Kate"));assert!(text("spoof\u{202e}text".into(),128).is_err());
+    }
+    #[test]fn container_metadata_is_private_and_cannot_refresh_expired_generation_fixture(){
+        let mut snapshot=Snapshot{snapshot_id:"fixture-generation".into(),generation:"fixture-generation".into(),window_handle:"fixture-window".into(),
+            window_identity:"fixture-private-identity".into(),captured:Instant::now(),truncated:false,nodes:vec![],ancestry:vec![],
+            lineage:vec![NodeLineage{handle:"fixture-container".into(),path:OwnedObjectPath::try_from("/fixture/container").unwrap(),
+                parent:OwnedObjectPath::try_from("/fixture/window").unwrap(),role:23,name:"private full bounded name".into(),states:vec![1],actions:vec![],children:1}]};
+        assert_eq!(snapshot.container_handles().unwrap(),vec!["fixture-container"]);
+        let value=serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(value.as_object().unwrap().len(),4);
+        for key in ["lineage","ancestry","captured","generation","window_identity"]{assert!(value.get(key).is_none());}
+        snapshot.snapshot_id="caller-changed".into();assert_eq!(snapshot.container_handles(),Err(ErrorCode::TargetChanged));
+        snapshot.snapshot_id=snapshot.generation.clone();snapshot.captured=Instant::now()-Duration::from_secs(3);
+        assert_eq!(snapshot.container_handles(),Err(ErrorCode::DeadlineExceeded));
     }
 }

@@ -92,7 +92,7 @@ def service_evidence_proof_valid(value, identity):
                 and type(data['main_pid']) is int and data['main_pid'] > 0
                 and str(data['main_pid']) == native['MainPID']
                 and type(value['expiry_elapsed_ns']) is int and value['expiry_elapsed_ns'] >= 5_100_000_000
-                and type(value['expired_upstream_exit']) is int and value['expired_upstream_exit'] == 0
+                and type(value['expired_upstream_exit']) is int and value['expired_upstream_exit'] == 1
                 and value['expired_response'] == {'ok': False, 'error': 'Native(Graph(StaleEvidence))'})
     except (KeyError, TypeError):
         return False

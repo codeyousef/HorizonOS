@@ -162,4 +162,12 @@ impl NativeReadTask {
         self.check_origin()?;
         if result.is_err(){self.revoke();}result
     }
+    pub fn snapshot_container(&mut self,previous:&Snapshot,container_handle:&str)->Result<Snapshot>{
+        self.check_origin()?;
+        if let Err(error)=self.check_grant(){self.revoke();return Err(error);}
+        let result=self.window.snapshot_container(previous,container_handle,&self.control);
+        if let Err(error)=self.check_grant(){self.revoke();return Err(error);}
+        self.check_origin()?;
+        if result.is_err(){self.revoke();}result
+    }
 }

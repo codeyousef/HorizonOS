@@ -108,6 +108,20 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     if std::env::var("AIOS_NATIVE_BRIDGE_SCENARIO").ok().as_deref()==Some("disposable-provider-v1"){
         qualify_broker_bridge(&display,&window);
     }
+    // Registration exposes the window before Kate finishes populating its
+    // accessibility tree. Let this owned fixture finish startup before the
+    // first query; a failed snapshot is never retried and its limits stay fixed.
+    std::thread::sleep(Duration::from_millis(500));
+    let paging=window.snapshot(&control).expect("native paging source snapshot");
+    let container=paging.container_handles().unwrap().into_iter().find(|h|h!=&paging.nodes[0].node_handle).expect("native non-window container");
+    let page=window.snapshot_container(&paging,&container,&control).expect("real selected native container page");
+    assert_eq!(page.window_handle,window.handle);assert_ne!(page.snapshot_id,paging.snapshot_id);
+    assert!(!page.nodes.is_empty() && page.nodes.len()<=300);
+    assert!(page.nodes.iter().map(|n|n.name.len()+n.actions.iter().map(String::len).sum::<usize>()).sum::<usize>()<=16384);
+    aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.snapshot","data").unwrap(),&serde_json::to_value(&page).unwrap()).unwrap();
+    window.verify_snapshot_node(&page,&page.nodes[0].node_handle,&control).expect("paged root retains selected-window ancestors");
+    assert!(matches!(window.snapshot_container(&page,&uuid::Uuid::new_v4().to_string(),&control),Err(ErrorCode::TargetNotFound)));
+    assert!(matches!(window.snapshot_container(&page,&page.nodes[0].node_handle,&AtomicU8::new(1)),Err(ErrorCode::Cancelled)));
     let mut snapshot=window.snapshot(&control).expect("real selected-window snapshot");
     assert_eq!(snapshot.window_handle,window.handle);assert!(!snapshot.nodes.is_empty());assert!(snapshot.nodes.len()<=300);
     assert!(snapshot.nodes.iter().map(|n|n.name.len()+n.actions.iter().map(String::len).sum::<usize>()).sum::<usize>()<=16384);
@@ -122,6 +136,8 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     assert_eq!(window.verify_snapshot_node(&snapshot,&selected_node,&cancelled_node),Err(ErrorCode::Cancelled));
     std::thread::sleep(Duration::from_millis(2100));
     assert_eq!(window.verify_snapshot_node(&snapshot,&selected_node,&control),Err(ErrorCode::DeadlineExceeded));
+    assert_eq!(snapshot.container_handles(),Err(ErrorCode::DeadlineExceeded));
+    assert!(matches!(window.snapshot_container(&snapshot,&selected_node,&control),Err(ErrorCode::DeadlineExceeded)));
     let cancelled=AtomicU8::new(1);
     assert!(matches!(window.snapshot(&cancelled),Err(ErrorCode::Cancelled)));
     // The real originating kernel peer and actual selected Kate/display scope
@@ -168,6 +184,7 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     assert!(matches!(task.poll_confirmation(),Err(ErrorCode::Cancelled)),"disconnected original peer retained pending consent");
     assert!(matches!(task.snapshot(),Err(ErrorCode::Cancelled)));
     assert_eq!(task.verify_snapshot_node(&snapshot,&selected_node),Err(ErrorCode::Cancelled));
+    assert!(matches!(task.snapshot_container(&snapshot,&selected_node),Err(ErrorCode::Cancelled)));
     let (proof,peer_socket)=std::os::unix::net::UnixStream::pair().unwrap();
     let origin=aios_session::ui_read::OriginatingClient::authenticate(proof).unwrap();
     let mut task=aios_session::ui_read::NativeReadTask::begin(origin,window.clone(),"Explain the selected synthetic document",aios_policy::Mode::Ask,
@@ -185,6 +202,8 @@ fn native_selected_kate_snapshot_and_stale_owner(){
         "cancelled_before_query":true,"closed_owner_denial":format!("{:?}",stale.unwrap_err()),
         "native_node_lineage_rechecked":true,"unknown_node_denied":true,"node_cancel_denied":true,"actual_node_expiry_wait_ms":2100,
         "changed_snapshot_generation_denied":true,"disconnected_grant_node_denied":true,"startup_metadata_timeouts":discovery_timeouts,
+        "native_non_window_container_page_nodes":page.nodes.len(),"container_page_snapshot_id":page.snapshot_id,
+        "container_page_ancestors_revalidated":true,"expired_container_denied":true,"container_cancel_denied":true,
         "semantic_effect_performed":false}));
     println!("NATIVE_POLICY_CONSENT={}",json!({"evidence_kind":"real-native-client-display-window-and-production-consent-transport-no-allow-or-grant",
         "uid":uid,"origin_pid":subject.pid,"origin_start_ticks":subject.start_ticks,"session_id":display.session.id,

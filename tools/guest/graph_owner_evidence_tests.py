@@ -83,7 +83,7 @@ class GraphEvidenceTests(unittest.TestCase):
                     'ordering_is_not_causation': True, 'load_state': 'loaded', 'active_state': 'active',
                     'sub_state': 'running', 'result': 'success', 'main_pid': 123}},
             'native': {'LoadState': 'loaded', 'ActiveState': 'active', 'SubState': 'running', 'Result': 'success', 'MainPID': '123'},
-            'expiry_elapsed_ns': 5_100_000_000, 'expired_upstream_exit': 0,
+            'expiry_elapsed_ns': 5_100_000_000, 'expired_upstream_exit': 1,
             'expired_response': {'ok': False, 'error': 'Native(Graph(StaleEvidence))'}}
 
     def test_service_viewer_gate_refuses_wrong_native_target_authority_or_expiry(self):
@@ -100,7 +100,7 @@ class GraphEvidenceTests(unittest.TestCase):
             (['view', 'captured', 'monotonic_ns'], True), (['view', 'live_compared_at', 'boot'], 'foreign'),
             (['view', 'live_compared_at', 'monotonic_ns'], 5_000_000_010),
             (['expiry_elapsed_ns'], 5_099_999_999), (['expiry_elapsed_ns'], True),
-            (['expired_upstream_exit'], True), (['expired_upstream_exit'], 1),
+            (['expired_upstream_exit'], True), (['expired_upstream_exit'], 0),
             (['expired_response'], {'ok': True, 'data': {}}),
             (['expired_response'], {'ok': False, 'error': 'Native(Graph(Corrupt))'})]
         for path, other in cases:
