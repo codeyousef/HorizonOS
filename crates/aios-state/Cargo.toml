@@ -16,3 +16,7 @@ libc = "0.2"
 [[bin]]
 name = "aios-state-check"
 path = "src/main.rs"
+
+[[bin]]
+name = "aios-stated"
+path = "src/state_main.rs"

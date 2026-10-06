@@ -67,6 +67,7 @@ in {
   # Executor1 serves authenticated preparation; model and indexer stay unloaded.
   services.aios.enable = false;
   services.aios.session.enable = true;
+  services.aios.graph.enable = true;
   services.aios.development = {
     enable = true;
     expectedVmUuid = guestUUID;

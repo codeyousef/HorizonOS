@@ -124,3 +124,17 @@ fn native_process_snapshot_deadline_and_database_scope_are_enforced(){
     println!("AIOS_NATIVE_GRAPH_PROCESS_EXPIRY={}",json!({"evidence_kind":"real-kernel-monotonic-own-process-snapshot-expiry","uid":uid,"attempts":attempts,"actual_wait_ms":2100,"expired_snapshot_refused":true,"live_read_reobserved_retained_process":true,"foreign_database_scope_refused":true,"installed_graph_service_qualified":false}));
     drop(expired);drop(snapshot);drop(store);
 }
+
+#[test]
+#[ignore="requires the enrolled NixOS guest's real system bus and systemd manager"]
+fn native_systemd_loaded_graph_matches_independent_service_state(){
+    use aios_state::graph::native::{NativeSystemdSnapshot,SYSTEMD_PROVIDER,system_service_key};
+    let (fixture,_uid)=process_fixture();let store=GraphStore::open(&fixture.0,Scope::System).unwrap();
+    let snapshot=NativeSystemdSnapshot::collect(&store).unwrap();let state=snapshot.apply(&store).unwrap();assert!(matches!(state.status,ProviderStatus::Ready|ProviderStatus::Partial));
+    let id=system_service_key("sshd.service").unwrap();let row=store.nodes(vec![id.clone()]).unwrap().remove(0);
+    let output=Command::new("/run/current-system/sw/bin/systemctl").args(["show","sshd.service","--property=LoadState","--property=ActiveState","--property=SubState"]).output().unwrap();assert!(output.status.success());
+    let text=String::from_utf8(output.stdout).unwrap();let expected=text.lines().map(|line|line.split_once('=').unwrap()).collect::<std::collections::BTreeMap<_,_>>();
+    assert_eq!(row.properties["observation"]["load_state"],expected["LoadState"]);assert_eq!(row.properties["observation"]["active_state"],expected["ActiveState"]);assert_eq!(row.properties["observation"]["sub_state"],expected["SubState"]);
+    assert!(row.properties["main_pid"].is_null());assert!(row.properties["result"].is_null());assert!(row.properties["ordering_after"].is_null());assert_eq!(row.provider,SYSTEMD_PROVIDER);assert_eq!(row.source_truth,SourceTruth::Running);
+    println!("AIOS_NATIVE_GRAPH_SYSTEMD={}",json!({"evidence_kind":"real-root-manager-loaded-service-graph-library","unit":"sshd.service","id":id,"provider_status":state.status,"observed_services":snapshot.ids().unwrap().len(),"manager_owner":row.properties["manager_owner"],"boot":snapshot.captured().boot,"independent_systemctl":text,"unknown_properties_preserved":true,"installed_graph_daemon_qualified":false}));drop(store);
+}

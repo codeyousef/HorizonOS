@@ -113,3 +113,23 @@ expires because the result is a new native observation, with its own timestamp.
 The enclosing authenticated broker still owns read scopes, grants, revocation
 and disconnect lifetimes. This adapter is not a root/other-UID process census,
 an execution permission or an installed graph daemon.
+
+## Private system graph owner
+
+`aios-stated` runs under the dedicated unprivileged `aios-state` identity. It
+owns `/var/lib/aios/state` and `/run/aios-state` at mode 0700; graph files and its
+control socket are 0600. The runtime path is separate from model-owned runtime
+parents. Startup and a fifteen-minute timer/fallback collect loaded system
+service facts through fixed read-only calls to the UID-0 systemd manager. Unit
+descriptions are omitted. Service-specific result/MainPID/ordering fields remain
+unknown unless separately observed; loaded units are not the installed-unit
+catalog, intended state or proof of a dependency.
+
+The private control protocol accepts status, reconciliation and a single
+validated service-name cache lookup, with peer credentials, fixed frame bounds
+and timeouts. Only root and the graph identity may use it. It is an internal
+component/operator channel; authenticated product graph retrieval is separate.
+Cache lookups show captured time and freshness and never authorize effects.
+The service has no model, home, activation or transaction-ledger access. It is
+wanted by normal boot and does not become a requirement of desktop or SSH.
+This system owner does not yet provide user overlays or native event watching.

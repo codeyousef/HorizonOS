@@ -127,3 +127,50 @@ impl NativeProcessSnapshot{
         assert!((before..=after).contains(&(first.0.realtime_ns as u128)));assert_eq!(first.0.boot,native_boot().unwrap());
     }
 }
+
+
+pub const SYSTEMD_PROVIDER:&str="native-systemd-loaded-services";
+/// Identity of a system-manager unit, independent of an individual activation.
+/// Source truth and provider scope remain pinned by the graph store.
+pub fn system_service_key(name:&str)->Result<String>{
+    aios_system::services::validate_service_name(name)?;
+    use sha2::{Digest,Sha256};
+    let bytes=serde_json::to_vec(&("systemd-system-service",name)).map_err(|_|Error::Clock)?;
+    Ok(format!("service:{:x}",Sha256::digest(bytes)))
+}
+pub struct NativeSystemdSnapshot {captured:NativeTime,expected_token:Option<String>,inventory:aios_system::services::LoadedServices}
+impl NativeSystemdSnapshot{
+    pub fn collect(store:&GraphStore)->Result<Self>{
+        if store.native_scope()!=Scope::System{return Err(Error::WrongScope);}
+        let result=(||{
+            let captured=NativeTime::observe()?;
+            let expected_token=store.reconciliation_plan(SYSTEMD_PROVIDER.into(),captured.0.clone(),SourceRevision::default())?.state.map(|s|s.token);
+            let inventory=aios_system::services::read_loaded_services()?;
+            if BootId::parse(&inventory.boot_id)!=Some(captured.0.boot.clone()){return Err(Error::Clock);}
+            let snapshot=Self{captured,expected_token,inventory};snapshot.fresh()?;Ok(snapshot)
+        })();if result.is_err(){store.report_event_loss();}result
+    }
+    fn fresh(&self)->Result<()>{
+        let now=NativeTime::observe()?;
+        match freshness(FreshnessClass::Service,&self.captured.0,&now.0,&SourceRevision::default(),&SourceRevision::default()){
+            Freshness::Current=>Ok(()),Freshness::Stale=>Err(Error::Expired),Freshness::Unknown=>Err(Error::Clock),
+        }
+    }
+    pub fn ids(&self)->Result<Vec<String>>{self.inventory.services.iter().map(|s|system_service_key(&s.unit_name)).collect()}
+    pub fn captured(&self)->&ObservationTime{&self.captured.0}
+    pub fn apply(&self,store:&GraphStore)->Result<ProviderState>{
+        if store.native_scope()!=Scope::System{return Err(Error::WrongScope);}
+        let result=(||{
+            self.fresh()?;
+            let mut nodes=Vec::new();for service in &self.inventory.services{
+                let id=system_service_key(&service.unit_name)?;
+                nodes.push(Node{id:id.clone(),kind:"service".into(),scope:Scope::System,provider:SYSTEMD_PROVIDER.into(),stable_key:id,
+                    properties:serde_json::json!({"observation":service,"captured":self.captured.0,"manager_owner":self.inventory.manager_owner,
+                        "manager_version":self.inventory.manager_version,"main_pid":null,"result":null,"ordering_after":null}),
+                    source_truth:SourceTruth::Running,realtime_ns:self.captured.0.realtime_ns});
+            }
+            self.fresh()?;Ok(store.apply_provider_snapshot(ProviderSnapshot{provider:SYSTEMD_PROVIDER.into(),expected_token:self.expected_token.clone(),source_truth:SourceTruth::Running,
+                time:self.captured.0.clone(),source_revision:SourceRevision::default(),complete:self.inventory.complete,nodes,verified_absent_ids:vec![]})?)
+        })();if result.is_err(){store.report_event_loss();}result
+    }
+}

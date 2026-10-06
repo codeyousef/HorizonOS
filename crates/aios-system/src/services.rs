@@ -180,6 +180,37 @@ pub fn read_service_status(name: &str, service_id: &str) -> Result<ServiceStatus
         ordering_after, ordering_is_not_causation:true })
 }
 
+/// Native loaded-system-service inventory. Descriptions and following-unit text
+/// are deliberately omitted; no command lines, home paths or user units.
+#[derive(Debug,Serialize)]
+pub struct LoadedService {pub unit_name:String,pub load_state:String,pub active_state:String,pub sub_state:String,pub job_id:u32,pub job_type:Option<String>}
+#[derive(Debug)]
+pub struct LoadedServices {pub manager_owner:String,pub manager_version:String,pub boot_id:String,pub complete:bool,pub services:Vec<LoadedService>}
+pub fn read_loaded_services()->Result<LoadedServices,ErrorCode>{
+    type Unit=(String,String,String,String,String,String,OwnedObjectPath,u32,String,OwnedObjectPath);
+    let started=Instant::now();let connection=system_connection()?;let owner=root_owner(&connection,"org.freedesktop.systemd1")?;
+    let manager=fresh_proxy(&connection,&owner,"/org/freedesktop/systemd1","org.freedesktop.systemd1.Manager")?;
+    let manager_version:String=manager.get_property("Version").map_err(dbus_error)?;
+    if manager_version.is_empty() || manager_version.len()>256 || manager_version.chars().any(char::is_control){return Err(ErrorCode::PartialResult);}
+    let units:Vec<Unit>=manager.call("ListUnits",&()).map_err(dbus_error)?;
+    if units.len()>8192{return Err(ErrorCode::ResourceExhausted);}
+    let mut services=Vec::new();let mut complete=true;let mut names=std::collections::BTreeSet::new();
+    for (name,_description,load,active,sub,_following,path,job_id,job_type,job_path) in units{
+        if !name.ends_with(".service"){continue;}
+        if validate_service_name(&name).is_err(){complete=false;continue;}
+        if !names.insert(name.clone()) || !path.as_str().starts_with("/org/freedesktop/systemd1/unit/"){return Err(ErrorCode::PartialResult);}
+        job_identity(job_id,job_path.as_str())?;
+        services.push(LoadedService{unit_name:name,load_state:small(load)?,active_state:small(active)?,sub_state:small(sub)?,job_id,
+            job_type:if job_id==0{None}else{Some(small(job_type)?)}});
+    }
+    services.sort_by(|a,b|a.unit_name.cmp(&b.unit_name));
+    if root_owner(&connection,"org.freedesktop.systemd1")?!=owner{return Err(ErrorCode::StaleEvidence);}
+    let boot_id=crate::boot_id(&crate::bounded(std::path::Path::new("/proc/sys/kernel/random/boot_id"),128)?)?;
+    if started.elapsed()>=Duration::from_secs(5){return Err(ErrorCode::DeadlineExceeded);}
+    drop(manager);
+    Ok(LoadedServices{manager_owner:owner,manager_version,boot_id,complete,services})
+}
+
 pub fn service_result(name: &str, service_id: &str) -> ProviderResult<ServiceStatus> {
     let observed_at = OffsetDateTime::now_utc().format(&Rfc3339).expect("valid UTC timestamp");
     let (status, complete, data, error) = match read_service_status(name, service_id) {

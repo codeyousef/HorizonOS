@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 
 pub mod store;
 pub mod native;
+pub mod runtime;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
