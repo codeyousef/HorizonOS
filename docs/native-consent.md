@@ -100,8 +100,18 @@ two-second total query bound, depth eight, at most 300 nodes and 16 KiB observed
 text. Captured ancestors stay private; ancestor validation is capped at 64
 objects and cannot refresh old node handles into a new page. The read-task
 wrapper rechecks the original live window grant and connection around paging.
-Public task/provider paging routes still require explicit integration; this
-native reader does not turn serialized paths or model UUIDs into authority.
+The original Unix-client read task exposes `get_ui_snapshot_containers` with
+`task_id` and `snapshot_id`, then `page_ui_snapshot` with the same fields and
+an observed `container_handle`. The provider retains the native grant and
+private snapshot; the caller cannot supply paths, owners or approval. Each
+successful page replaces the previous generation, returns a readiness receipt,
+and is consumed once with `take_ui_snapshot`. Old generations and failed native
+revalidation end that read. These operations do not permit semantic input.
+The worker holds a bounded command channel and never a task mutex across native
+queries; Stop and the original cancellation socket independently revoke it.
+The task's original 90-second deadline bounds grant and private-data retention.
+Installed acceptance must exercise this provider route with actual native
+consent; direct reader tests alone do not qualify the transport.
 
 The native transport launches the compile-pinned immutable Qt wrapper with a
 cleared environment and the selected Wayland socket. Its pollable supervisor

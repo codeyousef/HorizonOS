@@ -65,3 +65,13 @@ fn public_task_channel_has_no_approval_fields_and_transfers_only_one_native_sock
     // Dropping a pending task has the same revocation behavior.
     let (cancel,mut receiver)=Cancellation::pair().unwrap();drop(cancel);assert_eq!(receiver.read(&mut [0]).unwrap(),0);
 }
+
+#[test]
+fn paging_rejects_serialized_authority_paths_and_duplicate_generations(){
+    for raw in [
+        r#"{"kind":"page_snapshot","task_id":"t","snapshot_id":"s","container_handle":"h","approved":true}"#,
+        r#"{"kind":"page_snapshot","task_id":"t","snapshot_id":"s","snapshot_id":"other","container_handle":"h"}"#,
+        r#"{"kind":"page_snapshot","task_id":"t","snapshot_id":"s","container_handle":"h","object_path":"/org/a11y/atspi/accessible/root"}"#,
+        r#"{"kind":"snapshot_containers","task_id":"t","snapshot_id":"s","grant":{}}"#,
+    ]{assert!(matches!(parse(raw),Err(ErrorCode::InvalidArgument)));}
+}

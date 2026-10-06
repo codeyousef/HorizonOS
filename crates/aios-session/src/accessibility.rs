@@ -18,6 +18,8 @@ const ACCESSIBLE:&str="org.a11y.atspi.Accessible";
 const ROOT:&str="/org/a11y/atspi/accessible/root";
 fn error(e:zbus::Error)->ErrorCode{
     match e {
+        zbus::Error::FDO(e) if matches!(&*e,zbus::fdo::Error::UnknownObject(_)|zbus::fdo::Error::UnknownInterface(_))=>ErrorCode::TargetChanged,
+        zbus::Error::MethodError(name,_,_) if matches!(name.as_str(),"org.freedesktop.DBus.Error.UnknownObject"|"org.freedesktop.DBus.Error.UnknownInterface")=>ErrorCode::TargetChanged,
         zbus::Error::InputOutput(e) if e.kind()==std::io::ErrorKind::TimedOut=>ErrorCode::DeadlineExceeded,
         zbus::Error::MethodError(name,_,_) if matches!(name.as_str(),"org.freedesktop.DBus.Error.NoReply"|"org.freedesktop.DBus.Error.Timeout")=>ErrorCode::DeadlineExceeded,
         _=>ErrorCode::PartialResult,
@@ -301,6 +303,11 @@ impl Snapshot {
 pub struct Node {pub node_handle:String,pub role:String,pub name:String,pub states:Vec<String>,pub actions:Vec<String>}
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]fn vanished_accessible_objects_are_target_changes_not_partial_inventories(){
+        for e in [zbus::fdo::Error::UnknownObject("synthetic vanished node".into()),zbus::fdo::Error::UnknownInterface("synthetic changed interface".into())]{
+            assert_eq!(error(zbus::Error::FDO(Box::new(e))),ErrorCode::TargetChanged);
+        }
+    }
     #[test]fn control_and_deadline_deny_before_query(){
         let c=AtomicU8::new(1);assert_eq!(check(Instant::now()+Duration::from_secs(1),&c),Err(ErrorCode::Cancelled));
         c.store(0,Ordering::Release);assert_eq!(check(Instant::now()-Duration::from_millis(1),&c),Err(ErrorCode::DeadlineExceeded));

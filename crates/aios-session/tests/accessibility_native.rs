@@ -113,7 +113,12 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     // first query; a failed snapshot is never retried and its limits stay fixed.
     std::thread::sleep(Duration::from_millis(500));
     let paging=window.snapshot(&control).expect("native paging source snapshot");
-    let container=paging.container_handles().unwrap().into_iter().find(|h|h!=&paging.nodes[0].node_handle).expect("native non-window container");
+    let containers=paging.container_handles().unwrap();
+    // Page the owned document's text container, not transient toolbar/menu trees.
+    // Selection happens once from native metadata; a failed page is not retried.
+    let editors=paging.nodes.iter().filter(|n|n.role=="atspi:61" && containers.contains(&n.node_handle)).collect::<Vec<_>>();
+    assert_eq!(editors.len(),1,"one native selected-document text container required");
+    let container=editors[0].node_handle.clone();
     let page=window.snapshot_container(&paging,&container,&control).expect("real selected native container page");
     assert_eq!(page.window_handle,window.handle);assert_ne!(page.snapshot_id,paging.snapshot_id);
     assert!(!page.nodes.is_empty() && page.nodes.len()<=300);
@@ -281,6 +286,21 @@ fn qualify_broker_bridge(display:&DisplayBinding,window:&WindowBinding){
     aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.snapshot","data").unwrap(),&scoped).unwrap();
     assert_eq!(scoped["window_handle"],selected_window);let nodes=scoped["nodes"].as_array().unwrap();assert!(!nodes.is_empty() && nodes.len()<=300);
     let denied=client.call(json!({"kind":"take_ui_snapshot","task_id":allowed_task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::TargetNotFound);
+    let snapshot_id=scoped["snapshot_id"].as_str().unwrap();
+    let denied=reconnect.call(json!({"kind":"get_ui_snapshot_containers","task_id":allowed_task,"snapshot_id":snapshot_id})).unwrap();
+    assert_eq!(denied.error.unwrap().code,ErrorCode::AuthRequired);
+    let containers=client.call(json!({"kind":"get_ui_snapshot_containers","task_id":allowed_task,"snapshot_id":snapshot_id})).unwrap();
+    assert!(containers.error.is_none(),"{containers:?}");let containers=containers.data.unwrap();
+    let handles=containers["container_handles"].as_array().unwrap();
+    let editors=nodes.iter().filter(|n|n["role"]=="atspi:61" && handles.contains(&n["node_handle"])).collect::<Vec<_>>();
+    assert_eq!(editors.len(),1,"one real selected-document text container required");
+    let container=&editors[0]["node_handle"];
+    let page=client.call(json!({"kind":"page_ui_snapshot","task_id":allowed_task,"snapshot_id":snapshot_id,"container_handle":container})).unwrap();
+    assert!(page.error.is_none(),"{page:?}");let page_id=page.data.unwrap()["snapshot_id"].as_str().unwrap().to_owned();
+    assert_ne!(page_id,snapshot_id);
+    let page=client.call(json!({"kind":"take_ui_snapshot","task_id":allowed_task})).unwrap();assert!(page.error.is_none(),"{page:?}");
+    let page=page.data.unwrap();assert_eq!(page["snapshot_id"],page_id);assert_eq!(page["window_handle"],selected_window);
+    aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.snapshot","data").unwrap(),&page).unwrap();
     assert!(client.call(json!({"kind":"cancel_ui_read","task_id":allowed_task})).unwrap().error.is_none());
     let denied=client.call(json!({"kind":"take_ui_snapshot","task_id":allowed_task})).unwrap();assert_eq!(denied.error.unwrap().code,ErrorCode::Cancelled);
     assert!(client.call(json!({"kind":"forget_ui_read","task_id":allowed_task})).unwrap().error.is_none());

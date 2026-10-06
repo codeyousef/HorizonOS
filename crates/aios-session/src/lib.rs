@@ -52,6 +52,8 @@ pub enum Operation {
     StartUiRead { window_handle: String, goal: String, mode: Mode },
     GetUiReadStatus { task_id: String },
     TakeUiSnapshot { task_id: String },
+    GetUiSnapshotContainers { task_id:String,snapshot_id:String },
+    PageUiSnapshot { task_id:String,snapshot_id:String,container_handle:String },
     CancelUiRead { task_id: String },
     ForgetUiRead { task_id: String },
     ResolveService { unit_name: String },
@@ -105,6 +107,8 @@ fn parse_operation(raw: &str) -> Result<Operation, ErrorCode> {
         "start_ui_read" => fields!(StartUiRead { window_handle: String, goal: String, mode: Mode }),
         "get_ui_read_status" => fields!(GetUiReadStatus { task_id: String }),
         "take_ui_snapshot" => fields!(TakeUiSnapshot { task_id: String }),
+        "get_ui_snapshot_containers" => fields!(GetUiSnapshotContainers { task_id:String,snapshot_id:String }),
+        "page_ui_snapshot" => fields!(PageUiSnapshot { task_id:String,snapshot_id:String,container_handle:String }),
         "cancel_ui_read" => fields!(CancelUiRead { task_id: String }),
         "forget_ui_read" => fields!(ForgetUiRead { task_id: String }),
         "resolve_service" => fields!(ResolveService { unit_name: String }),
@@ -424,7 +428,7 @@ impl State {
                     "expires_after_ms":30000,"confirmation_required":true,"ui_authorized":false}))
             },
             Operation::ListUiWindows { .. } | Operation::StartUiRead { .. } | Operation::GetUiReadStatus { .. }
-                | Operation::TakeUiSnapshot { .. } | Operation::CancelUiRead { .. } | Operation::ForgetUiRead { .. } => {
+                | Operation::GetUiSnapshotContainers { .. } | Operation::PageUiSnapshot { .. } | Operation::TakeUiSnapshot { .. } | Operation::CancelUiRead { .. } | Operation::ForgetUiRead { .. } => {
                 // Graphical forwarding requires the actual original Unix FD.
                 // A claimed subject or plain State dispatch is insufficient.
                 Err(ErrorCode::AuthRequired)
@@ -603,6 +607,8 @@ fn graphical_dispatch(stream:&UnixStream,state:&SharedState,peer:&Peer,ui:&mut O
         Operation::StartUiRead{window_handle,goal,mode}=>json!({"kind":"start_read","window_handle":window_handle,"goal":goal,"mode":mode}),
         Operation::GetUiReadStatus{task_id}=>json!({"kind":"get_read_status","task_id":task_id}),
         Operation::TakeUiSnapshot{task_id}=>json!({"kind":"take_snapshot","task_id":task_id}),
+        Operation::GetUiSnapshotContainers{task_id,snapshot_id}=>json!({"kind":"snapshot_containers","task_id":task_id,"snapshot_id":snapshot_id}),
+        Operation::PageUiSnapshot{task_id,snapshot_id,container_handle}=>json!({"kind":"page_snapshot","task_id":task_id,"snapshot_id":snapshot_id,"container_handle":container_handle}),
         Operation::CancelUiRead{task_id}=>json!({"kind":"cancel","task_id":task_id}),
         Operation::ForgetUiRead{task_id}=>json!({"kind":"forget","task_id":task_id}),
         Operation::Submit{request} if request.selected_session_handle.is_some() || request.selected_app_handle.is_some()=>{
@@ -738,6 +744,19 @@ mod tests {
             r#"{"kind":"get_events","task_id":"a","after_sequence":0,"limit":1,"trust":"admin"}"#,
             r#"{"kind":"submit","request":{"mode":"ask","text":"test","client_nonce":"a","mode":"act"}}"#,
         ] { assert_eq!(parse_operation(raw).unwrap_err(), ErrorCode::InvalidArgument); }
+    }
+    #[test]
+    fn paging_requires_original_graphical_transport_and_rejects_forged_authority(){
+        let peer=peer_fixture();let mut state=State::default();
+        for raw in [
+            r#"{"kind":"get_ui_snapshot_containers","task_id":"t","snapshot_id":"s"}"#,
+            r#"{"kind":"page_ui_snapshot","task_id":"t","snapshot_id":"s","container_handle":"h"}"#,
+        ]{assert_eq!(state.dispatch(&peer,parse_operation(raw).unwrap()),Err(ErrorCode::AuthRequired));}
+        for raw in [
+            r#"{"kind":"page_ui_snapshot","task_id":"t","snapshot_id":"s","container_handle":"h","approved":true}"#,
+            r#"{"kind":"page_ui_snapshot","task_id":"t","snapshot_id":"s","snapshot_id":"other","container_handle":"h"}"#,
+            r#"{"kind":"get_ui_snapshot_containers","task_id":"t","snapshot_id":"s","uid":0}"#,
+        ]{assert_eq!(parse_operation(raw).unwrap_err(),ErrorCode::InvalidArgument);}
     }
     #[test]
     fn unavailable_model_modes_nonce_conflict_and_quota_fixture() {

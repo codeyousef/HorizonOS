@@ -3,13 +3,13 @@
 //! References are resolved on the authenticated native bus, never trusted as
 //! serialized caller credentials, and only the fixed broker can hand them off.
 use crate::{managed_service::{ManagedService,Role},ui_read::{OriginatingClient,NativeReadTask,NativeReadStop},
-    display::DisplayBinding,accessibility::WindowBinding};
+    display::DisplayBinding,accessibility::{WindowBinding,Snapshot}};
 use aios_protocol::{read_frame_with_limit,write_frame,MAX_TASK_BYTES,MAX_FRAME_BYTES,contracts::ErrorCode};
 use nix::sys::socket::{sendmsg,recvmsg,ControlMessage,ControlMessageOwned,MsgFlags};
 use serde::{Deserialize,Serialize};
 use serde_json::{Value,json,value::RawValue};
 use std::{collections::HashMap,fs,io::{IoSlice,IoSliceMut,Read},net::Shutdown,os::{fd::{AsRawFd,OwnedFd,FromRawFd,RawFd},unix::{fs::{MetadataExt,FileTypeExt},net::UnixStream}},
-    path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicBool,AtomicU8,AtomicUsize,Ordering}},time::Duration};
+    path::PathBuf,sync::{mpsc,Arc,Mutex,atomic::{AtomicBool,AtomicU8,AtomicUsize,Ordering}},time::Duration};
 type Result<T> = std::result::Result<T,ErrorCode>;
 const MARKER:u8=0xa7;
 const BUS_MARKER:u8=0xa8;
@@ -50,7 +50,8 @@ pub(crate) fn receive_cancellation(bridge:&UnixStream,broker:&ManagedService)->R
 enum Operation {
     Discover{session_id:String},StartRead{window_handle:String,goal:String,mode:String},
     StartTaskRead{window_handle:String,goal:String,mode:String,task_id:String},
-    GetReadStatus{task_id:String},TakeSnapshot{task_id:String},Cancel{task_id:String},Forget{task_id:String},
+    GetReadStatus{task_id:String},TakeSnapshot{task_id:String},
+    SnapshotContainers{task_id:String,snapshot_id:String},PageSnapshot{task_id:String,snapshot_id:String,container_handle:String},Cancel{task_id:String},Forget{task_id:String},
 }
 fn parse(raw:&str)->Result<Operation>{
     #[derive(Deserialize)]struct Kind{kind:String}
@@ -64,6 +65,8 @@ fn parse(raw:&str)->Result<Operation>{
         "discover"=>fields!(Discover{session_id:String}),"start_read"=>fields!(StartRead{window_handle:String,goal:String,mode:String}),
         "start_task_read"=>fields!(StartTaskRead{window_handle:String,goal:String,mode:String,task_id:String}),
         "get_read_status"=>fields!(GetReadStatus{task_id:String}),"take_snapshot"=>fields!(TakeSnapshot{task_id:String}),
+        "snapshot_containers"=>fields!(SnapshotContainers{task_id:String,snapshot_id:String}),
+        "page_snapshot"=>fields!(PageSnapshot{task_id:String,snapshot_id:String,container_handle:String}),
         "cancel"=>fields!(Cancel{task_id:String}),"forget"=>fields!(Forget{task_id:String}),_=>Err(ErrorCode::InvalidArgument),
     }
 }
@@ -75,7 +78,9 @@ struct Bound{schema_version:u32,request_id:String,operation:String,origin_sha256
 struct Response{schema_version:u32,request_id:String,operation:String,data:Option<Value>,error:Option<ErrorCode>}
 #[derive(Clone,Serialize)]
 struct ReadStatus{schema_version:u32,task_id:String,state:String,error:Option<ErrorCode>,snapshot_ready:bool}
-struct ReadWork{status:ReadStatus,control:Arc<AtomicU8>,stop:Option<NativeReadStop>,snapshot:Option<Value>,window:WindowBinding,deadline:u64}
+enum PageRequest { Take,Containers{snapshot_id:String},Page{snapshot_id:String,container_handle:String} }
+struct PageCommand { request:PageRequest,response:mpsc::SyncSender<Result<Value>> }
+struct ReadWork{pages:mpsc::SyncSender<PageCommand>,status:ReadStatus,control:Arc<AtomicU8>,stop:Option<NativeReadStop>,snapshot:Option<Value>,deadline:u64}
 impl ReadWork {
     fn cancel(&mut self){self.control.store(1,Ordering::Release);if let Some(stop)=&self.stop{stop.stop();}
         self.snapshot.take();self.status.snapshot_ready=false;self.status.state="cancelled".into();self.status.error=Some(ErrorCode::Cancelled);}
@@ -118,29 +123,41 @@ impl Context{
                 let admission=ReadAdmission;
                 let control=Arc::new(AtomicU8::new(0));
                 let status=ReadStatus{schema_version:1,task_id:id.clone(),state:"queued".into(),error:None,snapshot_ready:false};
-                let work=Arc::new(Mutex::new(ReadWork{status:status.clone(),control:control.clone(),stop:None,snapshot:None,
-                    window:window.clone(),deadline:aios_policy::boottime_ms()?.checked_add(90_000).ok_or(ErrorCode::TargetChanged)?}));
+                let (pages,receiver)=mpsc::sync_channel(1);
+                let work=Arc::new(Mutex::new(ReadWork{pages,status:status.clone(),control:control.clone(),stop:None,snapshot:None,
+                    deadline:aios_policy::boottime_ms()?.checked_add(90_000).ok_or(ErrorCode::TargetChanged)?}));
                 self.tasks.insert(id.clone(),work.clone());
                 if let Some(receiver)=cancellation{let work=work.clone();std::thread::spawn(move||watch_cancellation(receiver,work));}
-                std::thread::spawn(move||{let _admission=admission;run_read(work,origin,window,goal,mode,control,id,public);});
+                std::thread::spawn(move||{let _admission=admission;run_read(work,origin,window,goal,mode,control,id,public,receiver);});
                 serde_json::to_value(status).map_err(|_|ErrorCode::InvalidArgument)
             },
             Operation::GetReadStatus{task_id}=>{
                 let task=self.task(&task_id)?.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
                 serde_json::to_value(&task.status).map_err(|_|ErrorCode::InvalidArgument)
             },
-            Operation::TakeSnapshot{task_id}=>{
-                let task=self.task(&task_id)?.clone();
-                let window=task.lock().map_err(|_|ErrorCode::ResourceExhausted)?.window.clone();
-                window.verify()?;self.origin.verify()?;
-                let mut task=task.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
-                if task.control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
-                if task.status.state!="completed"{return Err(task.status.error.unwrap_or(ErrorCode::AuthRequired));}
-                let snapshot=task.snapshot.take().ok_or(ErrorCode::TargetNotFound)?;task.status.snapshot_ready=false;
-                Ok(snapshot)
-            },
+            Operation::TakeSnapshot{task_id}=>self.page(&task_id,PageRequest::Take),
+            Operation::SnapshotContainers{task_id,snapshot_id}=>self.page(&task_id,PageRequest::Containers{snapshot_id}),
+            Operation::PageSnapshot{task_id,snapshot_id,container_handle}=>self.page(&task_id,PageRequest::Page{snapshot_id,container_handle}),
             Operation::Cancel{task_id}=>{self.task(&task_id)?.lock().map_err(|_|ErrorCode::ResourceExhausted)?.cancel();Ok(json!({"task_id":task_id,"cancelled":true}))},
             Operation::Forget{task_id}=>{self.task(&task_id)?.lock().map_err(|_|ErrorCode::ResourceExhausted)?.cancel();self.tasks.remove(&task_id);Ok(json!({"task_id":task_id,"deleted":true}))},
+        }
+    }
+    fn page(&self,id:&str,request:PageRequest)->Result<Value>{
+        let (snapshot_id,container)=match &request{PageRequest::Take=>(None,None),PageRequest::Containers{snapshot_id}=>(Some(snapshot_id),None),
+            PageRequest::Page{snapshot_id,container_handle}=>(Some(snapshot_id),Some(container_handle))};
+        if snapshot_id.is_some_and(|s|!crate::uuid(s)) || container.is_some_and(|h|!crate::uuid(h)){return Err(ErrorCode::InvalidArgument);}
+        let work=self.task(id)?.clone();
+        let sender={let work=work.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+            if work.control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
+            if work.status.state!="completed"{return Err(work.status.error.unwrap_or(ErrorCode::AuthRequired));}
+            work.pages.clone()};
+        let (response,receiver)=mpsc::sync_channel(1);
+        sender.try_send(PageCommand{request,response}).map_err(|_|ErrorCode::ResourceExhausted)?;
+        // No task mutex across native queries. Stop uses the independent atomic
+        // control and cancellation channel even while a page is being read.
+        match receiver.recv_timeout(Duration::from_millis(2500)){
+            Ok(result)=>{self.origin.verify()?;result},
+            Err(_)=>{work.lock().map_err(|_|ErrorCode::ResourceExhausted)?.cancel();Err(ErrorCode::DeadlineExceeded)},
         }
     }
     fn task(&self,id:&str)->Result<&Arc<Mutex<ReadWork>>>{if !crate::uuid(id){return Err(ErrorCode::InvalidArgument);}self.tasks.get(id).ok_or(ErrorCode::TargetNotFound)}
@@ -149,7 +166,7 @@ fn watch_cancellation(mut stream:UnixStream,work:Arc<Mutex<ReadWork>>){
     if stream.set_read_timeout(Some(Duration::from_millis(100))).is_err(){if let Ok(mut work)=work.lock(){work.cancel();}return;}
     loop {
         if let Ok(mut work)=work.lock(){
-            if work.control.load(Ordering::Acquire)!=0 || (matches!(work.status.state.as_str(),"failed"|"completed") && work.snapshot.is_none()){return;}
+            if work.control.load(Ordering::Acquire)!=0 || work.status.state=="failed"{return;}
             if aios_policy::boottime_ms().map_or(true,|now|now>=work.deadline){work.cancel();return;}
         }else{return;}
         let mut byte=[0u8];match stream.read(&mut byte){
@@ -160,12 +177,13 @@ fn watch_cancellation(mut stream:UnixStream,work:Arc<Mutex<ReadWork>>){
         }
     }
 }
-fn run_read(work:Arc<Mutex<ReadWork>>,origin:OriginatingClient,window:WindowBinding,goal:String,mode:aios_policy::Mode,control:Arc<AtomicU8>,id:String,public:bool){
-    let result=(||->Result<Value>{
+fn run_read(work:Arc<Mutex<ReadWork>>,origin:OriginatingClient,window:WindowBinding,goal:String,mode:aios_policy::Mode,
+    control:Arc<AtomicU8>,id:String,public:bool,pages:mpsc::Receiver<PageCommand>){
+    let result=(||->Result<()>{
         let hostname=fs::read_to_string("/proc/sys/kernel/hostname").map_err(|_|ErrorCode::TargetChanged)?.trim().to_owned();
         if hostname.is_empty() || hostname.len()>128 || hostname.chars().any(char::is_control){return Err(ErrorCode::TargetChanged);}
         let profile=if public{"Local CPU (normal; read-only task inference)"}else{"Local CPU (observation only; no model requested)"};
-        let mut task=NativeReadTask::begin_owned(origin,window,&goal,mode,hostname,profile.into(),control.clone(),id)?;
+        let mut task=NativeReadTask::begin_owned(origin,window,&goal,mode,hostname,profile.into(),control.clone(),id.clone())?;
         let stop=task.stop_handle()?;
         {let mut work=work.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
             if control.load(Ordering::Acquire)!=0{stop.stop();return Err(ErrorCode::Cancelled);}
@@ -177,14 +195,62 @@ fn run_read(work:Arc<Mutex<ReadWork>>,origin:OriginatingClient,window:WindowBind
         }
         {let mut work=work.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
             if control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}work.status.state="inspecting".into();}
-        serde_json::to_value(task.snapshot()?).map_err(|_|ErrorCode::InvalidArgument)
+        let mut snapshot=task.snapshot()?;
+        publish_snapshot(&work,&snapshot)?;
+        loop {
+            // Original caller, live window grant and policy are checked during
+            // idle time too. Serialized data never reconstructs this task.
+            if control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
+            task.poll_confirmation()?;
+            if aios_policy::boottime_ms()?>=work.lock().map_err(|_|ErrorCode::ResourceExhausted)?.deadline{return Err(ErrorCode::ApprovalExpired);}
+            let command=match pages.recv_timeout(Duration::from_millis(100)){
+                Ok(command)=>command,Err(mpsc::RecvTimeoutError::Timeout)=>continue,
+                Err(mpsc::RecvTimeoutError::Disconnected)=>return Err(ErrorCode::Cancelled),
+            };
+            let consuming=matches!(&command.request,PageRequest::Take);
+            let answer=(||->Result<Value>{
+                let expected=match &command.request{PageRequest::Take=>None,PageRequest::Containers{snapshot_id}|PageRequest::Page{snapshot_id,..}=>Some(snapshot_id)};
+                if expected.is_some_and(|id|id!=&snapshot.snapshot_id){return Err(ErrorCode::TargetChanged);}
+                match command.request {
+                    PageRequest::Take=>{
+                        // Consume only under the same original caller/live grant.
+                        // No mutex is held during native grant revalidation.
+                        task.poll_confirmation()?;
+                        let mut work=work.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+                        if control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
+                        let value=work.snapshot.take().ok_or(ErrorCode::TargetNotFound)?;
+                        work.status.snapshot_ready=false;Ok(value)
+                    },
+                    PageRequest::Containers{..}=>{
+                        let root=snapshot.nodes.first().ok_or(ErrorCode::TargetNotFound)?.node_handle.clone();
+                        task.verify_snapshot_node(&snapshot,&root)?;
+                        Ok(json!({"schema_version":1,"task_id":id,"snapshot_id":snapshot.snapshot_id,
+                            "container_handles":snapshot.container_handles()?}))
+                    },
+                    PageRequest::Page{container_handle,..}=>{
+                        let next=task.snapshot_container(&snapshot,&container_handle)?;
+                        snapshot=next;publish_snapshot(&work,&snapshot)?;
+                        Ok(json!({"schema_version":1,"task_id":id,"snapshot_id":snapshot.snapshot_id,"snapshot_ready":true}))
+                    },
+                }
+            })();
+            let failure=answer.as_ref().err().copied();
+            let _=command.response.try_send(answer);
+            // Refusal ends this read; never retry against a changed/stale tree.
+            if let Some(error)=failure{if !(consuming && error==ErrorCode::TargetNotFound){return Err(error);}}
+        }
     })();
     if let Ok(mut work)=work.lock(){
-        work.stop.take();
+        work.stop.take();work.snapshot.take();work.status.snapshot_ready=false;
         if control.load(Ordering::Acquire)!=0{work.cancel();return;}
-        match result{Ok(snapshot)=>{work.snapshot=Some(snapshot);work.status.snapshot_ready=true;work.status.state="completed".into();},
-            Err(error)=>{work.status.state=if error==ErrorCode::Cancelled{"cancelled"}else{"failed"}.into();work.status.error=Some(error);}}
+        if let Err(error)=result{work.status.state=if error==ErrorCode::Cancelled{"cancelled"}else{"failed"}.into();work.status.error=Some(error);}
     }
+}
+fn publish_snapshot(work:&Arc<Mutex<ReadWork>>,snapshot:&Snapshot)->Result<()>{
+    let value=serde_json::to_value(snapshot).map_err(|_|ErrorCode::InvalidArgument)?;
+    let mut work=work.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+    if work.control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
+    work.snapshot=Some(value);work.status.snapshot_ready=true;work.status.state="completed".into();Ok(())
 }
 pub(crate) fn receive_origin(stream:&mut UnixStream)->Result<OriginatingClient>{
     Ok(match receive_proof(stream)? {
