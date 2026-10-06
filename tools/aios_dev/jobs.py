@@ -123,7 +123,7 @@ def pull(config, job=None):
     directory = private_directory(config.root, ".local/reports/" + job + "-" + str(uuid.uuid4()))
     write_json_new(directory / "report.json", report)
     write_new(directory / "log.txt", log)
-    if set(response["locks"]) - {"flake.lock", "Cargo.lock"}:
+    if set(response["locks"]) - {"flake.lock", "Cargo.lock", "native-runtime.Cargo.lock"}:
         raise failure(ExitCode.VERIFICATION_FAILURE, "INVALID_LOCK_ARTIFACT", "Unexpected lock artifact")
     hashes = {}
     for name, encoded in response["locks"].items():

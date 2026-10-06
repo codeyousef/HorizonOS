@@ -1,0 +1,20 @@
+[package]
+name = "horizon-native-runtime"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Qualification fixtures are excluded from the installed product fileset.
+[workspace]
+
+[dependencies]
+aios-session = { path = "../../crates/aios-session" }
+aios-system = { path = "../../crates/aios-system" }
+nix = { version = "0.31", features = ["socket", "user", "uio"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+zbus = { version = "5.19", features = ["blocking-api"] }
+
+[[test]]
+name = "process_refusals"
+path = "process_refusals.rs"

@@ -96,6 +96,23 @@ class JobTests(unittest.TestCase):
         self.assertEqual(commands[0], ["nix", "flake", "lock", "path:" + str(release)])
         self.assertIn("--no-write-lock-file", commands[1])
 
+    def test_native_fixture_lock_uses_only_the_registered_manifest(self):
+        release = self.root / "source"
+        release.mkdir()
+        (release / "Cargo.lock").write_text("existing lock fixture")
+        unrelated = release / "tests/unregistered"
+        unrelated.mkdir(parents=True)
+        (unrelated / "Cargo.toml").write_text("unregistered fixture")
+        self.assertEqual(len(controller.commands("resolve-lock", release)), 2)
+        registered = release / "tests/native-runtime"
+        registered.mkdir()
+        (registered / "Cargo.toml").write_text("registered qualification fixture")
+        commands = controller.commands("resolve-lock", release)
+        self.assertEqual(len(commands), 3)
+        self.assertEqual(commands[2][-5:], ["cargo", "update", "--workspace", "--manifest-path", "tests/native-runtime/Cargo.toml"])
+        self.assertIn("--no-update-lock-file", commands[2])
+        self.assertNotIn("unregistered", " ".join(commands[2]))
+
     def test_optional_profile_jobs_are_separate_locked_conversion_operations(self):
         release = Path("/home/dev/aios-releases") / ("a" * 64)
         for profile in ("low", "high"):

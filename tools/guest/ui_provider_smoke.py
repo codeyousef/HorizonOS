@@ -151,6 +151,13 @@ def main():
             process_output=process.stdout.decode();print(process_output,flush=True)
             if process.returncode or "NATIVE_MANAGED_PROCESS_TERMINATION=" not in process_output:
                 raise RuntimeError("native managed termination qualification failed")
+            refusals=subprocess.run(["nix","develop","--no-update-lock-file","--no-write-lock-file","path:"+str(release),"--command",
+                                     "cargo","test","--locked","--manifest-path",str(release/"tests/native-runtime/Cargo.toml"),
+                                     "--test","process_refusals","--","--ignored","--nocapture"],
+                                    env=scenario,check=False,stdout=subprocess.PIPE,timeout=900)
+            refusal_output=refusals.stdout.decode();print(refusal_output,flush=True)
+            if refusals.returncode or "NATIVE_MANAGED_PROCESS_REFUSALS=" not in refusal_output:
+                raise RuntimeError("native managed termination negative qualification failed")
             origin=subprocess.run(["nix","develop","--no-update-lock-file","--no-write-lock-file","path:"+str(release),"--command",
                                    "cargo","test","--locked","-p","aios-session","--lib","user_bus::tests::","--","--ignored","--nocapture"],
                                   env=scenario,check=False,stdout=subprocess.PIPE,timeout=900)

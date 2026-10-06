@@ -112,7 +112,13 @@ def commands(kind, release, package=None, job_directory=None):
         # A workspace dependency change must not refresh unrelated locked
         # registry packages. Initial resolution still creates a missing lock.
         cargo = ["cargo", "update", "--workspace"] if (release / "Cargo.lock").exists() else ["cargo", "generate-lockfile"]
-        return [["nix", "flake", "lock", reference], ["nix", "develop", *locked, reference + "#lock-resolution", "--command", *cargo]]
+        result = [["nix", "flake", "lock", reference], ["nix", "develop", *locked, reference + "#lock-resolution", "--command", *cargo]]
+        # One fixed standalone qualification crate; never a caller-supplied
+        # manifest. Resolve in the existing writable public-source copy only.
+        if (release / "tests/native-runtime/Cargo.toml").is_file():
+            result.append(["nix", "develop", *locked, reference + "#lock-resolution", "--command",
+                           "cargo", "update", "--workspace", "--manifest-path", "tests/native-runtime/Cargo.toml"])
+        return result
     if kind == "system-info-smoke":
         return [["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "-p", "aios-cli", "--test", "system_info", "--", "--nocapture"]]
     if kind == "service-inspection-smoke":
@@ -304,8 +310,9 @@ def worker(directory):
                                 raise ValueError("invalid built store path")
                             paths.append(path)
                     report["built_outputs"] = paths
-            for name in ("flake.lock", "Cargo.lock"):
-                path = working / name
+            for name, relative in (("flake.lock", "flake.lock"), ("Cargo.lock", "Cargo.lock"),
+                                   ("native-runtime.Cargo.lock", "tests/native-runtime/Cargo.lock")):
+                path = working / relative
                 if path.exists():
                     data = path.read_bytes()
                     if len(data) > 1024**2:
@@ -384,7 +391,9 @@ def dispatch(request, identity_reader=source.identity):
             raise ValueError("job log exceeds limit")
         result = {"schema_version": 1, "report": record, "sanitized_log": sanitize(data.decode(errors="replace")), "locks": {}}
         if record["request"]["kind"] == "resolve-lock" and record["state"] == "succeeded":
-            for name in ("flake.lock", "Cargo.lock"):
+            for name in ("flake.lock", "Cargo.lock", "native-runtime.Cargo.lock"):
+                if name not in record["lock_hashes"]:
+                    continue
                 data = (directory / name).read_bytes()
                 if len(data) > 1024**2 or hashlib.sha256(data).hexdigest() != record["lock_hashes"][name]:
                     raise ValueError("lock artifact differs")
