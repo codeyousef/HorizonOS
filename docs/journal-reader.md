@@ -66,8 +66,10 @@ reference or disappeared native cursor fails explicitly. There are at most
 `ResolveUserLogService` resolves a service only through the authenticated
 caller's native user manager. The root system manager must identify the active
 `user@UID.service` and its compiled systemd executable, PID, start time and
-invocation. The fixed runtime bus socket must belong to that UID, and its
-kernel peer and systemd bus owner must match the root-managed process. The
+invocation. The fixed `/run/user/UID/systemd/private` socket must belong to
+that UID, and its kernel peer must match the root-managed process. This is a
+direct manager connection with EXTERNAL authentication, not an application
+message bus; there is no alternate endpoint or authentication-UID override. The
 handle binds the unit object and invocation, manager identity and socket
 identity. Restarting the unit or manager invalidates it; callers must resolve
 a fresh handle. User handles infer the user source and reject a system or

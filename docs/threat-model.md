@@ -98,7 +98,11 @@ It does not expose home directories or provide a caller-selected file or bus
 endpoint. Only immutable configured normal readers may resolve user units.
 The adapter derives the UID from the native originating system-bus sender,
 checks the root-managed user manager's compiled executable and incarnation,
-then checks the actual kernel socket peer and manager's unique bus owner.
+then connects only to `/run/user/UID/systemd/private` using EXTERNAL
+authentication and checks the actual kernel peer against that process.
+The parent directory and socket identities are rechecked. The root system
+manager's unique bus owner remains bound; no application bus or claimed
+authentication UID is used for the direct user-manager connection.
 Its fixed calls read unit identity/properties; no arbitrary method, launch,
 environment, credential or user-runtime file read is exposed. Unit/manager
 restart, endpoint replacement, owner change and caller loss invalidate the

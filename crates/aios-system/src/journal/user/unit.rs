@@ -7,6 +7,13 @@ use std::{fs, os::{fd::AsRawFd, unix::{fs::{MetadataExt, FileTypeExt}, net::Unix
     sync::{atomic::{AtomicUsize, Ordering}, mpsc}, time::{Duration, Instant}};
 use zbus::{blocking::{Connection, Proxy}, zvariant::OwnedObjectPath};
 type Result<T> = std::result::Result<T, ErrorCode>;
+mod direct;
+// Fixed diagnostic labels and error codes only: never log a unit name, UID,
+// endpoint, bus message, property value, environment or authentication payload.
+fn diagnostic(stage: &'static str, error: ErrorCode) -> ErrorCode {
+    eprintln!("AIOS_JOURNAL_USER_UNIT_FAILURE stage={stage} code={error:?}");
+    error
+}
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 struct Admission(&'static AtomicUsize);
 impl Admission {
@@ -32,9 +39,9 @@ fn bounded(user: NativeUser, name: String) -> Result<Identity> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct Manager { root_owner: String, pid: u32, started_usec: u64, invocation: Vec<u8> }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-struct Endpoint { runtime_inode: u64, device: u64, inode: u64, mode: u32 }
+struct Endpoint { runtime_inode: u64, manager_directory_inode: u64, device: u64, inode: u64, mode: u32 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Identity { uid: u32, boot_id: String, name: String, manager: Manager, endpoint: Endpoint, owner: String, path: String, invocation: Vec<u8> }
+pub struct Identity { uid: u32, boot_id: String, name: String, manager: Manager, endpoint: Endpoint, path: String, invocation: Vec<u8> }
 /// Opaque native binding. Wire data cannot reconstruct it.
 #[derive(Clone, Debug)]
 pub struct UserUnit { user: NativeUser, identity: Identity }
@@ -76,9 +83,15 @@ fn endpoint(uid: u32) -> Result<Endpoint> {
     if !runtime.is_dir() || runtime.uid() != uid || runtime.mode() & 0o077 != 0 || directory.canonicalize().map_err(|_| ErrorCode::TargetChanged)? != directory {
         return Err(ErrorCode::PermissionDenied);
     }
-    let bus = fs::symlink_metadata(directory.join("bus")).map_err(|_| ErrorCode::TargetNotFound)?;
+    let manager_directory = directory.join("systemd");
+    let native = fs::symlink_metadata(&manager_directory).map_err(|_| ErrorCode::TargetNotFound)?;
+    if !native.is_dir() || native.uid() != uid || native.mode() & 0o022 != 0
+        || manager_directory.canonicalize().map_err(|_| ErrorCode::TargetChanged)? != manager_directory {
+        return Err(ErrorCode::PermissionDenied);
+    }
+    let bus = fs::symlink_metadata(manager_directory.join("private")).map_err(|_| ErrorCode::TargetNotFound)?;
     if !bus.file_type().is_socket() || bus.uid() != uid { return Err(ErrorCode::PermissionDenied); }
-    Ok(Endpoint { runtime_inode: runtime.ino(), device: bus.dev(), inode: bus.ino(), mode: bus.mode() })
+    Ok(Endpoint { runtime_inode: runtime.ino(), manager_directory_inode: native.ino(), device: bus.dev(), inode: bus.ino(), mode: bus.mode() })
 }
 fn peer(stream: &UnixStream, uid: u32, pid: u32) -> Result<()> {
     let mut credentials = std::mem::MaybeUninit::<libc::ucred>::uninit();
@@ -91,40 +104,34 @@ fn peer(stream: &UnixStream, uid: u32, pid: u32) -> Result<()> {
     if unsafe { libc::poll(&mut poll, 1, 0) } < 0 || poll.revents & (libc::POLLRDHUP | libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 { return Err(ErrorCode::TargetChanged); }
     Ok(())
 }
-fn bus_owner(bus: &Connection, uid: u32, pid: u32) -> Result<String> {
-    let native = proxy(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus")?;
-    let owner: String = native.call("GetNameOwner", &("org.freedesktop.systemd1",)).map_err(crate::services::dbus_error)?;
-    if !owner.starts_with(':')
-        || native.call::<_, _, u32>("GetConnectionUnixUser", &(owner.as_str(),)).map_err(crate::services::dbus_error)? != uid
-        || native.call::<_, _, u32>("GetConnectionUnixProcessID", &(owner.as_str(),)).map_err(crate::services::dbus_error)? != pid { return Err(ErrorCode::PermissionDenied); }
-    Ok(owner)
+fn connect(uid: u32, manager_pid: u32) -> Result<(UnixStream, direct::Bus)> {
+    // This is systemd's native point-to-point manager endpoint, not a session
+    // application bus. Its actual kernel peer must be the root-managed PID.
+    // No alternate endpoint, claimed auth UID, fallback or mutation RPC exists.
+    let proof = UnixStream::connect(format!("/run/user/{uid}/systemd/private")).map_err(|_| ErrorCode::UnsupportedCapability)?;
+    peer(&proof, uid, manager_pid)?;
+    proof.set_read_timeout(Some(Duration::from_secs(2))).map_err(|_| ErrorCode::TargetChanged)?;
+    proof.set_write_timeout(Some(Duration::from_secs(2))).map_err(|_| ErrorCode::TargetChanged)?;
+    let bus = direct::Bus::connect(proof.try_clone().map_err(|_| ErrorCode::TargetChanged)?)
+        .map_err(|error| diagnostic("direct-manager-connection", error))?;
+    peer(&proof, uid, manager_pid)?;
+    Ok((proof, bus))
 }
 fn observe(user: &NativeUser, name: &str) -> Result<Identity> {
     crate::services::validate_service_name(name)?; user.verify()?;
-    let started = Instant::now(); let uid = user.uid(); let before = manager(uid)?; let socket = endpoint(uid)?;
-    let proof = UnixStream::connect(format!("/run/user/{uid}/bus")).map_err(|_| ErrorCode::UnsupportedCapability)?;
-    peer(&proof, uid, before.pid)?;
-    proof.set_read_timeout(Some(Duration::from_secs(2))).map_err(|_| ErrorCode::TargetChanged)?;
-    proof.set_write_timeout(Some(Duration::from_secs(2))).map_err(|_| ErrorCode::TargetChanged)?;
-    let bus = zbus::blocking::connection::Builder::async_io_unix_stream(proof.try_clone().map_err(|_| ErrorCode::TargetChanged)?)
-        .method_timeout(Duration::from_millis(250)).build().map_err(crate::services::dbus_error)?;
-    let owner = bus_owner(&bus, uid, before.pid)?;
-    let m = proxy(&bus, &owner, "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager")?;
-    let path: OwnedObjectPath = m.call("GetUnit", &(name,)).map_err(crate::services::dbus_error)?;
-    let unit = proxy(&bus, &owner, path.as_str(), "org.freedesktop.systemd1.Unit")?;
-    let id: String = unit.get_property("Id").map_err(crate::services::dbus_error)?;
-    let load: String = unit.get_property("LoadState").map_err(crate::services::dbus_error)?;
-    let invocation: Vec<u8> = unit.get_property("InvocationID").map_err(crate::services::dbus_error)?;
-    if id != name || load != "loaded" || invocation.len() != 16 { return Err(ErrorCode::TargetChanged); }
-    if manager(uid)? != before || endpoint(uid)? != socket || bus_owner(&bus, uid, before.pid)? != owner { return Err(ErrorCode::TargetChanged); }
+    let started = Instant::now(); let uid = user.uid();
+    let before = manager(uid).map_err(|error| diagnostic("root-managed-identity", error))?;
+    let socket = endpoint(uid).map_err(|error| diagnostic("runtime-endpoint", error))?;
+    let (proof, bus) = connect(uid, before.pid)?;
+    let observed = bus.unit(name).map_err(|error| diagnostic("direct-unit-identity", error))?;
+    if observed.id != name || observed.load != "loaded" || observed.invocation.len() != 16 { return Err(ErrorCode::TargetChanged); }
+    if manager(uid)? != before || endpoint(uid)? != socket { return Err(ErrorCode::TargetChanged); }
     peer(&proof, uid, before.pid)?; user.verify()?;
-    if unit.get_property::<String>("Id").map_err(crate::services::dbus_error)? != id
-        || unit.get_property::<String>("LoadState").map_err(crate::services::dbus_error)? != load
-        || unit.get_property::<Vec<u8>>("InvocationID").map_err(crate::services::dbus_error)? != invocation {
+    if bus.unit(name)? != observed {
         return Err(ErrorCode::TargetChanged);
     }
     if started.elapsed() >= Duration::from_secs(5) { return Err(ErrorCode::DeadlineExceeded); }
-    Ok(Identity { uid, boot_id: user.boot.clone(), name: name.into(), manager: before, endpoint: socket, owner: owner.clone(), path: path.to_string(), invocation })
+    Ok(Identity { uid, boot_id: user.boot.clone(), name: name.into(), manager: before, endpoint: socket, path: observed.path, invocation: observed.invocation })
 }
 impl NativeUser {
     pub fn resolve_unit(&self, name: &str) -> Result<UserUnit> {
@@ -142,6 +149,24 @@ impl UserUnit {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires a verified NixOS guest with the current normal user's native user manager"]
+    fn native_own_user_manager_transport() {
+        assert!(fs::read_to_string("/etc/os-release").unwrap().lines().any(|line| line == "ID=nixos"));
+        let uid = unsafe { libc::geteuid() }; assert!(uid >= 1000);
+        let manager = manager(uid).expect("root-managed own-user identity");
+        let endpoint_before = endpoint(uid).expect("own-user runtime endpoint");
+        let (socket, bus) = connect(uid, manager.pid).expect("native direct-manager authentication");
+        let unit = bus.unit("aios-sessiond.service").unwrap();
+        assert_eq!(unit.id, "aios-sessiond.service");
+        assert_eq!(unit.load, "loaded"); assert_eq!(unit.invocation.len(), 16);
+        assert!(matches!(bus.unit("../sshd.service"), Err(ErrorCode::InvalidArgument)));
+        assert!(matches!(bus.unit("horizon-missing-unit-11111111111111111111111111111111.service"), Err(ErrorCode::TargetNotFound)));
+        assert_eq!(bus.unit("aios-sessiond.service").unwrap(), unit);
+        assert_eq!(endpoint(uid).unwrap(), endpoint_before);
+        peer(&socket, uid, manager.pid).unwrap();
+        println!("AIOS_NATIVE_USER_MANAGER_TRANSPORT={{\"uid\":{uid},\"manager_pid\":{},\"kernel_peer_and_direct_manager_verified\":true,\"root_caller_authentication_verified\":false}}", manager.pid);
+    }
     #[test] fn abandoned_observations_keep_bounded_admission_until_native_work_ends() {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let workers = (0..4).map(|_| Admission::acquire(&COUNTER).unwrap()).collect::<Vec<_>>();
