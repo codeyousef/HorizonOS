@@ -206,6 +206,9 @@ store objects, records absence explicitly, and attributes one realized store
 closure/hash only when every declared artifact resolves to that same closure.
 Catalog membership, selection and runtime presence remain separate facts; none
 confers execution authority or claims a complete system/user/unmanaged inventory.
+The same per-entry runtime observations are included in the root-private
+`--metadata` response so qualification can verify exact artifact outcomes rather
+than infer them from provider success.
 The root-private `--metadata` diagnostic compares the cache with fresh native
 metadata and returns capture time and freshness without execution authority.
 

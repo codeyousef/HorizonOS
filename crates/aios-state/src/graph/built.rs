@@ -23,11 +23,12 @@ pub struct BuiltConfiguration {
     pub installation_state_version: String,
     pub platform: String,
     pub catalog_packages: Vec<CatalogEntry>,
+    pub catalog_runtime: Vec<CatalogRuntimeObservation>,
     pub configuration: ManagedState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-struct ArtifactObservation {
+pub struct ArtifactObservation {
     name: String,
     path: String,
     present: bool,
@@ -37,7 +38,8 @@ struct ArtifactObservation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-struct CatalogRuntimeObservation {
+pub struct CatalogRuntimeObservation {
+    id: String,
     binary_paths_verified: bool,
     desktop_entries_verified: bool,
     binaries: Vec<ArtifactObservation>,
@@ -95,7 +97,7 @@ fn observe_catalog_runtime(running:&str,entry:&CatalogEntry)->Result<CatalogRunt
     let (realized_package_closure,realized_store_hash)=same_closure
         .map(|(closure,digest)|(Some(closure.clone()),Some(digest.clone()))).unwrap_or_default();
     let runtime_available=binaries.iter().chain(&desktop_entries).all(|item|item.present);
-    Ok(CatalogRuntimeObservation{binary_paths_verified:true,desktop_entries_verified:true,binaries,desktop_entries,runtime_available,
+    Ok(CatalogRuntimeObservation{id:entry.id.clone(),binary_paths_verified:true,desktop_entries_verified:true,binaries,desktop_entries,runtime_available,
         realized_package_closure,realized_store_hash})
 }
 fn fingerprint(m: &fs::Metadata) -> (u64,u64,u64,i64,i64,i64,i64) {
@@ -137,11 +139,13 @@ fn decode(running: String, profile: Option<String>, manifest: &[u8], catalog: &[
     // defaults, reordering and unknown fields cannot become different facts.
     if compiled.bytes!=manifest { return Err(invalid()); }
     let content=parsed.content();
+    let catalog_packages=content.packages.clone();
+    let catalog_runtime=catalog_packages.iter().map(|package|observe_catalog_runtime(&running,package)).collect::<Result<Vec<_>>>()?;
     Ok(BuiltConfiguration{running_closure:running,selected_profile_closure:profile,
         manifest_sha256:hash(manifest),catalog_sha256:hash(catalog),catalog_revision:parsed.revision().into(),
         template_revision:content.base_template_revision.clone(),nixpkgs_revision:content.nixpkgs_revision.clone(),
         lock_sha256:content.lock_sha256.clone(),installation_state_version:content.installation_state_version.clone(),
-        platform:content.platform.clone(),catalog_packages:content.packages.clone(),configuration:compiled.state})
+        platform:content.platform.clone(),catalog_packages,catalog_runtime,configuration:compiled.state})
 }
 /// No caller path or deserialized observation is accepted as native provenance.
 pub fn observe() -> Result<(ObservationTime, BuiltConfiguration)> {
@@ -182,8 +186,7 @@ impl NativeBuiltSnapshot {
                 "complete_package_inventory_verified":false,"execution_authority":false});
             let mut nodes=vec![Node{id:NODE.into(),kind:"configuration".into(),scope:Scope::System,provider:PROVIDER.into(),
                 stable_key:NODE.into(),properties,source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns}];
-            let runtime=self.data.catalog_packages.iter().map(|package|observe_catalog_runtime(&self.data.running_closure,package)).collect::<Result<Vec<_>>>()?;
-            for (package,runtime) in self.data.catalog_packages.iter().zip(&runtime) {
+            for (package,runtime) in self.data.catalog_packages.iter().zip(&self.data.catalog_runtime) {
                 let id=format!("catalog:package:{}",package.id);
                 let selected=self.data.configuration.system_packages.contains(&package.id);
                 nodes.push(Node{id:id.clone(),kind:"package_catalog_entry".into(),scope:Scope::System,provider:PROVIDER.into(),stable_key:id,
@@ -204,8 +207,7 @@ impl NativeBuiltSnapshot {
             }
             let state=store.apply_provider_snapshot(ProviderSnapshot{provider:PROVIDER.into(),expected_token:self.token.clone(),source_truth:SourceTruth::Built,
                 time:self.captured.clone(),source_revision:self.revision(),complete:true,nodes,verified_absent_ids:vec![]})?;
-            let after_runtime=current.catalog_packages.iter().map(|package|observe_catalog_runtime(&current.running_closure,package)).collect::<Result<Vec<_>>>()?;
-            if observe()?.1!=self.data || after_runtime!=runtime { return Err(changed()); }Ok(state)
+            if observe()?.1!=self.data { return Err(changed()); }Ok(state)
         })();if result.is_err(){store.report_event_loss();}result
     }
 }
@@ -229,6 +231,10 @@ impl NativeBuiltSnapshot {
         assert_eq!(result.configuration,catalog.defaults());
         assert_eq!(result.catalog_packages.len(),1);
         assert_eq!(result.catalog_packages[0],*catalog.entry("postgresql-17").unwrap());
+        assert_eq!(result.catalog_runtime.len(),1);
+        assert_eq!(result.catalog_runtime[0].id,"postgresql-17");
+        assert!(result.catalog_runtime[0].binary_paths_verified);
+        assert!(!result.catalog_runtime[0].runtime_available);
         let mut value:serde_json::Value=serde_json::from_slice(&canonical).unwrap();
         value["base_template_revision"]=serde_json::json!("4".repeat(64));
         assert!(decode("fixture".into(),None,&serde_json::to_vec(&value).unwrap(),&bytes).is_err());
