@@ -35,10 +35,10 @@ fn native(pid:u32,parent:u32,stamp:&(u64,String)){
     let stat=fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
     assert_eq!(stat.rsplit_once(')').unwrap().1.split_whitespace().nth(1).unwrap().parse::<u32>().unwrap(),parent);
 }
-fn provider(bus:&Connection)->u32{
+fn provider(bus:&Connection,program:&str)->u32{
     let manager=owner(bus,"org.freedesktop.systemd1");
     let m=proxy(bus,&manager.0,"/org/freedesktop/systemd1","org.freedesktop.systemd1.Manager");
-    let path:OwnedObjectPath=m.call("GetUnit",&("aios-ui-agent.service",)).unwrap();
+    let path:OwnedObjectPath=m.call("GetUnit",&(format!("{program}.service"),)).unwrap();
     let unit=proxy(bus,&manager.0,path.as_str(),"org.freedesktop.systemd1.Unit");
     assert_eq!(unit.get_property::<String>("ActiveState").unwrap(),"active");
     let service=proxy(bus,&manager.0,path.as_str(),"org.freedesktop.systemd1.Service");
@@ -46,7 +46,7 @@ fn provider(bus:&Connection)->u32{
     type Commands=Vec<(String,Vec<String>,bool,u64,u64,u64,u64,u32,i32,i32)>;
     let commands:Commands=service.get_property("ExecStart").unwrap();assert_eq!(commands.len(),1);
     let exe=fs::read_link(format!("/proc/{pid}/exe")).unwrap();
-    assert!(exe.starts_with("/nix/store"));assert_eq!(exe.file_name().unwrap(),"aios-ui-agent");
+    assert!(exe.starts_with("/nix/store"));assert_eq!(exe.file_name().unwrap(),program);
     assert_eq!(commands[0].0,exe.to_str().unwrap());assert_eq!(commands[0].1,vec![commands[0].0.clone()]);assert!(!commands[0].2);
     pid
 }
@@ -54,18 +54,35 @@ fn provider(bus:&Connection)->u32{
 /// Invoke one native action, only after observing this exact synthetic request
 /// in the renderer owned by the canonical managed provider. No retry of input.
 pub fn allow_owned_read(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_identity:&str)->serde_json::Value{
-    allow_owned(display,goal,window,title,window_identity,"Local CPU (observation only; no model requested)")
+    allow_owned(display,goal,Expected::Read{window,title,identity:window_identity,profile:"Local CPU (observation only; no model requested)"})
 }
 pub fn allow_owned_task_read(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_identity:&str)->serde_json::Value{
-    allow_owned(display,goal,window,title,window_identity,"Local CPU (normal; read-only task inference)")
+    allow_owned(display,goal,Expected::Read{window,title,identity:window_identity,profile:"Local CPU (normal; read-only task inference)"})
 }
-fn allow_owned(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_identity:&str,profile:&str)->serde_json::Value{
+enum Expected<'a>{
+    Read{window:&'a str,title:&'a str,identity:&'a str,profile:&'a str},
+    Termination{process:&'a aios_system::processes::OwnProcess,identity:aios_system::processes::Identity,handle:&'a str,closure:String},
+}
+/// Only the owned controlled child may be confirmed, with its live retained
+/// native identity checked again immediately before the single input attempt.
+pub fn allow_owned_termination(display:&DisplayBinding,goal:&str,process:&aios_system::processes::OwnProcess,handle:&str)->serde_json::Value{
+    let identity=process.inspect().unwrap().identity;assert_eq!(identity.uid,1001);
+    assert_ne!(identity.pid,std::process::id());
+    let closure=fs::canonicalize("/run/current-system").unwrap().to_str().unwrap().to_owned();
+    assert_eq!(Path::new(&closure).parent(),Some(Path::new("/nix/store")));
+    allow_owned(display,goal,Expected::Termination{process,identity,handle,closure})
+}
+fn allow_owned(display:&DisplayBinding,goal:&str,expected:Expected<'_>)->serde_json::Value{
+    let (program,dialog_name,button,profile,mode,prefix)=match &expected{
+        Expected::Read{profile,..}=>("aios-ui-agent","Horizon OS application read permission","Allow this read scope",*profile,"ask","Native permission fixture "),
+        Expected::Termination{..}=>("aios-processd","Horizon OS process termination permission","Terminate this process","Human-confirmed own-user process termination","act","Native termination fixture "),
+    };
     assert_eq!(std::env::var("AIOS_NATIVE_BRIDGE_SCENARIO").unwrap(),"disposable-provider-v1");
     assert_eq!(nix::unistd::geteuid().as_raw(),1001);
     assert_eq!(fs::read_to_string("/etc/aios/desktop-test-profile").unwrap().trim(),"synthetic-disposable-plasma-wayland-v1");
-    assert!(goal.starts_with("Native permission fixture "));display.verify().unwrap();
+    assert!(goal.starts_with(prefix));display.verify().unwrap();
     let session=zbus::blocking::connection::Builder::address("unix:path=/run/user/1001/bus").unwrap().method_timeout(Duration::from_millis(100)).build().unwrap();
-    let provider_pid=provider(&session);let provider_stamp=process_stamp(provider_pid);
+    let provider_pid=provider(&session,program);let provider_stamp=process_stamp(provider_pid);
     let launcher=owner(&session,"org.a11y.Bus");let launcher_stamp=process_stamp(launcher.1);
     assert_eq!(fs::read_link(format!("/proc/{}/exe",launcher.1)).unwrap(),Path::new(env!("AIOS_ATSPI_LAUNCHER")));
     let address:String=proxy(&session,&launcher.0,"/org/a11y/bus","org.a11y.Bus").call("GetAddress",&()).unwrap();
@@ -100,25 +117,35 @@ fn allow_owned(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_i
         assert_eq!(p.get_property::<Object>("Parent").unwrap(),(app.clone(),parent));
         let name:String=p.get_property("Name").unwrap();bytes+=name.len();assert!(bytes<=65536);
         let role:u32=p.call("GetRole",&()).unwrap();
-        if depth==0{assert_eq!(name,"Horizon OS application read permission");assert_eq!(role,16);}
-        if name=="Allow this read scope"{assert_eq!(role,43);assert!(allow.replace(path.clone()).is_none());}
+        if depth==0{assert_eq!(name,dialog_name);assert_eq!(role,16);}
+        if name==button{assert_eq!(role,43);assert!(allow.replace(path.clone()).is_none());}
         labels.push(name);
         let children:i32=p.get_property("ChildCount").unwrap();assert!((0..=300).contains(&children));
         for i in 0..children{let child:Object=p.call("GetChildAtIndex",&(i,)).unwrap();assert_eq!(child.0,app);queue.push_back((child.1,depth+1,path.clone()));}
     }
     assert!(labels.contains(&format!("Request:\n{goal}")),"synthetic request mismatch");
-    assert!(labels.iter().any(|v|v.contains(title) && v.contains(&format!("Resource: {window}")) && v.contains(&format!("Identity: {window_identity}"))),"selected native window mismatch");
     let hostname=fs::read_to_string("/proc/sys/kernel/hostname").unwrap();
     assert!(labels.contains(&format!("Target: {}\nDesktop: {} · User: 1001",hostname.trim(),display.session.id)));
-    assert!(labels.contains(&format!("Local / CPU: {profile}\nMode: ask")));
-    assert!(labels.contains(&"Read access: ui.snapshot\nNo input or external effects are authorized by this read scope.".into()));
+    assert!(labels.contains(&format!("Local / CPU: {profile}\nMode: {mode}")));
+    match &expected{
+        Expected::Read{window,title,identity,..}=>{
+            assert!(labels.iter().any(|v|v.contains(title) && v.contains(&format!("Resource: {window}")) && v.contains(&format!("Identity: {identity}"))),"selected native window mismatch");
+            assert!(labels.contains(&"Read access: ui.snapshot\nNo input or external effects are authorized by this read scope.".into()));
+        }
+        Expected::Termination{process,identity,handle,closure}=>{
+            assert_eq!(process.inspect().unwrap().identity,*identity);
+            assert!(labels.contains(&format!("Selected process: {handle}\nPID: {} · User: 1001\nStart ticks: {}\nBoot: {}\nExecutable identity: {}",identity.pid,identity.start_time_ticks,identity.boot_id,identity.executable_identity)));
+            assert!(labels.contains(&format!("System closure: {closure}")));
+            assert!(labels.contains(&"Action: process.terminate — R2\nSend one SIGTERM to this process. Verify exit within 30000 milliseconds.\nThis may interrupt work or lose unsaved data. It cannot be undone.\nAn ignored signal or timeout reports a partial effect. No automatic SIGKILL or retry.".into()));
+        }
+    }
     let proposal=labels.iter().find_map(|v|v.strip_prefix("Proposal: ")).unwrap();
     assert_eq!(proposal.len(),64);assert!(proposal.bytes().all(|v|v.is_ascii_digit() || (b'a'..=b'f').contains(&v)));
     let path=allow.expect("native Allow button");native(pid,provider_pid,&stamp);display.verify().unwrap();
-    assert_eq!(provider(&session),provider_pid);assert_eq!(process_stamp(provider_pid),provider_stamp);
+    assert_eq!(provider(&session,program),provider_pid);assert_eq!(process_stamp(provider_pid),provider_stamp);
     assert_eq!(owner(&session,"org.a11y.Bus"),launcher);assert_eq!(process_stamp(launcher.1),launcher_stamp);
     assert_eq!(owner(&bus,&app),(app.clone(),pid));
-    let p=proxy(&bus,&app,path.as_str(),ACCESSIBLE);assert_eq!(p.get_property::<String>("Name").unwrap(),"Allow this read scope");
+    let p=proxy(&bus,&app,path.as_str(),ACCESSIBLE);assert_eq!(p.get_property::<String>("Name").unwrap(),button);
     assert_eq!(p.call::<_,_,u32>("GetRole",&()).unwrap(),43);
     let states:Vec<u32>=p.call("GetState",&()).unwrap();assert!(states.len()<=2);
     // AT-SPI StateType: ENABLED=8, SENSITIVE=24, SHOWING=25, VISIBLE=30.
@@ -133,6 +160,11 @@ fn allow_owned(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_i
     let index=press.expect("unique Qt Press action");
     native(pid,provider_pid,&stamp);
     assert_eq!(action.call::<_,_,String>("GetName",&(index,)).unwrap(),"Press");
+    if let Expected::Termination{process,identity,closure,..}=&expected{
+        assert_eq!(process.inspect().unwrap().identity,*identity);
+        assert_eq!(fs::canonicalize("/run/current-system").unwrap(),Path::new(closure));
+    }
+    display.verify().unwrap();assert_eq!(provider(&session,program),provider_pid);
     let accepted:bool=action.call("DoAction",&(index,)).expect("one native input attempt; timeout or failure is never retried");assert!(accepted);
     serde_json::json!({"evidence_kind":"owned-production-dialog-native-assistive-input-fixture-not-human-approval","renderer_pid":pid,
         "provider_pid":provider_pid,"proposal_digest":proposal,"profile":profile,"native_action":"Press","input_attempts":1,"reviewed_nodes":visited.len()})
