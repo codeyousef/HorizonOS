@@ -13,7 +13,7 @@ def main():
     release = Path(__file__).resolve().parents[2]
     argv = ["nix", "develop", "--no-update-lock-file", "--no-write-lock-file", "path:" + str(release),
         "--command", "cargo", "test", "--locked", "-p", "aios-session", "--test", "process_observer",
-        "--", "--ignored", "--nocapture"]
+        "--", "--exact", "installed_process_handles_pages_native_identity_and_refusals", "--ignored", "--nocapture"]
     # The host publishes immutable source; generated files stay in the VM.
     # Keep this foreground process alive until the real caller has finished.
     with tempfile.TemporaryDirectory(prefix="aios-process-qualification-") as temporary:
