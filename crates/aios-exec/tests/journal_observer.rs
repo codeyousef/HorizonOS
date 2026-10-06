@@ -29,13 +29,17 @@ fn verify_records(proxy:&Proxy<'_>,original:&[Value],result:&Value,boot:&str,uid
     for expected in original {
         assert_eq!(expected["_UID"],uid.to_string());assert_eq!(expected["_BOOT_ID"],boot.replace('-',""));
         let raw=expected["MESSAGE"].as_str().unwrap();
-        let row=entries.iter().find(|row|row["timestamp"].as_str().is_some_and(|s|OffsetDateTime::parse(s,&Rfc3339).unwrap().unix_timestamp_nanos()/1000==expected["__REALTIME_TIMESTAMP"].as_str().unwrap().parse::<i128>().unwrap()))
-            .unwrap_or_else(||panic!("controlled message missing: boot={boot}, native_timestamp={}, returned_timestamps={:?}",
-                expected["__REALTIME_TIMESTAMP"],entries.iter().map(|r|r["timestamp"].as_str()).collect::<Vec<_>>()));
+        // A multiline stdout write can yield distinct journal entries with
+        // the same microsecond timestamp. Match the authoritative native
+        // cursor as well; timestamp alone can select a different message.
+        let candidates:Vec<_>=entries.iter().filter(|row|row["timestamp"].as_str().is_some_and(|s|OffsetDateTime::parse(s,&Rfc3339).unwrap().unix_timestamp_nanos()/1000==expected["__REALTIME_TIMESTAMP"].as_str().unwrap().parse::<i128>().unwrap()))
+            .map(|row|(row,call(proxy,"GetJournalEvidence",(row["evidence_id"].as_str().unwrap(),))))
+            .filter(|(_,evidence)|evidence["data"]["source_locator"]["cursor"]==expected["__CURSOR"]).collect();
+        assert_eq!(candidates.len(),1,"exact native journal cursor must resolve once");
+        let (row,evidence)=candidates.into_iter().next().unwrap();
         assert_eq!(row["priority"],5);assert_eq!(row["source"],"user");
         if raw.contains("PASSWORD") {assert_eq!(row["redacted"],true);assert!(!row.to_string().contains("fake-private-value"));}
         else {assert_eq!(row["message"],raw);assert_eq!(row["redacted"],false);}
-        let evidence=call(proxy,"GetJournalEvidence",(row["evidence_id"].as_str().unwrap(),));
         assert_eq!(evidence["data"]["source_locator"]["cursor"],expected["__CURSOR"]);
         assert_eq!(evidence["data"]["source_locator"]["boot_id"],boot);
         assert_eq!(evidence["data"]["payload"],*row);
