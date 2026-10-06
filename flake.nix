@@ -46,8 +46,10 @@
       systemTemplate = pkgs.callPackage ./nix/packages/system-template.nix {
         root = ./.; inherit templateInputs stateContract;
       };
-      state = (productPackage "aios-state" "aios-state" "aios-state-check").overrideAttrs (_: {
+      state = (productPackage "aios-state" "aios-state" "aios-state-check").overrideAttrs (old: {
         AIOS_STATE_CATALOG_JSON = builtins.toJSON stateContract.catalog;
+        nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
+        buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
       });
       cli = productPackage "aios-cli" "aios-cli" "aiosctl";
       consentUi = pkgs.callPackage ./nix/packages/consent-ui.nix { };
