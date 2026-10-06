@@ -329,6 +329,9 @@ def main():
                 proof['steps']['systemd_events'] = event_proof
                 break
             if time.monotonic() >= deadline:
+                # Preserve the last native counters and independent comparison
+                # on failure. This diagnostic cannot satisfy the required step.
+                proof['failed_systemd_event_observation'] = event_proof
                 raise RuntimeError('actual native systemd notification and snapshot refresh were not verified')
             time.sleep(0.2)
         before = proof['steps']['startup']['process']
