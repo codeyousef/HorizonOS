@@ -9,6 +9,8 @@ use std::{fs::{self,File,OpenOptions},os::unix::{fs::{MetadataExt,OpenOptionsExt
 mod evidence;
 mod reconcile;
 mod edges;
+mod recovery;
+pub use recovery::RecoveryReceipt;
 pub use edges::{Relation, Certainty, EdgeInput, StoredEdge};
 pub use reconcile::{ProviderStatus, ProviderState, ProviderSnapshot, ProviderEvent, EventKind, ReconcileReason, ReconcilePlan};
 pub use evidence::{EvidenceInput, ObservationInput, ResolvedEvidence, SourceLocator, ViewerTarget, DocumentRange, Sensitivity, ReadPurpose};
@@ -81,7 +83,7 @@ fn private_directory(path:&Path,uid:u32)->Result<()> {
         || meta.uid()!=uid || meta.mode()&0o777!=0o700 { return Err(Error::IdentityChanged); }
     Ok(())
 }
-struct Database { connection:Connection, _lock:File }
+struct Database { connection:Connection, _lock:File, recovery:Option<RecoveryReceipt> }
 impl Database {
     fn open(directory:&Path,scope:Scope)->Result<Self> {
         let uid=unsafe {libc::geteuid()};private_directory(directory,uid)?;
@@ -90,15 +92,45 @@ impl Database {
             .custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).open(&lock_path).map_err(|_|Error::Storage)?;
         safe_file(&lock_path,uid)?;
         if unsafe {libc::flock(lock.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)}!=0 { return Err(Error::Busy); }
+        // Keep the same flock open description across preflight failure,
+        // quarantine, restart completion and creation of the replacement.
+        let pending=recovery::pending(directory,scope)?;
+        let recovered=if let Some(plan)=pending {
+            Some(recovery::resume(directory,&plan)?)
+        } else {None};
+        recovery::verify_stamp(directory,scope)?;
+        let result=if recovered.is_none() && recovery::damaged_header(directory)? {
+            Err(Error::Corrupt)
+        } else {Self::open_locked(directory,scope,lock.try_clone().map_err(|_|Error::Storage)?)};
+        let mut db=match result {
+            Ok(db)=>db,
+            Err(Error::Corrupt) if recovered.is_none()=>{
+                let plan=recovery::prepare(directory,scope)?;
+                let receipt=recovery::resume(directory,&plan)?;
+                let mut db=Self::open_locked(directory,scope,lock.try_clone().map_err(|_|Error::Storage)?)?;
+                db.recovery=Some(receipt);db
+            },
+            Err(error)=>return Err(error),
+        };
+        if db.recovery.is_none(){db.recovery=recovered;}
+        recovery::stamp(directory,scope)?;
+        if let Some(receipt)=&db.recovery {recovery::finish(directory,receipt)?;}
+        Ok(db)
+    }
+    fn open_locked(directory:&Path,scope:Scope,lock:File)->Result<Self> {
+        let uid=unsafe {libc::geteuid()};
         let path=directory.join("graph.sqlite3");
-        for name in ["graph.sqlite3-wal","graph.sqlite3-shm","graph.sqlite3-journal"] { safe_file(&directory.join(name),uid)?; }
+        let mut has_sidecars=false;
+        for name in ["graph.sqlite3-wal","graph.sqlite3-shm","graph.sqlite3-journal"] { has_sidecars|=safe_file(&directory.join(name),uid)?.is_some(); }
         let identity=match safe_file(&path,uid)? {
             Some(id)=>id,None=>{
+                if has_sidecars{return Err(Error::IdentityChanged);}
                 let file=OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC)
                     .open(&path).map_err(|_|Error::Storage)?;file.sync_all().map_err(|_|Error::Storage)?;
                 safe_file(&path,uid)?.ok_or(Error::IdentityChanged)?
             }
         };
+        if has_sidecars && fs::metadata(&path).map_err(|_|Error::Storage)?.len()==0{return Err(Error::IdentityChanged);}
         let connection=Connection::open_with_flags(&path,OpenFlags::SQLITE_OPEN_READ_ONLY|OpenFlags::SQLITE_OPEN_NO_MUTEX|OpenFlags::SQLITE_OPEN_NOFOLLOW).map_err(sql)?;
         if safe_file(&path,uid)?!=Some(identity) { return Err(Error::IdentityChanged); }
         connection.busy_timeout(Duration::from_millis(250)).map_err(sql)?;
@@ -132,7 +164,7 @@ impl Database {
         if mode!="wal" { return Err(Error::Incompatible); }
         connection.execute_batch("PRAGMA wal_autocheckpoint=1000; PRAGMA journal_size_limit=8388608;").map_err(sql)?;
         for name in ["graph.sqlite3","graph.sqlite3-wal","graph.sqlite3-shm"] { safe_file(&directory.join(name),uid)?; }
-        Ok(Self {connection,_lock:lock})
+        Ok(Self {connection,_lock:lock,recovery:None})
     }
     fn compatible(connection:&Connection)->Result<()> {
         // Check actual DDL, not only a version marker that may survive drift.
@@ -206,7 +238,7 @@ impl Request {
         Self::Snapshot(_,reply)|Self::Events(_,_,reply)=>{let _=reply.send(Err(error));},Self::Plan(_,_,_,reply)=>{let _=reply.send(Err(error));},
     }}
 }
-pub struct GraphStore { sender:Option<SyncSender<Request>>,worker:Option<JoinHandle<()>>,overflow:Arc<AtomicBool> }
+pub struct GraphStore { sender:Option<SyncSender<Request>>,worker:Option<JoinHandle<()>>,overflow:Arc<AtomicBool>,recovery:Option<RecoveryReceipt> }
 impl GraphStore {
     /// The trusted owner selects Scope from authenticated native identity.
     /// Callers must not choose database scope from model request fields.
@@ -215,6 +247,7 @@ impl GraphStore {
         // A new owner may have missed events before admission loss was written.
         // Resample persisted providers even when the host boot did not change.
         db.owner_started()?;
+        let recovery=db.recovery.clone();
         let (sender,receiver)=mpsc::sync_channel::<Request>(QUEUE);
         let overflow=Arc::new(AtomicBool::new(false));let worker_overflow=overflow.clone();
         let worker=thread::Builder::new().name("aios-graph-store".into()).spawn(move||{
@@ -237,8 +270,11 @@ impl GraphStore {
                 Request::ResolveEvidence(id,binding,now,revision,purpose,reply)=>{let _=reply.send(db.resolve_evidence(scope,&id,&binding,&now,&revision,purpose));},
             }}
         }).map_err(|_|Error::Storage)?;
-        Ok(Self{sender:Some(sender),worker:Some(worker),overflow})
+        Ok(Self{sender:Some(sender),worker:Some(worker),overflow,recovery})
     }
+    /// Diagnostic receipt of preserved corrupt cache files. This is never a
+    /// source locator, execution permission or authority to delete quarantine.
+    pub fn recovery_receipt(&self)->Option<&RecoveryReceipt>{self.recovery.as_ref()}
     fn send(&self,request:Request)->Result<()> {
         self.sender.as_ref().ok_or(Error::Storage)?.try_send(request).map_err(|error|match error {
             TrySendError::Full(_)=>{self.overflow.store(true,Ordering::Release);Error::ResourceExhausted},TrySendError::Disconnected(_)=>Error::Storage,

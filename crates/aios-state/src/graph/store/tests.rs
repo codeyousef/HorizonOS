@@ -1,5 +1,5 @@
 use super::*;
-use std::{os::unix::fs::{PermissionsExt,symlink},sync::atomic::{AtomicU64,Ordering}};
+use std::{io::Write,os::unix::fs::{PermissionsExt,DirBuilderExt,symlink},sync::atomic::{AtomicU64,Ordering}};
 static NEXT:AtomicU64=AtomicU64::new(0);
 struct Temporary(std::path::PathBuf);
 impl Temporary {fn new()->Self{let path=std::env::temp_dir().join(format!("horizon-graph-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));fs::create_dir(&path).unwrap();fs::set_permissions(&path,fs::Permissions::from_mode(0o700)).unwrap();Self(path)}}
@@ -199,4 +199,97 @@ fn provider_event(id:&str)->ProviderEvent{ProviderEvent{id:id.into(),entity_id:S
     assert_eq!(plan.reason,Some(ReconcileReason::Invalidated));let state=plan.state.unwrap();assert_eq!(state.error.unwrap()["code"],"graph_owner_started");assert_ne!(state.token,before.token);
     assert_eq!(store.apply_provider_snapshot(provider_snapshot(Some(before.token),3,&["a"])),Err(Error::IdentityChanged));
     assert_eq!(store.apply_provider_snapshot(provider_snapshot(Some(state.token),3,&["a"])).unwrap().status,ProviderStatus::Ready);
+}
+
+fn corrupt_owned_graph(temp:&Temporary)->Vec<(String,Vec<u8>)>{
+    let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();store.upsert_nodes(vec![node("a")]).unwrap();drop(store);
+    fs::write(temp.0.join("graph.sqlite3"),b"damaged native graph header").unwrap();
+    for name in ["graph.sqlite3-wal","graph.sqlite3-shm","graph.sqlite3-journal"]{
+        OpenOptions::new().write(true).create_new(true).mode(0o600).open(temp.0.join(name)).unwrap().write_all(name.as_bytes()).unwrap();
+    }
+    recovery::FILES_FOR_TEST.iter().map(|name|(name.to_string(),fs::read(temp.0.join(name)).unwrap())).collect()
+}
+#[test] fn corrupt_owned_graph_preserves_every_file_and_rebuilds_unknown(){
+    let temp=Temporary::new();let before=corrupt_owned_graph(&temp);
+    let ledger=b"ledger must survive graph recovery";fs::write(temp.0.join("transactions.sqlite3"),ledger).unwrap();
+    let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();let receipt=store.recovery_receipt().unwrap().clone();
+    for (name,bytes) in before {assert_eq!(fs::read(receipt.quarantine_directory.join(name)).unwrap(),bytes);}
+    assert_eq!(receipt.files.len(),5);assert!(receipt.quarantine_directory.join("receipt.json").exists());assert!(!temp.0.join("graph.recovery").exists());
+    assert_eq!(fs::read(temp.0.join("transactions.sqlite3")).unwrap(),ledger);assert!(store.nodes(vec!["a".into()]).unwrap().is_empty());
+    assert_eq!(store.reconciliation_plan("native-systemd".into(),observation_time(2),crate::graph::SourceRevision::default()).unwrap().reason,Some(ReconcileReason::Unknown));
+    store.upsert_nodes(vec![node("b")]).unwrap();drop(store);
+    let reopened=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();assert!(reopened.recovery_receipt().is_none());assert_eq!(reopened.nodes(vec!["b".into()]).unwrap().len(),1);
+}
+#[test] fn recovery_resumes_each_partial_move_without_losing_old_sidecars(){
+    for count in 0..=5 {
+        let temp=Temporary::new();let before=corrupt_owned_graph(&temp);let plan=recovery::prepare(&temp.0,Scope::User(1000)).unwrap();
+        let destination=temp.0.join(format!("graph.quarantine-{}",recovery::nonce_for_test(&plan)));
+        for (name,_) in before.iter().take(count){fs::rename(temp.0.join(name),destination.join(name)).unwrap();}
+        let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();assert!(store.recovery_receipt().is_some());
+        for (name,bytes) in &before{assert_eq!(fs::read(destination.join(name)).unwrap(),*bytes);}
+        assert!(store.nodes(vec!["a".into()]).unwrap().is_empty());
+    }
+}
+#[test] fn interrupted_replacement_reopens_only_a_compatible_new_graph(){
+    let temp=Temporary::new();corrupt_owned_graph(&temp);let plan=recovery::prepare(&temp.0,Scope::User(1000)).unwrap();recovery::resume(&temp.0,&plan).unwrap();
+    let lock=OpenOptions::new().read(true).write(true).open(temp.0.join("graph.lock")).unwrap();
+    let mut replacement=Database::open_locked(&temp.0,Scope::User(1000),lock).unwrap();replacement.write(Scope::User(1000),vec![node("b")]).unwrap();drop(replacement);recovery::stamp(&temp.0,Scope::User(1000)).unwrap();
+    let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();assert!(store.recovery_receipt().is_some());assert_eq!(store.nodes(vec!["b".into()]).unwrap().len(),1);
+}
+#[test] fn unmarked_corruption_wrong_scope_and_substituted_inode_never_reset(){
+    let unknown=Temporary::new();let path=unknown.0.join("graph.sqlite3");OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).unwrap().write_all(b"unrecognized damaged store").unwrap();
+    let before=fs::read(&path).unwrap();assert!(matches!(GraphStore::open(&unknown.0,Scope::System),Err(Error::Corrupt)));assert_eq!(fs::read(path).unwrap(),before);assert!(!unknown.0.join("graph.recovery").exists());
+    let temp=Temporary::new();corrupt_owned_graph(&temp);assert!(matches!(GraphStore::open(&temp.0,Scope::User(1001)),Err(Error::WrongScope)));assert!(!temp.0.join("graph.recovery").exists());
+    fs::rename(temp.0.join("graph.sqlite3"),temp.0.join("old.sqlite3")).unwrap();OpenOptions::new().write(true).create_new(true).mode(0o600).open(temp.0.join("graph.sqlite3")).unwrap().write_all(b"another damaged file").unwrap();
+    assert!(matches!(GraphStore::open(&temp.0,Scope::User(1000)),Err(Error::IdentityChanged)));assert!(!temp.0.join("graph.recovery").exists());
+}
+#[test] fn pending_recovery_refuses_changed_inventory_and_retains_plan(){
+    let temp=Temporary::new();let before=corrupt_owned_graph(&temp);recovery::prepare(&temp.0,Scope::User(1000)).unwrap();
+    fs::write(temp.0.join("graph.sqlite3-wal"),b"substituted WAL").unwrap();
+    assert!(matches!(GraphStore::open(&temp.0,Scope::User(1000)),Err(Error::IdentityChanged)));assert!(temp.0.join("graph.recovery").exists());assert_eq!(fs::read(temp.0.join("graph.sqlite3")).unwrap(),before[0].1);
+}
+#[test] fn unsafe_sidecars_and_quarantine_destinations_are_refused(){
+    for hard_link in [false,true] {
+        let temp=Temporary::new();corrupt_owned_graph(&temp);let original=temp.0.join("graph.sqlite3-wal");fs::rename(&original,temp.0.join("retained-wal")).unwrap();
+        if hard_link{fs::hard_link(temp.0.join("retained-wal"),&original).unwrap();}else{symlink(temp.0.join("retained-wal"),&original).unwrap();}
+        assert!(matches!(GraphStore::open(&temp.0,Scope::User(1000)),Err(Error::IdentityChanged)));assert!(!temp.0.join("graph.recovery").exists());
+    }
+    let temp=Temporary::new();corrupt_owned_graph(&temp);let plan=recovery::prepare(&temp.0,Scope::User(1000)).unwrap();let target=temp.0.join(format!("graph.quarantine-{}",recovery::nonce_for_test(&plan)));
+    fs::rename(&target,temp.0.join("retained-quarantine")).unwrap();fs::DirBuilder::new().mode(0o700).create(&target).unwrap();
+    assert!(matches!(GraphStore::open(&temp.0,Scope::User(1000)),Err(Error::IdentityChanged)));assert!(temp.0.join("graph.recovery").exists());
+}
+#[test] fn structural_graph_corruption_quarantines_but_schema_drift_does_not(){
+    use std::io::{Seek,SeekFrom,Write};
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();store.upsert_nodes(vec![node("a")]).unwrap();drop(store);
+    let db=Connection::open(temp.0.join("graph.sqlite3")).unwrap();let page:i64=db.query_row("SELECT rootpage FROM sqlite_master WHERE name='nodes'",[],|r|r.get(0)).unwrap();let size:i64=db.pragma_query_value(None,"page_size",|r|r.get(0)).unwrap();drop(db);
+    let mut file=OpenOptions::new().write(true).open(temp.0.join("graph.sqlite3")).unwrap();file.seek(SeekFrom::Start(((page-1)*size) as u64)).unwrap();file.write_all(&[0]).unwrap();file.sync_all().unwrap();drop(file);
+    let bytes=fs::read(temp.0.join("graph.sqlite3")).unwrap();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();let receipt=store.recovery_receipt().unwrap();assert_eq!(fs::read(receipt.quarantine_directory.join("graph.sqlite3")).unwrap(),bytes);
+}
+
+#[test] fn actual_committed_wal_snapshot_is_preserved_before_header_recovery(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();store.apply_provider_snapshot(provider_snapshot(None,1,&["a"])).unwrap();
+    let names=["graph.sqlite3","graph.sqlite3-wal","graph.sqlite3-shm"];
+    let snapshot=names.iter().map(|n|(n.to_string(),fs::read(temp.0.join(n)).unwrap())).collect::<Vec<_>>();
+    assert!(snapshot[1].1.len()>32);drop(store);
+    for (name,bytes) in &snapshot {let mut f=OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(temp.0.join(name)).unwrap();f.write_all(bytes).unwrap();f.sync_all().unwrap();}
+    let mut file=OpenOptions::new().write(true).open(temp.0.join("graph.sqlite3")).unwrap();file.write_all(b"?").unwrap();file.sync_all().unwrap();drop(file);
+    let before=names.iter().map(|n|(n.to_string(),fs::read(temp.0.join(n)).unwrap())).collect::<Vec<_>>();
+    let rebuilt=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();let receipt=rebuilt.recovery_receipt().unwrap();
+    for (name,bytes) in before {assert_eq!(fs::read(receipt.quarantine_directory.join(name)).unwrap(),bytes);}
+    assert!(rebuilt.nodes(vec!["a".into()]).unwrap().is_empty());
+}
+#[test] fn incompatible_interrupted_replacement_blocks_with_archives_intact(){
+    let temp=Temporary::new();let before=corrupt_owned_graph(&temp);let plan=recovery::prepare(&temp.0,Scope::User(1000)).unwrap();let receipt=recovery::resume(&temp.0,&plan).unwrap();
+    let lock=OpenOptions::new().read(true).write(true).open(temp.0.join("graph.lock")).unwrap();drop(Database::open_locked(&temp.0,Scope::User(1000),lock).unwrap());
+    let connection=Connection::open(temp.0.join("graph.sqlite3")).unwrap();connection.pragma_update(None,"user_version",2).unwrap();drop(connection);let replacement=fs::read(temp.0.join("graph.sqlite3")).unwrap();
+    assert!(matches!(GraphStore::open(&temp.0,Scope::User(1000)),Err(Error::Incompatible)));assert!(temp.0.join("graph.recovery").exists());assert_eq!(fs::read(temp.0.join("graph.sqlite3")).unwrap(),replacement);
+    for (name,bytes) in before {assert_eq!(fs::read(receipt.quarantine_directory.join(name)).unwrap(),bytes);}
+}
+
+#[test] fn orphan_sidecar_cannot_attach_to_an_absent_or_empty_unmarked_database(){
+    for empty in [false,true] {
+        let temp=Temporary::new();let wal=temp.0.join("graph.sqlite3-wal");OpenOptions::new().write(true).create_new(true).mode(0o600).open(&wal).unwrap().write_all(b"orphan native WAL").unwrap();
+        if empty {OpenOptions::new().write(true).create_new(true).mode(0o600).open(temp.0.join("graph.sqlite3")).unwrap();}
+        assert!(matches!(GraphStore::open(&temp.0,Scope::System),Err(Error::IdentityChanged)));assert_eq!(fs::read(wal).unwrap(),b"orphan native WAL");assert_eq!(temp.0.join("graph.sqlite3").exists(),empty);assert!(!temp.0.join("graph.identity").exists());
+    }
 }

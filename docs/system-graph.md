@@ -66,6 +66,24 @@ explicitly refused, never silently treated as complete. Properties have an
 checkpoints and retains the latest 4096 event sequences. Evidence access lives
 for at most 900 seconds. Retention does not convert expired evidence into a grant.
 
+## Rebuildable cache recovery
+
+A successful compatible open records the graph inode and scope in a private
+ownership marker. Corruption of a marked graph triggers quarantine of the
+fixed database, WAL, SHM, rollback journal and marker. A durable bounded manifest
+binds their identities, lengths and SHA-256 hashes before any move. Renames never
+overwrite files; files and both directories are synced. Interrupted moves resume
+under the same exclusive owner lock before SQLite can create a replacement.
+All old sidecars must be archived before a fresh graph can open. Replacement
+state starts unknown and requires native provider resampling. A diagnostic
+recovery receipt names the retained quarantine; it confers no execution rights.
+
+Unknown unmarked corrupt files, foreign scopes/inodes, unsafe links, schema
+changes and unsupported versions fail closed. Recovery does not delete any
+quarantine or inspect transaction paths. Partial manifests or changed inventories
+block opening for deterministic operator repair, preserving the bytes rather
+than claiming a successful rebuild. A damaged ownership marker also blocks.
+
 These library contracts require native adapter, scheduler, scoped viewer and
-store-recovery integration. Transaction ledgers use separate paths and recovery
+installed recovery notification integration. Transaction ledgers use separate paths and recovery
 rules; graph storage never opens or resets them.
