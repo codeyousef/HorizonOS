@@ -26,6 +26,26 @@ SYSTEMCTL = '/run/current-system/sw/bin/systemctl'
 PROFILE = 'fixed-installed-graph-owner-v1'
 
 
+def device_proof_valid(value, identity):
+    try:
+        row = value['selected']
+        properties = row['properties']
+        device = properties['device']
+        native = value['native_properties']
+        return (value['execution_authority'] is False and row['source_truth'] == 'running'
+                and properties['execution_authority'] is False and properties['live_identity_retained'] is False
+                and properties['captured']['boot'] == identity['boot_id']
+                and device['syspath'] == value['native_syspath']
+                and type(device['major']) is int and type(device['minor']) is int
+                and [device['major'], device['minor']] == value['native_devnum']
+                and device['serial'] == identity['disk_serial']
+                and all(device[field] == native.get(key) for field, key in
+                        [('serial', 'ID_SERIAL'), ('serial_short', 'ID_SERIAL_SHORT'), ('wwn', 'ID_WWN'),
+                         ('bus', 'ID_BUS'), ('model', 'ID_MODEL'), ('vendor', 'ID_VENDOR')]))
+    except (KeyError, TypeError):
+        return False
+
+
 def event_proof_valid(value, boot):
     try:
         before, after = value['before'], value['after']
@@ -272,6 +292,23 @@ def main():
                 or pointers['bootloader_entry'] is not None or pointers['managed_transaction'] is not None):
             raise RuntimeError('native graph generation observations differ or infer unobserved provenance')
         proof['steps']['startup_generations'] = generations
+        devices = graph(expected, executable, '--devices')
+        # Independent fixed managed QEMU root-disk locator, never a graph/model
+        # path interpreted with root authority or a raw block-device read.
+        native_path = Path('/sys/class/block/vda').resolve(strict=True)
+        selected = next(row for row in devices['data'] if row['properties']['device']['syspath'] == str(native_path))
+        independent = command(expected, ['/run/current-system/sw/bin/udevadm', 'info', '--query=property', '--path', str(native_path)])
+        if independent.returncode:
+            raise RuntimeError('fixed native root disk property inspection failed')
+        native_properties = dict(line.split('=', 1) for line in independent.stdout.decode().splitlines() if '=' in line)
+        device_proof = {'selected': selected, 'native_syspath': str(native_path),
+            'native_devnum': [int(v) for v in Path('/sys/class/block/vda/dev').read_text().strip().split(':')],
+            'native_properties': {key: native_properties[key] for key in
+                ('ID_SERIAL', 'ID_SERIAL_SHORT', 'ID_WWN', 'ID_BUS', 'ID_MODEL', 'ID_VENDOR') if native_properties.get(key)},
+            'execution_authority': devices['execution_authority']}
+        if not device_proof_valid(device_proof, expected):
+            raise RuntimeError('native graph root disk properties differ or infer missing identity')
+        proof['steps']['startup_devices'] = device_proof
         cached = graph(expected, executable, '--service', 'sshd.service')
         native = properties(expected, 'sshd.service', ['LoadState', 'ActiveState', 'SubState'])
         observed = cached['data']['properties']['observation']

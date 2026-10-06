@@ -134,3 +134,5 @@ mod tests {
 pub mod services;
 pub mod journal;
 pub mod processes;
+
+pub mod devices;

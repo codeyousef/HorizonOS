@@ -170,3 +170,31 @@ fn native_systemd_loaded_graph_matches_independent_service_state(){
     assert!(row.properties["main_pid"].is_null());assert!(row.properties["result"].is_null());assert!(row.properties["ordering_after"].is_null());assert_eq!(row.provider,SYSTEMD_PROVIDER);assert_eq!(row.source_truth,SourceTruth::Running);
     println!("AIOS_NATIVE_GRAPH_SYSTEMD={}",json!({"evidence_kind":"real-root-manager-loaded-service-graph-library","unit":"sshd.service","id":id,"provider_status":state.status,"observed_services":snapshot.ids().unwrap().len(),"manager_owner":row.properties["manager_owner"],"boot":snapshot.captured().boot,"independent_systemctl":text,"unknown_properties_preserved":true,"installed_graph_daemon_qualified":false}));drop(store);
 }
+
+#[test]
+#[ignore="requires enrolled NixOS guest, native udev/sysfs; no storage effect or installed owner claim"]
+fn real_block_device_properties_match_native_udev_and_scoped_graph(){
+    use aios_state::graph::devices::{NativeBlockSnapshot,PROVIDER};
+    let fixture=Fixture(std::env::temp_dir().join(format!("aios-graph-block-{}-{}",std::process::id(),time().monotonic_ns)));
+    fs::create_dir(&fixture.0).unwrap();fs::set_permissions(&fixture.0,fs::Permissions::from_mode(0o700)).unwrap();let root=fixture.0.join("graph");fs::create_dir(&root).unwrap();fs::set_permissions(&root,fs::Permissions::from_mode(0o700)).unwrap();
+    let store=GraphStore::open(&root,Scope::System).unwrap();let snapshot=NativeBlockSnapshot::collect(&store).unwrap();
+    let inventory=snapshot.inventory().clone();assert!(!inventory.devices.is_empty());
+    let ids=snapshot.ids().unwrap();let result=snapshot.apply(&store).unwrap();let mut rows=Vec::new();for ids in ids.chunks(64){rows.extend(store.nodes(ids.to_vec()).unwrap());}assert_eq!(rows.len(),inventory.devices.len());
+    assert_eq!(result.status,if inventory.complete{ProviderStatus::Ready}else{ProviderStatus::Partial});
+    let device=&inventory.devices[0];
+    assert_eq!(fs::read_to_string(Path::new(&device.syspath).join("dev")).unwrap().trim(),format!("{}:{}",device.major,device.minor));
+    let argv=["/run/current-system/sw/bin/udevadm","info","--query=property","--path",device.syspath.as_str()];
+    let independent=Command::new(argv[0]).args(&argv[1..]).output().unwrap();assert!(independent.status.success());assert!(independent.stdout.len()+independent.stderr.len()<65536);
+    let properties:std::collections::BTreeMap<_,_>=std::str::from_utf8(&independent.stdout).unwrap().lines().filter_map(|l|l.split_once('=').filter(|(_,value)|!value.is_empty())).collect();
+    for (property,value) in [("ID_SERIAL",&device.serial),("ID_SERIAL_SHORT",&device.serial_short),("ID_WWN",&device.wwn),("ID_BUS",&device.bus),("ID_MODEL",&device.model),("ID_VENDOR",&device.vendor)]{
+        assert_eq!(properties.get(property).copied(),value.as_deref());
+    }
+    for row in &rows{assert_eq!(row.provider,PROVIDER);assert_eq!(row.source_truth,SourceTruth::Running);assert_eq!(row.properties["execution_authority"],false);assert_eq!(row.properties["live_identity_retained"],false);}
+    let other=fixture.0.join("user");fs::create_dir(&other).unwrap();fs::set_permissions(&other,fs::Permissions::from_mode(0o700)).unwrap();
+    let user=GraphStore::open(&other,Scope::User(unsafe{libc::geteuid()})).unwrap();
+    assert!(matches!(NativeBlockSnapshot::collect(&user),Err(aios_state::graph::native::Error::WrongScope)));
+    let expired=NativeBlockSnapshot::collect(&store).unwrap();std::thread::sleep(std::time::Duration::from_millis(2100));
+    assert!(matches!(expired.apply(&store),Err(aios_state::graph::native::Error::Expired)));
+    println!("AIOS_NATIVE_BLOCK_GRAPH={}",json!({"evidence_kind":"native-udev-block-disk-graph-library","device_count":rows.len(),"complete_block_enumeration":inventory.complete,
+        "independent_udevadm_argv":argv,"independent_udevadm_exit":0,"selected_device":device,"missing_serials_stay_null":rows.iter().all(|row|!row.properties["device"]["serial"].is_null() || row.properties["identity_kind"]=="boot_scoped_kernel_locator" || row.properties["identity_kind"]=="udev_wwn"),"wrong_scope_refused":true,"expired_snapshot_refused":true,"storage_effect_performed":false,"installed_owner_verified":false}));
+}

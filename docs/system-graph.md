@@ -154,3 +154,18 @@ there is no inferred healthy state during loss. Status exposes subscription
 availability and errors separately from snapshot completeness. The independent
 fifteen-minute timer/fallback remains active. Complete closure metadata and user
 overlay reconciliation remain separate providers.
+
+
+The system owner also samples native block-disk properties through libudev at
+startup, native generation/service refresh and the periodic fallback. This
+provider covers block disks; other hardware classes and udev event monitoring
+remain separate work. Serial, WWN, bus, model and vendor are native optional
+properties. A missing serial remains null. WWN/serial-based keys are preferred;
+otherwise a boot-scoped kernel locator is explicitly labeled without durable
+identity or retained live identity. Duplicate stable properties are ambiguous
+and refuse publication. Native inventories are compared before/after applying
+an opaque two-second snapshot. Only the system-scoped database accepts them.
+The root-private `--devices` diagnostic includes capture time and a conservative
+two-second cache eligibility limit. Partial snapshots cannot claim Current.
+These observations do not grant storage execution authority or expose raw
+block-device access; effect providers must acquire critical identity live.

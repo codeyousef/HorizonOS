@@ -2,7 +2,7 @@
 import copy
 import unittest
 import installed_graph_owner_smoke as gate
-from graph_owner_preflight import raw_timer_trigger, denied_probe_valid, event_proof_valid
+from graph_owner_preflight import raw_timer_trigger, denied_probe_valid, event_proof_valid, device_proof_valid
 
 class GraphEvidenceTests(unittest.TestCase):
     def test_denial_requires_original_dev_process_exit(self):
@@ -48,11 +48,33 @@ class GraphEvidenceTests(unittest.TestCase):
         altered = copy.deepcopy(value); altered['native']['ActiveState'] = 'failed'
         self.assertFalse(event_proof_valid(altered, 'fixture-boot'))
 
+    def device_fixture(self):
+        return {'execution_authority': False, 'native_syspath': '/sys/devices/fixture', 'native_devnum': [252, 0],
+            'native_properties': {'ID_SERIAL': 'fixture-native-serial'},
+            'selected': {'source_truth': 'running', 'properties': {'execution_authority': False,
+                'live_identity_retained': False, 'captured': {'boot': 'fixture-boot'},
+                'device': {'syspath': '/sys/devices/fixture', 'major': 252, 'minor': 0,
+                    'serial': 'fixture-native-serial', 'serial_short': None, 'wwn': None, 'bus': None, 'model': None, 'vendor': None}}}}
+
+    def test_device_gate_refuses_foreign_kernel_identity_or_invented_missing_serial(self):
+        identity = {'boot_id': 'fixture-boot', 'disk_serial': 'fixture-native-serial'}
+        value = self.device_fixture(); self.assertTrue(device_proof_valid(value, identity))
+        for field, other in [('syspath', '/sys/devices/other'), ('major', True), ('minor', 1),
+                             ('serial', 'invented'), ('serial_short', 'invented'), ('wwn', 'invented')]:
+            altered = copy.deepcopy(value); altered['selected']['properties']['device'][field] = other
+            self.assertFalse(device_proof_valid(altered, identity))
+        for field, other in [('execution_authority', True), ('live_identity_retained', True)]:
+            altered = copy.deepcopy(value); altered['selected']['properties'][field] = other
+            self.assertFalse(device_proof_valid(altered, identity))
+        altered = copy.deepcopy(value); altered['selected']['properties']['captured']['boot'] = 'foreign-boot'
+        self.assertFalse(device_proof_valid(altered, identity))
+
     def fixture(self):
-        identity = {"boot_id": "fixture-boot", "current_system": "fixture-system"}
+        identity = {"boot_id": "fixture-boot", "current_system": "fixture-system", "disk_serial": "fixture-native-serial"}
         steps = {k: {} for k in gate.REQUIRED}
         steps.update({"service_comparison": {"unknown_properties_preserved": True},
             "systemd_events": self.event_fixture(),
+            "startup_devices": self.device_fixture(),
             "startup_generations": {"execution_authority": False, "data": {"freshness": "Current", "pointers": {"running_closure": "fixture-system", "bootloader_entry": None, "managed_transaction": None}}},
             "foreign_uid_denied": {"upstream_exit": 1, "native_unit": self.denial_unit()},
             "corruption_recovery": {"ledger_unchanged": True},

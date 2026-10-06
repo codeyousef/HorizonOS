@@ -7,6 +7,7 @@ pub mod store;
 pub mod native;
 pub mod runtime;
 pub mod generations;
+pub mod devices;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -39,7 +40,7 @@ impl ProcessIdentity {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FreshnessClass { Process, Ui, Service, Network, Audio, StorageFree, Inventory, Documentation }
+pub enum FreshnessClass { Process, Ui, Device, Service, Network, Audio, StorageFree, Inventory, Documentation }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservationTime { pub boot: BootId, pub realtime_ns: u64, pub monotonic_ns: u64 }
@@ -82,7 +83,7 @@ pub fn freshness(class: FreshnessClass, observed: &ObservationTime, now: &Observ
             if observed.boot != now.boot { return Freshness::Stale; }
             let Some(age) = now.monotonic_ns.checked_sub(observed.monotonic_ns) else { return Freshness::Unknown; };
             let seconds = match other {
-                FreshnessClass::Process | FreshnessClass::Ui => 2,
+                FreshnessClass::Process | FreshnessClass::Ui | FreshnessClass::Device => 2,
                 FreshnessClass::Service | FreshnessClass::Network | FreshnessClass::Audio => 5,
                 FreshnessClass::StorageFree => 30,
                 _ => unreachable!(),
@@ -119,7 +120,7 @@ mod tests {
     #[test]
     fn wall_clock_change_does_not_extend_native_observation_lifetime() {
         let empty = SourceRevision::default();
-        for (class, seconds) in [(FreshnessClass::Process, 2), (FreshnessClass::Ui, 2), (FreshnessClass::Service, 5),
+        for (class, seconds) in [(FreshnessClass::Process, 2), (FreshnessClass::Ui, 2), (FreshnessClass::Device, 2), (FreshnessClass::Service, 5),
             (FreshnessClass::Network, 5), (FreshnessClass::Audio, 5), (FreshnessClass::StorageFree, 30)] {
             let old = time(boot(1), 1);
             let mut current = time(boot(1), 1 + seconds * 1_000_000_000);

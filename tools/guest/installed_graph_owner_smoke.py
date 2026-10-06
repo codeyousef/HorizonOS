@@ -7,11 +7,11 @@ import stat
 import subprocess
 
 import snapshot
-from graph_owner_preflight import denied_probe_valid, event_proof_valid
+from graph_owner_preflight import denied_probe_valid, event_proof_valid, device_proof_valid
 
 REPORT = Path('/run/aios-graph-acceptance/result.json')
 PHASE = REPORT.with_name('phase.json')
-REQUIRED = {'startup', 'startup_desktop', 'startup_generations', 'systemd_events', 'service_comparison', 'foreign_uid_denied', 'restart', 'outage_desktop',
+REQUIRED = {'startup', 'startup_desktop', 'startup_generations', 'startup_devices', 'systemd_events', 'service_comparison', 'foreign_uid_denied', 'restart', 'outage_desktop',
             'outage_ssh', 'corruption_recovery', 'real_timer', 'final_desktop', 'final_process'}
 
 
@@ -39,6 +39,7 @@ def qualified(value, identity):
                 and value['evidence_kind'] == 'actual-installed-graph-owner' and set(steps) == REQUIRED
                 and steps['service_comparison']['unknown_properties_preserved'] is True
                 and event_proof_valid(steps['systemd_events'], identity['boot_id'])
+                and device_proof_valid(steps['startup_devices'], identity)
                 and steps['startup_generations']['execution_authority'] is False
                 and steps['startup_generations']['data']['freshness'] == 'Current'
                 and steps['startup_generations']['data']['pointers']['running_closure'] == identity['current_system']
