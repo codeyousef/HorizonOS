@@ -4,9 +4,13 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, pa
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use std::{fs::{self,File,OpenOptions},os::unix::{fs::{MetadataExt,OpenOptionsExt},io::AsRawFd},
-    path::Path,sync::mpsc::{self,SyncSender,TrySendError},thread::{self,JoinHandle},time::Duration};
+    path::Path,sync::{mpsc::{self,SyncSender,TrySendError},Arc,atomic::{AtomicBool,Ordering}},thread::{self,JoinHandle},time::Duration};
 
 mod evidence;
+mod reconcile;
+mod edges;
+pub use edges::{Relation, Certainty, EdgeInput, StoredEdge};
+pub use reconcile::{ProviderStatus, ProviderState, ProviderSnapshot, ProviderEvent, EventKind, ReconcileReason, ReconcilePlan};
 pub use evidence::{EvidenceInput, ObservationInput, ResolvedEvidence, SourceLocator, ViewerTarget, DocumentRange, Sensitivity, ReadPurpose};
 
 const SCHEMA: &str = include_str!("schema.sql");
@@ -184,29 +188,100 @@ impl Database {
         Ok(result)
     }
 }
-enum Request { Write(Vec<Node>,SyncSender<Result<()>>), Read(Vec<String>,SyncSender<Result<Vec<StoredNode>>>),
+enum Request {
+    #[cfg(test)] TestPause(SyncSender<()>,mpsc::Receiver<()>),
+    AppendEdges(Vec<EdgeInput>,Certainty,String,super::ObservationTime,super::SourceRevision,SyncSender<Result<()>>),
+    ReadEdges(Vec<String>,String,super::ObservationTime,super::SourceRevision,ReadPurpose,SyncSender<Result<Vec<StoredEdge>>>),
+    Write(Vec<Node>,SyncSender<Result<()>>), Read(Vec<String>,SyncSender<Result<Vec<StoredNode>>>),
     AppendEvidence(ObservationInput,EvidenceInput,SyncSender<Result<()>>),
-    ResolveEvidence(String,String,super::ObservationTime,super::SourceRevision,ReadPurpose,SyncSender<Result<ResolvedEvidence>>) }
-pub struct GraphStore { sender:Option<SyncSender<Request>>,worker:Option<JoinHandle<()>> }
+    ResolveEvidence(String,String,super::ObservationTime,super::SourceRevision,ReadPurpose,SyncSender<Result<ResolvedEvidence>>),
+    Snapshot(ProviderSnapshot,SyncSender<Result<ProviderState>>), Events(String,Vec<ProviderEvent>,SyncSender<Result<ProviderState>>),
+    Plan(String,super::ObservationTime,super::SourceRevision,SyncSender<Result<ReconcilePlan>>) }
+impl Request {
+    fn fail(self,error:Error){match self{
+        #[cfg(test)] Self::TestPause(started,_)=>{let _=started.send(());},
+        Self::Write(_,reply)|Self::AppendEvidence(_,_,reply)|Self::AppendEdges(_,_,_,_,_,reply)=>{let _=reply.send(Err(error));},
+        Self::ReadEdges(_,_,_,_,_,reply)=>{let _=reply.send(Err(error));},
+        Self::Read(_,reply)=>{let _=reply.send(Err(error));},Self::ResolveEvidence(_,_,_,_,_,reply)=>{let _=reply.send(Err(error));},
+        Self::Snapshot(_,reply)|Self::Events(_,_,reply)=>{let _=reply.send(Err(error));},Self::Plan(_,_,_,reply)=>{let _=reply.send(Err(error));},
+    }}
+}
+pub struct GraphStore { sender:Option<SyncSender<Request>>,worker:Option<JoinHandle<()>>,overflow:Arc<AtomicBool> }
 impl GraphStore {
     /// The trusted owner selects Scope from authenticated native identity.
     /// Callers must not choose database scope from model request fields.
     pub fn open(directory:&Path,scope:Scope)->Result<Self> {
-        let mut db=Database::open(directory,scope)?;let (sender,receiver)=mpsc::sync_channel(QUEUE);
+        let mut db=Database::open(directory,scope)?;
+        // A new owner may have missed events before admission loss was written.
+        // Resample persisted providers even when the host boot did not change.
+        db.owner_started()?;
+        let (sender,receiver)=mpsc::sync_channel::<Request>(QUEUE);
+        let overflow=Arc::new(AtomicBool::new(false));let worker_overflow=overflow.clone();
         let worker=thread::Builder::new().name("aios-graph-store".into()).spawn(move||{
-            while let Ok(request)=receiver.recv(){match request {
+            while let Ok(request)=receiver.recv(){
+                // Admission loss cannot be silently mistaken for a complete
+                // provider stream. The next serialized operation persists it.
+                if worker_overflow.swap(false,Ordering::AcqRel){
+                    if let Err(error)=db.overflow(){worker_overflow.store(true,Ordering::Release);request.fail(error);continue;}
+                }
+                match request {
+                #[cfg(test)] Request::TestPause(started,resume)=>{let _=started.send(());let _=resume.recv();},
+                Request::AppendEdges(edges,certainty,binding,now,revision,reply)=>{let _=reply.send(db.append_edges(scope,edges,certainty,&binding,&now,&revision));},
+                Request::ReadEdges(ids,binding,now,revision,purpose,reply)=>{let _=reply.send(db.read_edges(scope,ids,&binding,&now,&revision,purpose));},
+                Request::Snapshot(snapshot,reply)=>{let _=reply.send(db.snapshot(scope,snapshot));},
+                Request::Events(provider,events,reply)=>{let _=reply.send(db.events(scope,&provider,events));},
+                Request::Plan(provider,now,revision,reply)=>{let _=reply.send(db.reconcile_plan(&provider,&now,&revision));},
                 Request::Write(nodes,reply)=>{let _=reply.send(db.write(scope,nodes));},
                 Request::Read(ids,reply)=>{let _=reply.send(db.read(scope,ids));},
                 Request::AppendEvidence(observation,evidence,reply)=>{let _=reply.send(db.append_evidence(scope,observation,evidence));},
                 Request::ResolveEvidence(id,binding,now,revision,purpose,reply)=>{let _=reply.send(db.resolve_evidence(scope,&id,&binding,&now,&revision,purpose));},
             }}
         }).map_err(|_|Error::Storage)?;
-        Ok(Self{sender:Some(sender),worker:Some(worker)})
+        Ok(Self{sender:Some(sender),worker:Some(worker),overflow})
     }
     fn send(&self,request:Request)->Result<()> {
         self.sender.as_ref().ok_or(Error::Storage)?.try_send(request).map_err(|error|match error {
-            TrySendError::Full(_)=>Error::ResourceExhausted,TrySendError::Disconnected(_)=>Error::Storage,
+            TrySendError::Full(_)=>{self.overflow.store(true,Ordering::Release);Error::ResourceExhausted},TrySendError::Disconnected(_)=>Error::Storage,
         })
+    }
+    /// Provider identifiers, clocks and revisions originate in native adapters.
+    /// A complete snapshot replaces only this fixed scope/provider/truth. A
+    /// partial one preserves the previous nodes and explicitly reports Partial.
+    pub fn apply_provider_snapshot(&self,snapshot:ProviderSnapshot)->Result<ProviderState>{
+        reconcile::validate_snapshot(&snapshot)?;
+        let (reply,receiver)=mpsc::sync_channel(1);self.send(Request::Snapshot(snapshot,reply))?;receiver.recv().map_err(|_|Error::Storage)?
+    }
+    pub fn ingest_provider_events(&self,provider:String,events:Vec<ProviderEvent>)->Result<ProviderState>{
+        reconcile::validate_events(&provider,&events)?;
+        let (reply,receiver)=mpsc::sync_channel(1);self.send(Request::Events(provider,events,reply))?;receiver.recv().map_err(|_|Error::Storage)?
+    }
+    /// Called with live boot/generation/profile observations and monotonic time.
+    /// The result requests native resampling only; it never invokes inference.
+    pub fn reconciliation_plan(&self,provider:String,now:super::ObservationTime,revision:super::SourceRevision)->Result<ReconcilePlan>{
+        if !key(&provider,64){return Err(Error::Invalid);}
+        reconcile::validate_context(&now,&revision)?;
+        let (reply,receiver)=mpsc::sync_channel(1);self.send(Request::Plan(provider,now,revision,reply))?;receiver.recv().map_err(|_|Error::Storage)?
+    }
+    /// Report loss discovered upstream even if the store's queue did not fill.
+    /// All provider snapshots are conservatively invalidated on the next read.
+    pub fn report_event_loss(&self){self.overflow.store(true,Ordering::Release);}
+    /// Native producers may record only relations explicitly present in the
+    /// sealed observation. After= remains OrderedAfter, never a causal claim.
+    pub fn append_observed_edges(&self,edges:Vec<EdgeInput>,binding:String,now:super::ObservationTime,revision:super::SourceRevision)->Result<()>{
+        self.append_edges(edges,Certainty::Observed,binding,now,revision)
+    }
+    pub fn append_hypotheses(&self,edges:Vec<EdgeInput>,binding:String,now:super::ObservationTime,revision:super::SourceRevision)->Result<()>{
+        self.append_edges(edges,Certainty::Hypothesis,binding,now,revision)
+    }
+    fn append_edges(&self,edges:Vec<EdgeInput>,certainty:Certainty,binding:String,now:super::ObservationTime,revision:super::SourceRevision)->Result<()>{
+        if !edges::valid(&edges)||!key(&binding,128){return Err(Error::Invalid);}
+        reconcile::validate_context(&now,&revision)?;
+        let (reply,receiver)=mpsc::sync_channel(1);self.send(Request::AppendEdges(edges,certainty,binding,now,revision,reply))?;receiver.recv().map_err(|_|Error::Storage)?
+    }
+    pub fn edges(&self,ids:Vec<String>,binding:String,now:super::ObservationTime,revision:super::SourceRevision,purpose:ReadPurpose)->Result<Vec<StoredEdge>>{
+        if ids.is_empty()||ids.len()>BATCH||ids.iter().any(|id|!key(id,128))||!key(&binding,128){return Err(Error::Invalid);}
+        reconcile::validate_context(&now,&revision)?;
+        let (reply,receiver)=mpsc::sync_channel(1);self.send(Request::ReadEdges(ids,binding,now,revision,purpose,reply))?;receiver.recv().map_err(|_|Error::Storage)?
     }
     pub fn upsert_nodes(&self,nodes:Vec<Node>)->Result<()> {
         // Reject oversized allocations before enqueueing. Payload validation is
@@ -230,6 +305,7 @@ impl GraphStore {
     pub fn resolve_evidence(&self,id:String,authenticated_binding:String,now:super::ObservationTime,
         live_revision:super::SourceRevision,purpose:ReadPurpose)->Result<ResolvedEvidence> {
         if !key(&id,128) || !key(&authenticated_binding,128) {return Err(Error::Invalid);}
+        reconcile::validate_context(&now,&live_revision)?;
         let (reply,receiver)=mpsc::sync_channel(1);
         self.send(Request::ResolveEvidence(id,authenticated_binding,now,live_revision,purpose,reply))?;receiver.recv().map_err(|_|Error::Storage)?
     }

@@ -105,7 +105,7 @@ pub(super) fn validate(observation:&ObservationInput,evidence:&EvidenceInput)->R
         || !bounded_properties(&observation.payload) {return Err(Error::Invalid);}
     if observation.time.realtime_ns.checked_add(evidence.access_lifetime_ns).is_none_or(|n|n>i64::MAX as u64)
         || observation.time.monotonic_ns.checked_add(evidence.access_lifetime_ns).is_none(){return Err(Error::Invalid);}
-    let _=encoded(&evidence.source_revision)?;Ok(())
+    super::reconcile::validate_context(&observation.time,&evidence.source_revision)?;Ok(())
 }
 impl Database {
     pub(super) fn append_evidence(&mut self,scope:Scope,observation:ObservationInput,evidence:EvidenceInput)->Result<()> {
@@ -159,6 +159,9 @@ impl Database {
             || payload.time!=envelope.captured || payload.sensitivity.text()!=sensitivity {return Err(Error::Corrupt);}
         let mut fresh=freshness(envelope.freshness_class,&envelope.captured,now,&envelope.source_revision,revision);
         if u64::try_from(current_revision).ok()!=Some(payload.entity_revision){fresh=Freshness::Stale;}
+        // Persisted provider loss/revision changes invalidate even a young cache.
+        let plan=self.reconcile_plan(&provider,now,revision)?;
+        if plan.state.is_some() && plan.reason.is_some(){fresh=Freshness::Stale;}
         if purpose==ReadPurpose::Current && fresh!=Freshness::Current{return Err(Error::StaleEvidence);}
         let sensitivity=match sensitivity.as_str(){"public"=>Sensitivity::Public,"private"=>Sensitivity::Private,"restricted"=>Sensitivity::Restricted,_=>return Err(Error::Corrupt)};
         if scope==Scope::System && sensitivity!=Sensitivity::Public{return Err(Error::Corrupt);}

@@ -96,3 +96,107 @@ fn resolve(store:&GraphStore,now:crate::graph::ObservationTime,purpose:ReadPurpo
         let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();assert_eq!(resolve(&store,observation_time(2),ReadPurpose::Current),Err(Error::Corrupt));
     }
 }
+fn provider_snapshot(token:Option<String>,mono:u64,ids:&[&str])->ProviderSnapshot {
+    let time=observation_time(mono);let mut nodes=Vec::new();for id in ids{let mut n=node(id);n.realtime_ns=time.realtime_ns;nodes.push(n);}
+    ProviderSnapshot{provider:"native-systemd".into(),expected_token:token,source_truth:SourceTruth::Running,time,
+        source_revision:crate::graph::SourceRevision::default(),complete:true,nodes}
+}
+#[test] fn complete_provider_replacement_is_atomic_and_partial_keeps_prior_nodes(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();
+    let first=store.apply_provider_snapshot(provider_snapshot(None,1,&["a","b"])).unwrap();assert_eq!(first.status,ProviderStatus::Ready);
+    let mut partial=provider_snapshot(Some(first.token.clone()),2,&["a"]);partial.complete=false;
+    let partial=store.apply_provider_snapshot(partial).unwrap();assert_eq!(partial.status,ProviderStatus::Partial);assert_eq!(store.nodes(vec!["a".into(),"b".into()]).unwrap().len(),2);
+    let fresh=store.apply_provider_snapshot(provider_snapshot(Some(partial.token),3,&["a"])).unwrap();assert_eq!(store.nodes(vec!["b".into()]).unwrap().len(),0);
+    let mut conflict=provider_snapshot(Some(fresh.token.clone()),4,&["a","c"]);conflict.nodes[0].stable_key="changed-native-identity".into();
+    assert_eq!(store.apply_provider_snapshot(conflict),Err(Error::IdentityChanged));assert_eq!(store.nodes(vec!["a".into(),"c".into()]).unwrap().len(),1);
+    let state=store.reconciliation_plan("native-systemd".into(),observation_time(4),crate::graph::SourceRevision::default()).unwrap().state.unwrap();assert_eq!(state.token,fresh.token);
+}
+#[test] fn provider_reconciliation_uses_live_boot_revision_and_exact_period(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();let provider="native-systemd".to_string();let revision=crate::graph::SourceRevision::default();
+    assert_eq!(store.reconciliation_plan(provider.clone(),observation_time(1),revision.clone()).unwrap().reason,Some(ReconcileReason::Unknown));
+    store.apply_provider_snapshot(provider_snapshot(None,10,&["a"])).unwrap();
+    assert_eq!(store.reconciliation_plan(provider.clone(),observation_time(900_000_000_009),revision.clone()).unwrap().reason,None);
+    assert_eq!(store.reconciliation_plan(provider.clone(),observation_time(900_000_000_010),revision.clone()).unwrap().reason,Some(ReconcileReason::Periodic));
+    assert_eq!(store.reconciliation_plan(provider.clone(),observation_time(9),revision.clone()).unwrap().reason,Some(ReconcileReason::ClockUnknown));
+    let mut reboot=observation_time(11);reboot.boot=crate::graph::BootId::parse("22222222-2222-4222-8222-222222222222").unwrap();
+    assert_eq!(store.reconciliation_plan(provider.clone(),reboot,revision.clone()).unwrap().reason,Some(ReconcileReason::BootChanged));
+    let mut changed=revision;changed.profile=Some("native-manual-generation".into());
+    assert_eq!(store.reconciliation_plan(provider,observation_time(11),changed).unwrap().reason,Some(ReconcileReason::RevisionChanged));
+}
+fn provider_event(id:&str)->ProviderEvent{ProviderEvent{id:id.into(),entity_id:Some("a".into()),kind:EventKind::Changed,time:observation_time(2),origin_transaction_id:None,payload:serde_json::json!({"changed":true})}}
+#[test] fn deduplicated_events_invalidate_snapshot_and_reject_racing_replacement(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();let provider="native-systemd".to_string();
+    let first=store.apply_provider_snapshot(provider_snapshot(None,1,&["a"])).unwrap();
+    let dirty=store.ingest_provider_events(provider.clone(),vec![provider_event("event:a"),provider_event("event:a")]).unwrap();assert_eq!(dirty.status,ProviderStatus::ReconcileRequired);assert_ne!(first.token,dirty.token);
+    let duplicate=store.ingest_provider_events(provider.clone(),vec![provider_event("event:a")]).unwrap();assert_eq!(duplicate.token,dirty.token);
+    let mut rebound=provider_event("event:a");rebound.payload=Value::Null;assert_eq!(store.ingest_provider_events(provider.clone(),vec![rebound]),Err(Error::IdentityChanged));
+    assert_eq!(store.apply_provider_snapshot(provider_snapshot(Some(first.token),3,&["a"])),Err(Error::IdentityChanged));
+    let other=store.ingest_provider_events(provider.clone(),vec![provider_event("event:b")]).unwrap();assert_ne!(other.token,dirty.token);
+    assert_eq!(store.apply_provider_snapshot(provider_snapshot(Some(dirty.token),3,&["a"])),Err(Error::IdentityChanged));
+    store.apply_provider_snapshot(provider_snapshot(Some(other.token),4,&["a"])).unwrap();
+    assert_eq!(store.reconciliation_plan(provider,observation_time(5),crate::graph::SourceRevision::default()).unwrap().reason,None);
+    drop(store);let db=Connection::open(temp.0.join("graph.sqlite3")).unwrap();let count:i64=db.query_row("SELECT count(*) FROM events",[],|r|r.get(0)).unwrap();assert_eq!(count,2);
+}
+#[test] fn event_flood_retention_and_explicit_loss_reconcile_without_inference(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();let provider="native-systemd".to_string();
+    store.apply_provider_snapshot(provider_snapshot(None,1,&["a"])).unwrap();
+    for batch in 0..66{store.ingest_provider_events(provider.clone(),(0..64).map(|n|provider_event(&format!("event:{}",batch*64+n))).collect()).unwrap();}
+    store.report_event_loss();let plan=store.reconciliation_plan(provider,observation_time(3),crate::graph::SourceRevision::default()).unwrap();assert_eq!(plan.reason,Some(ReconcileReason::Invalidated));assert_eq!(plan.state.unwrap().error.unwrap()["code"],"event_queue_overflow");
+    drop(store);let db=Connection::open(temp.0.join("graph.sqlite3")).unwrap();let count:i64=db.query_row("SELECT count(*) FROM events",[],|r|r.get(0)).unwrap();assert_eq!(count,4096);
+}
+#[test] fn native_edges_require_declared_relation_and_hypotheses_remain_separate(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();store.upsert_nodes(vec![node("a"),node("b")]).unwrap();
+    let (mut o,e)=records();o.payload=serde_json::json!({"relations":[{"to_id":"b","relation":"ordered_after"}]});store.append_evidence(o,e).unwrap();
+    let edge=EdgeInput{id:"edge:ordering".into(),from_id:"a".into(),to_id:"b".into(),relation:Relation::OrderedAfter,evidence_id:"evidence:a".into()};
+    let binding="origin:1.99:scope:a".to_string();let revision=crate::graph::SourceRevision::default();
+    store.append_observed_edges(vec![edge.clone()],binding.clone(),observation_time(2),revision.clone()).unwrap();
+    let mut inferred=edge.clone();inferred.id="edge:hypothesis".into();inferred.relation=Relation::DependsOn;
+    assert_eq!(store.append_observed_edges(vec![inferred.clone()],binding.clone(),observation_time(2),revision.clone()),Err(Error::Invalid));
+    store.append_hypotheses(vec![inferred],binding.clone(),observation_time(2),revision.clone()).unwrap();
+    let edges=store.edges(vec![edge.id,"edge:hypothesis".into()],binding,observation_time(2),revision.clone(),ReadPurpose::Current).unwrap();
+    assert_eq!(edges[0].certainty,Certainty::Observed);assert_eq!(edges[0].relation,Relation::OrderedAfter);assert_eq!(edges[1].certainty,Certainty::Hypothesis);assert_eq!(edges[1].provider,"reasoning-hypothesis");
+    assert_eq!(store.edges(vec!["edge:ordering".into()],"origin:foreign".into(),observation_time(2),revision,ReadPurpose::Current),Err(Error::WrongScope));
+}
+#[test] fn provider_loss_invalidates_young_evidence_and_tampered_edges_are_refused(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();store.apply_provider_snapshot(provider_snapshot(None,1,&["a","b"])).unwrap();
+    let (mut o,e)=records();o.payload=serde_json::json!({"relations":[{"to_id":"b","relation":"ordered_after"}]});store.append_evidence(o,e).unwrap();
+    let edge=EdgeInput{id:"edge:a".into(),from_id:"a".into(),to_id:"b".into(),relation:Relation::OrderedAfter,evidence_id:"evidence:a".into()};
+    let binding="origin:1.99:scope:a".to_string();let revision=crate::graph::SourceRevision::default();store.append_observed_edges(vec![edge],binding.clone(),observation_time(2),revision.clone()).unwrap();
+    store.report_event_loss();assert_eq!(resolve(&store,observation_time(3),ReadPurpose::Current),Err(Error::StaleEvidence));
+    assert_eq!(resolve(&store,observation_time(3),ReadPurpose::Diagnostic).unwrap().freshness,crate::graph::Freshness::Stale);
+    drop(store);let db=Connection::open(temp.0.join("graph.sqlite3")).unwrap();db.execute_batch("UPDATE edges SET relation='depends_on'").unwrap();drop(db);
+    let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();assert_eq!(store.edges(vec!["edge:a".into()],binding,observation_time(3),revision,ReadPurpose::Diagnostic),Err(Error::Corrupt));
+}
+#[test] fn actual_full_queue_returns_bounded_error_and_persists_loss_before_next_read(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();store.apply_provider_snapshot(provider_snapshot(None,1,&["a"])).unwrap();
+    let (started,ready)=mpsc::sync_channel(1);let (resume,wait)=mpsc::sync_channel(1);
+    // A test-only rendezvous holds the actual actor, allowing deterministic
+    // saturation of its real bounded queue without relying on scheduler timing.
+    struct Resume(SyncSender<()>);impl Drop for Resume{fn drop(&mut self){let _=self.0.send(());}}
+    store.send(Request::TestPause(started,wait)).unwrap();let release=Resume(resume);ready.recv().unwrap();
+    let mut replies=Vec::new();for _ in 0..QUEUE{let (reply,receive)=mpsc::sync_channel(1);store.send(Request::Read(vec!["a".into()],reply)).unwrap();replies.push(receive);}
+    let (reply,_)=mpsc::sync_channel(1);assert_eq!(store.send(Request::Read(vec!["a".into()],reply)),Err(Error::ResourceExhausted));drop(release);
+    for reply in replies{assert_eq!(reply.recv().unwrap().unwrap().len(),1);}
+    let state=store.reconciliation_plan("native-systemd".into(),observation_time(2),crate::graph::SourceRevision::default()).unwrap().state.unwrap();
+    assert_eq!(state.status,ProviderStatus::ReconcileRequired);assert_eq!(state.error.unwrap()["code"],"event_queue_overflow");
+    assert_eq!(store.apply_provider_snapshot(provider_snapshot(Some(state.token),3,&["a"])).unwrap().status,ProviderStatus::Ready);
+}
+#[test] fn snapshot_provider_scope_count_and_context_bounds_preserve_prior_state(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();let first=store.apply_provider_snapshot(provider_snapshot(None,1,&["a"])).unwrap();
+    let mut foreign=provider_snapshot(Some(first.token.clone()),2,&["a"]);foreign.nodes[0].scope=Scope::User(1001);assert_eq!(store.apply_provider_snapshot(foreign),Err(Error::WrongScope));
+    let mut big=provider_snapshot(Some(first.token.clone()),2,&["a"]);big.nodes=vec![node("a");8193];assert_eq!(store.apply_provider_snapshot(big),Err(Error::ResourceExhausted));
+    let mut revision=crate::graph::SourceRevision::default();revision.profile=Some("x".repeat(2049));
+    assert_eq!(store.reconciliation_plan("native-systemd".into(),observation_time(2),revision),Err(Error::ResourceExhausted));
+    assert_eq!(store.ingest_provider_events("foreign-provider".into(),vec![provider_event("foreign-event")]),Err(Error::WrongScope));
+    for n in 0..127{let mut snapshot=provider_snapshot(None,2,&[]);snapshot.provider=format!("provider:{n}");store.apply_provider_snapshot(snapshot).unwrap();}
+    let mut excess=provider_snapshot(None,2,&[]);excess.provider="provider:excess".into();assert_eq!(store.apply_provider_snapshot(excess),Err(Error::ResourceExhausted));
+    assert_eq!(store.reconciliation_plan("native-systemd".into(),observation_time(2),crate::graph::SourceRevision::default()).unwrap().state.unwrap().token,first.token);
+    assert_eq!(store.nodes(vec!["a".into()]).unwrap().len(),1);
+}
+#[test] fn reopened_owner_requires_resampling_even_in_the_same_boot(){
+    let temp=Temporary::new();let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();let before=store.apply_provider_snapshot(provider_snapshot(None,1,&["a"])).unwrap();drop(store);
+    let store=GraphStore::open(&temp.0,Scope::User(1000)).unwrap();let plan=store.reconciliation_plan("native-systemd".into(),observation_time(2),crate::graph::SourceRevision::default()).unwrap();
+    assert_eq!(plan.reason,Some(ReconcileReason::Invalidated));let state=plan.state.unwrap();assert_eq!(state.error.unwrap()["code"],"graph_owner_started");assert_ne!(state.token,before.token);
+    assert_eq!(store.apply_provider_snapshot(provider_snapshot(Some(before.token),3,&["a"])),Err(Error::IdentityChanged));
+    assert_eq!(store.apply_provider_snapshot(provider_snapshot(Some(state.token),3,&["a"])).unwrap().status,ProviderStatus::Ready);
+}
