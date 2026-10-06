@@ -288,7 +288,7 @@ fn qualify_broker_bridge(display:&DisplayBinding,window:&WindowBinding){
     }
     let candidates=WindowBinding::discover(display,&AtomicU8::new(0)).unwrap();
     assert_eq!(candidates.len(),1,"production provider must exclude its permission UI");assert_eq!(candidates[0].title,window.title);
-    let input=native_confirmation::allow_owned_read(display,&goal,&selected_window,&window.title,windows[0]["identity_sha256"].as_str().unwrap());
+    let input=native_confirmation::allow_owned_selector_read(display,&goal,&selected_window,&window.title,windows[0]["identity_sha256"].as_str().unwrap());
     let until=Instant::now()+Duration::from_secs(8);
     let completed=loop{
         let status=client.call(json!({"kind":"get_ui_read_status","task_id":allowed_task})).unwrap();assert!(status.error.is_none(),"{status:?}");

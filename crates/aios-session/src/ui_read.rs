@@ -100,6 +100,9 @@ pub struct NativeReadTask {
     pending:Option<ReadConfirmation>,grant:Option<policy::ReadGrant>,control:Arc<AtomicU8>,
 }
 pub struct NativeReadStop { control:Arc<AtomicU8>, cancellation:ReadCancellation }
+/// Selected by the authenticated provider route, never by a model field or
+/// presentation text. Inference reads do not inherit selector authority.
+pub(crate) enum ReadAccess { Snapshot, SnapshotAndSelectors }
 impl NativeReadStop {
     pub fn stop(&self){self.control.store(1,Ordering::Release);self.cancellation.cancel();}
 }
@@ -108,10 +111,10 @@ impl NativeReadTask {
     /// selection. WindowBinding has no request/model deserializer.
     pub fn begin(origin:OriginatingClient,window:WindowBinding,goal:&str,mode:policy::Mode,
         target:String,profile:String,control:Arc<AtomicU8>)->Result<Self>{
-        Self::begin_owned(origin,window,goal,mode,target,profile,control,uuid::Uuid::new_v4().to_string())
+        Self::begin_owned(origin,window,goal,mode,target,profile,control,uuid::Uuid::new_v4().to_string(),ReadAccess::Snapshot)
     }
     pub(crate) fn begin_owned(origin:OriginatingClient,window:WindowBinding,goal:&str,mode:policy::Mode,
-        target:String,profile:String,control:Arc<AtomicU8>,request_id:String)->Result<Self>{
+        target:String,profile:String,control:Arc<AtomicU8>,request_id:String,access:ReadAccess)->Result<Self>{
         if !crate::uuid(&request_id){return Err(ErrorCode::InvalidArgument);}
         if control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
         origin.verify()?;window.verify()?;
@@ -119,10 +122,14 @@ impl NativeReadTask {
         let policy=policy::Policy::new(subject.boot_id.clone(),policy::registry_revision())?;
         let intent=policy.authenticated_user_intent(subject.clone(),request_id.clone(),goal,mode)?;
         let display=window.selected_display();
-        let proposal=policy.propose_graphical_selector_read(intent,NativeDesktop{uid:display.session.uid,boot_id:display.boot_id.clone(),
-            session_id:display.session.id.clone(),identity_sha256:policy::digest(display)?,socket_name:display.socket_name.clone()},
-            ReadPresentation{target,profile,goal:goal.into(),windows:vec![SelectedWindow{handle:window.handle.clone(),identity_sha256:window.identity_sha256()?,
-                name:window.name.clone(),window:window.title.clone()}],evidence:vec![]},90_000)?;
+        let desktop=NativeDesktop{uid:display.session.uid,boot_id:display.boot_id.clone(),
+            session_id:display.session.id.clone(),identity_sha256:policy::digest(display)?,socket_name:display.socket_name.clone()};
+        let presentation=ReadPresentation{target,profile,goal:goal.into(),windows:vec![SelectedWindow{handle:window.handle.clone(),identity_sha256:window.identity_sha256()?,
+            name:window.name.clone(),window:window.title.clone()}],evidence:vec![]};
+        let proposal=match access {
+            ReadAccess::Snapshot=>policy.propose_graphical_read(intent,desktop,presentation,90_000),
+            ReadAccess::SnapshotAndSelectors=>policy.propose_graphical_selector_read(intent,desktop,presentation,90_000),
+        }?;
         let pending=proposal.launch(&policy,&subject,&Resources(&window))?;
         let mut task=Self{origin,window,policy,request_id,pending:Some(pending),grant:None,control};
         task.check_origin()?;Ok(task)

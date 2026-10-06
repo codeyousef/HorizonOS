@@ -332,4 +332,12 @@ that page generation, selected window and native ancestry. It re-resolves the
 page under the original caller and delivered native read grant before and after
 matching. This derived check exports no grant and extends no expiry. A stale
 page, scope change, Stop or disconnected caller ends the read without retry.
+The provider chooses read purpose from its authenticated route, never from
+presentation text or a model argument. Public inference and direct native reads
+request only `ui.snapshot`; explicit managed window inspection requests
+`ui.snapshot` and `ui.find`. A shared constructor must not expand inference
+consent to selector access. Both purposes retain the same originating client,
+window, display, expiry and cancellation checks. Policy revision changes
+invalidate earlier volatile authority.
+
 The selector route does not authorize input or advertise a model capability.

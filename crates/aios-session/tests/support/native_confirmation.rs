@@ -53,14 +53,14 @@ fn provider(bus:&Connection,program:&str)->u32{
 
 /// Invoke one native action, only after observing this exact synthetic request
 /// in the renderer owned by the canonical managed provider. No retry of input.
-pub fn allow_owned_read(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_identity:&str)->serde_json::Value{
-    allow_owned(display,goal,Expected::Read{window,title,identity:window_identity,profile:"Local CPU (observation only; no model requested)"})
+pub fn allow_owned_selector_read(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_identity:&str)->serde_json::Value{
+    allow_owned(display,goal,Expected::Read{window,title,identity:window_identity,profile:"Local CPU (observation only; no model requested)",actions:"ui.find, ui.snapshot"})
 }
 pub fn allow_owned_task_read(display:&DisplayBinding,goal:&str,window:&str,title:&str,window_identity:&str)->serde_json::Value{
-    allow_owned(display,goal,Expected::Read{window,title,identity:window_identity,profile:"Local CPU (normal; read-only task inference)"})
+    allow_owned(display,goal,Expected::Read{window,title,identity:window_identity,profile:"Local CPU (normal; read-only task inference)",actions:"ui.snapshot"})
 }
 enum Expected<'a>{
-    Read{window:&'a str,title:&'a str,identity:&'a str,profile:&'a str},
+    Read{window:&'a str,title:&'a str,identity:&'a str,profile:&'a str,actions:&'a str},
     Termination{process:&'a aios_system::processes::OwnProcess,identity:aios_system::processes::Identity,handle:&'a str,closure:String},
 }
 /// Only the owned controlled child may be confirmed, with its live retained
@@ -128,9 +128,9 @@ fn allow_owned(display:&DisplayBinding,goal:&str,expected:Expected<'_>)->serde_j
     assert!(labels.contains(&format!("Target: {}\nDesktop: {} · User: 1001",hostname.trim(),display.session.id)));
     assert!(labels.contains(&format!("Local / CPU: {profile}\nMode: {mode}")));
     match &expected{
-        Expected::Read{window,title,identity,..}=>{
+        Expected::Read{window,title,identity,actions,..}=>{
             assert!(labels.iter().any(|v|v.contains(title) && v.contains(&format!("Resource: {window}")) && v.contains(&format!("Identity: {identity}"))),"selected native window mismatch");
-            assert!(labels.contains(&"Read access: ui.snapshot\nNo input or external effects are authorized by this read scope.".into()));
+            assert!(labels.contains(&format!("Read access: {actions}\nNo input or external effects are authorized by this read scope.")),"read-class label mismatch: expected {actions:?}; actual scope labels: {:?}",labels.iter().filter(|v|v.starts_with("Read access:")).collect::<Vec<_>>());
         }
         Expected::Termination{process,identity,handle,closure}=>{
             assert_eq!(process.inspect().unwrap().identity,*identity);

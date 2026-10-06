@@ -192,7 +192,8 @@ fn run_read(work:Arc<Mutex<ReadWork>>,origin:OriginatingClient,window:WindowBind
         let hostname=fs::read_to_string("/proc/sys/kernel/hostname").map_err(|_|ErrorCode::TargetChanged)?.trim().to_owned();
         if hostname.is_empty() || hostname.len()>128 || hostname.chars().any(char::is_control){return Err(ErrorCode::TargetChanged);}
         let profile=if public{"Local CPU (normal; read-only task inference)"}else{"Local CPU (observation only; no model requested)"};
-        let mut task=NativeReadTask::begin_owned(origin,window,&goal,mode,hostname,profile.into(),control.clone(),id.clone())?;
+        let access=if public{crate::ui_read::ReadAccess::Snapshot}else{crate::ui_read::ReadAccess::SnapshotAndSelectors};
+        let mut task=NativeReadTask::begin_owned(origin,window,&goal,mode,hostname,profile.into(),control.clone(),id.clone(),access)?;
         let stop=task.stop_handle()?;
         {let mut work=work.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
             if control.load(Ordering::Acquire)!=0{stop.stop();return Err(ErrorCode::Cancelled);}
