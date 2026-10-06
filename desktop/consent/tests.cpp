@@ -1,5 +1,6 @@
 #include "scope_dialog.hpp"
 #include <QAccessible>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -19,10 +20,52 @@ static QJsonObject fixture(quint64 lifetime=10000) {
         {"issued_ms",qint64(now)},{"expires_ms",qint64(now+lifetime)},
         {"evidence",QJsonArray{"fixture-native-observation"}}};
 }
+static QJsonObject processFixture() {
+    auto o=fixture();o["kind"]="process_termination";o["mode"]="act";o.remove("apps");
+    o["process_id"]="abbccdde-1234-4567-89ab-abbccddeeff0";
+    o["actions"]=QJsonArray{"process.terminate"};o["closure"]="/nix/store/"+QString(32,'0')+"-nixos-system-aios-dev";
+    QFile boot("/proc/sys/kernel/random/boot_id");if (!boot.open(QIODevice::ReadOnly)) qFatal("native boot unavailable");
+    o["preview"]=QJsonObject{{"identity",QJsonObject{{"pid",qint64(getpid()+10)},{"uid",qint64(geteuid())},
+        {"start_time_ticks",12345},{"boot_id",QString::fromLatin1(boot.read(64)).trimmed()},
+        {"executable_identity","dev=1;ino=2;size=3;mtime=4:5;ctime=6:7"}}},
+        {"signal","SIGTERM"},{"verification_timeout_ms",1000},{"reversible",false},{"automatic_escalation",false}};
+    return o;
+}
 static QByteArray wire(const QJsonObject &o) {return QJsonDocument(o).toJson(QJsonDocument::Compact);}
 class ConsentTests : public QObject {
     Q_OBJECT
 private slots:
+    void terminationRejectsExpandedEffectsAndIdentityDrift() {
+        QVERIFY(ScopePreview::parse(wire(processFixture())));
+        for (int field=0;field<12;field++) {
+            auto o=processFixture();auto p=o["preview"].toObject();auto i=p["identity"].toObject();
+            switch(field) {
+                case 0:p["signal"]="SIGKILL";break;case 1:p["automatic_escalation"]=true;break;
+                case 2:p["reversible"]=true;break;case 3:p["verification_timeout_ms"]=30001;break;
+                case 4:i["uid"]=qint64(geteuid()+1);break;case 5:i["pid"]=qint64(getpid());break;
+                case 6:i["boot_id"]="abbccdde-1234-4567-89ab-abbccddeeff0";break;
+                case 7:i["start_time_ticks"]=0;break;case 8:o["actions"]=QJsonArray{"process.terminate","ui.click"};break;
+                case 9:o["mode"]="ask";break;case 10:o["closure"]="/tmp/fake";break;case 11:o["approved"]=true;break;
+            }
+            p["identity"]=i;o["preview"]=p;QVERIFY(!ScopePreview::parse(wire(o)));
+        }
+        auto duplicate=wire(processFixture());duplicate.insert(1,"\"mode\":\"act\",");QVERIFY(!ScopePreview::parse(duplicate));
+    }
+    void terminationDisplaysExactIdentityImpactAndDefaultsToCancel() {
+        auto o=processFixture();auto p=ScopePreview::parse(wire(o));QVERIFY(p);
+        ScopeDialog dialog(*p);QSignalSpy result(&dialog,&ScopeDialog::decision);dialog.show();
+        auto process=dialog.findChild<QLabel *>("process");QVERIFY(process);
+        QVERIFY(process->text().contains(o["process_id"].toString()));QVERIFY(process->text().contains("12345"));
+        QVERIFY(process->text().contains("dev=1;ino=2"));QCOMPARE(process->textFormat(),Qt::PlainText);
+        auto scope=dialog.findChild<QLabel *>("scope");QVERIFY(scope->text().contains("SIGTERM"));
+        QVERIFY(scope->text().contains("1000"));QVERIFY(scope->text().contains("cannot be undone"));
+        QVERIFY(scope->text().contains("No automatic SIGKILL"));
+        auto cancel=dialog.findChild<QPushButton *>("cancel");auto allow=dialog.findChild<QPushButton *>("allow");
+        QCOMPARE(allow->text(),QString("Terminate this process"));QVERIFY(cancel->isDefault());QVERIFY(!allow->isDefault());
+        o["process_id"]="changed";allow->setFocus();QTest::keyClick(allow,Qt::Key_Space);
+        QCOMPARE(result.count(),1);QCOMPARE(result[0][0].toString(),p->digest);QCOMPARE(result[0][1].toBool(),true);
+        QVERIFY(!process->text().contains("changed"));dialog.withdraw();QCOMPARE(result.count(),1);
+    }
     void invalidAuthorityAndExpiry() {
         QVERIFY(ScopePreview::parse(wire(fixture())));
         for (auto key : {"approved","nonce","shell","automation"}) {

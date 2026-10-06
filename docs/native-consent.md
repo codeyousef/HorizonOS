@@ -1,4 +1,4 @@
-# Native application read consent
+# Native consent
 
 `aios-consent-ui` provides a Qt Widgets permission dialog. It displays a single
 immutable, bounded `read_scope` proposal: user, explicitly selected desktop,
@@ -13,7 +13,37 @@ resource resolution, canonical proposal hash, policy revision, boot identity,
 volatile nonce, revocation and issuance. Those bindings must still match after
 the response. A changed resource, disconnected client, cancelled task, expired
 proposal or changed policy requires denial and a fresh proposal. The component
-does not authorize input, writes, external effects or system transactions.
+does not authorize effects merely by rendering a proposal. Read and process
+termination use distinct fixed proposal types and distinct opaque decisions.
+
+The `process_termination` presentation is an exact R2 preview in Act mode. It
+contains one selected owner-bound process handle, native PID/UID/start/boot and
+executable locator, current immutable system closure, one SIGTERM, verification
+timeout, no automatic escalation and irreversible impact. The dialog states
+that work may be interrupted or unsaved data lost, an ignored signal or timeout
+can leave a partial effect, and there is no automatic SIGKILL or retry. Cancel
+remains the default action. The separate button says “Terminate this process”.
+Native boot, own UID, fixed action/signal, bounded timeout and exact closed
+fields are checked before rendering. No application read proposal can be used
+as a termination decision.
+
+`aios-policy::consent::termination` freezes the original authenticated subject,
+request and goal, native display, process identity/handle, current closure,
+fixed effect/verification, registry/policy revision, broker incarnation, volatile
+nonce and expiry into one canonical digest. Its native transport is shared with
+read confirmation: only the compile-pinned child, successful exit and exact
+bounded digest response can produce an opaque decision. Consuming that decision
+revalidates every native resource and returns non-cloneable delivery authority
+for at most two final adapter checks. Each check binds the original task and
+canonical retained-pidfd preview; denial or exhausted checks permanently revoke
+authority. Stop revokes both pending and delivered decisions independently.
+The native broker must reauthenticate the original caller at each boundary and
+resolve real native resources; the policy library is not an identity adapter.
+
+These process types are not yet connected to installed broker/helper
+orchestration or exposed through public signal actions. Policy fixtures and Qt
+widget fixtures do not prove an installed native termination consent or effect.
+Those require source-bound installed service and native interaction qualification.
 
 ## Private transport
 
