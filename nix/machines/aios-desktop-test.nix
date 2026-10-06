@@ -1,5 +1,6 @@
 # Synthetic disposable desktop only. Never import into a production image.
 { config, pkgs, lib, ... }: {
+  imports = [ ./aios-graph-test.nix ];
   services.displayManager.autoLogin = { enable = lib.mkForce true; user = "tester"; };
   services.displayManager.defaultSession = "plasma";
   users.users.tester.extraGroups = lib.mkForce [];
