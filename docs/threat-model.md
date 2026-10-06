@@ -75,10 +75,16 @@ transfers an originating Unix descriptor or a unique bus sender resolved against
 the kernel-authenticated root-associated user bus. No serialized UID/PID/session
 can confer authority. Embedded user policy checks bracket native observations;
 the original caller is reauthenticated before and after each operation. The
-fixed bridge accepts only process.list and process.inspect, with bounded
-owner/expiry handles and cursor state. It has no signal, shell, arbitrary file,
-model or graphical route. Four admitted connections bound native descriptor
-retention; disconnect removes their caller state. Its potential compromise has
+fixed observation bridge accepts process.list and process.inspect, with bounded
+owner/expiry handles and cursor state. Its separate human Act lifecycle permits
+one retained-pidfd SIGTERM only after exact native desktop confirmation of the
+original owner, process identity, selected session and current closure. Model
+tool calls and serialized approval fields cannot enter this route. A dedicated
+broker cancellation socket can only revoke that task, including at final
+delivery checks; no signal override, escalation or numeric-PID fallback exists.
+The component has no shell, arbitrary file, model or desktop input route.
+Four admitted connections and four effect workers bound native descriptor
+retention; disconnect cancels work before shared caller cleanup. Its potential compromise has
 ordinary same-UID filesystem access, explicitly within this native component
 boundary. The orchestration broker's full sandbox remains intact. The component
 starts in the user manager independently of a graphical session and inference.

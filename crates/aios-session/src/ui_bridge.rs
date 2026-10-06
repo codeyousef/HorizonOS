@@ -9,7 +9,7 @@ use nix::sys::socket::{sendmsg,recvmsg,ControlMessage,ControlMessageOwned,MsgFla
 use serde::{Deserialize,Serialize};
 use serde_json::{Value,json,value::RawValue};
 use std::{collections::HashMap,fs,io::{IoSlice,IoSliceMut,Read},net::Shutdown,os::{fd::{AsRawFd,OwnedFd,FromRawFd,RawFd},unix::{fs::{MetadataExt,FileTypeExt},net::UnixStream}},
-    path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicU8,AtomicUsize,Ordering}},time::Duration};
+    path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicBool,AtomicU8,AtomicUsize,Ordering}},time::Duration};
 type Result<T> = std::result::Result<T,ErrorCode>;
 const MARKER:u8=0xa7;
 const BUS_MARKER:u8=0xa8;
@@ -42,6 +42,10 @@ fn receive_proof(bridge:&UnixStream)->Result<TransferredProof>{
         (MARKER,1)=>Ok(TransferredProof::Unix(UnixStream::from(descriptors.remove(0)))),
         (BUS_MARKER,0)=>Ok(TransferredProof::Bus),_=>Err(ErrorCode::PermissionDenied),
     }
+}
+pub(crate) fn receive_cancellation(bridge:&UnixStream,broker:&ManagedService)->Result<UnixStream>{
+    let TransferredProof::Unix(receiver)=receive_proof(bridge)? else{return Err(ErrorCode::PermissionDenied);};
+    broker.verify_cancellation_peer(&receiver)?;Ok(receiver)
 }
 enum Operation {
     Discover{session_id:String},StartRead{window_handle:String,goal:String,mode:String},
@@ -223,12 +227,13 @@ pub fn serve(mut stream:UnixStream)->Result<()>{
     Ok(())
 }
 pub(crate) struct Client{stream:UnixStream,provider:ManagedService}
-pub(crate) struct Cancellation{stream:UnixStream}
+pub(crate) struct Cancellation{stream:UnixStream,cancelled:AtomicBool}
 impl Cancellation {
     pub(crate) fn pair()->Result<(Arc<Self>,UnixStream)>{
-        let (stream,receiver)=UnixStream::pair().map_err(|_|ErrorCode::ResourceExhausted)?;Ok((Arc::new(Self{stream}),receiver))
+        let (stream,receiver)=UnixStream::pair().map_err(|_|ErrorCode::ResourceExhausted)?;Ok((Arc::new(Self{stream,cancelled:AtomicBool::new(false)}),receiver))
     }
-    pub(crate) fn cancel(&self){let _=self.stream.shutdown(Shutdown::Both);}
+    pub(crate) fn cancelled(&self)->bool{self.cancelled.load(Ordering::Acquire)}
+    pub(crate) fn cancel(&self){self.cancelled.store(true,Ordering::Release);let _=self.stream.shutdown(Shutdown::Both);}
 }
 impl Drop for Cancellation{fn drop(&mut self){self.cancel();}}
 impl Client {
@@ -280,9 +285,16 @@ impl Client {
     pub(crate) fn start_task(&mut self,operation:Value,receiver:&UnixStream)->Result<Value>{
         self.call_with_cancellation(operation,Some(receiver))
     }
+    pub(crate) fn start_task_with_id(&mut self,operation:Value,receiver:&UnixStream,id:&str)->Result<Value>{
+        if !crate::uuid(id){return Err(ErrorCode::InvalidArgument);}
+        self.call_with_id(operation,Some(receiver),id)
+    }
     fn call_with_cancellation(&mut self,operation:Value,receiver:Option<&UnixStream>)->Result<Value>{
+        let id=uuid::Uuid::new_v4().to_string();self.call_with_id(operation,receiver,&id)
+    }
+    fn call_with_id(&mut self,operation:Value,receiver:Option<&UnixStream>,id:&str)->Result<Value>{
         self.provider.verify(&self.stream)?;
-        let id=uuid::Uuid::new_v4().to_string();let frame=json!({"schema_version":1,"request_id":id,"operation":operation}).to_string();
+        let frame=json!({"schema_version":1,"request_id":id,"operation":operation}).to_string();
         if frame.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted);}
         write_frame(&mut self.stream,&frame).map_err(|_|ErrorCode::TargetChanged)?;
         if let Some(receiver)=receiver{send_proof(&self.stream,receiver)?;}

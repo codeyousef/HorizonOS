@@ -34,17 +34,21 @@ struct Admission(Arc<AtomicUsize>);
 impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); } }
 
 #[derive(Clone)]
-pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>>,processes:Arc<Mutex<HashMap<(String,String),ProcessConnection>>> }
+pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,control_active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>>,processes:Arc<Mutex<HashMap<(String,String),ProcessConnection>>> }
 struct UiConnection { peer:Peer,expires:Instant,client:Arc<crate::graphical::Connection> }
-struct ProcessConnection { peer:Peer,expires:u64,client:crate::process_selection::Connection }
+struct ProcessConnection { peer:Peer,expires:u64,client:crate::process_selection::Connection,control:Arc<crate::process_control::Connection> }
 impl Agent {
-    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())),processes:Arc::new(Mutex::new(HashMap::new())) } }
+    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),control_active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())),processes:Arc::new(Mutex::new(HashMap::new())) } }
     fn admit(&self) -> Result<Admission> {
         if self.active.fetch_add(1, Ordering::AcqRel) >= 16 {
             self.active.fetch_sub(1, Ordering::AcqRel);
             return Err(ErrorCode::ResourceExhausted.into());
         }
         Ok(Admission(self.active.clone()))
+    }
+    fn admit_control(&self)->Result<Admission>{
+        if self.control_active.fetch_add(1,Ordering::AcqRel)>=4{self.control_active.fetch_sub(1,Ordering::AcqRel);return Err(ErrorCode::ResourceExhausted.into());}
+        Ok(Admission(self.control_active.clone()))
     }
     async fn peer(connection: &Connection, header: &Header<'_>) -> Result<Peer> {
         let sender = header.sender().ok_or(ErrorCode::PermissionDenied)?.to_string();
@@ -61,12 +65,15 @@ impl Agent {
         Ok(peer)
     }
     async fn dispatch(&self, connection: &Connection, header: Header<'_>, operation: Operation) -> Result<Value> {
-        let _admission = self.admit()?;
+        let _admission = if matches!(operation,Operation::CancelProcessTermination{..}|Operation::ForgetProcessTermination{..}){self.admit_control()?}else{self.admit()?};
         let peer = Self::peer(connection, &header).await?;
         let outcome=if let Some(action)=crate::process_bridge::action(&operation)?{
             let agent=self.clone();let original=peer.clone();
             blocking::unblock(move||agent.process_read(&original,&action)).await
         }else{match operation {
+            operation if crate::process_control::is_operation(&operation)=>{
+                let agent=self.clone();let original=peer.clone();blocking::unblock(move||agent.process_control(&original,operation)).await
+            },
             Operation::Submit{request} if request.selected_session_handle.is_none() && request.selected_app_handle.is_none() && !request.context_handles.is_empty()=>{
                 let agent=self.clone();let original=peer.clone();blocking::unblock(move||agent.submit_process(&original,request)).await
             },
@@ -86,21 +93,40 @@ impl Agent {
         identity::verify_peer(peer)?;
         let now=aios_policy::boottime_ms()?;
         let key=(peer.bus_id.clone().ok_or(ErrorCode::PermissionDenied)?,peer.bus_sender.clone().ok_or(ErrorCode::PermissionDenied)?);
-        let mut clients=self.processes.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
-        clients.retain(|_,client|client.expires>now);
-        if let Some(client)=clients.get(&key){if client.peer!=*peer{return Err(ErrorCode::TargetChanged);}}
-        else{
-            if clients.len()>=4{return Err(ErrorCode::ResourceExhausted);}
-            clients.insert(key.clone(),ProcessConnection{peer:peer.clone(),expires:now.checked_add(34_000).ok_or(ErrorCode::ResourceExhausted)?,client:Arc::new(Mutex::new(crate::process_bridge::Client::connect(None,peer)?))});
-        }
-        let client=clients.get_mut(&key).ok_or(ErrorCode::TargetChanged)?;
-        let result=client.client.lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(action);
-        client.expires=aios_policy::boottime_ms()?.checked_add(34_000).ok_or(ErrorCode::ResourceExhausted)?;
+        let cached={let mut clients=self.processes.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+            clients.retain(|_,client|client.expires>now);
+            if let Some(client)=clients.get_mut(&key){
+                if client.peer!=*peer{return Err(ErrorCode::TargetChanged);}
+                client.expires=now.checked_add(95_000).ok_or(ErrorCode::ResourceExhausted)?;Some(client.client.clone())
+            }else{if clients.len()>=4{return Err(ErrorCode::ResourceExhausted);}None}};
+        let client=if let Some(client)=cached{client}else{
+            // Managed handshakes can perform native I/O. Keep them outside the
+            // connection table so another caller can still latch Stop.
+            let client=Arc::new(Mutex::new(crate::process_bridge::Client::connect(None,peer)?));
+            let control=Arc::new(crate::process_control::Connection::new(peer.clone(),client.clone()));
+            let mut clients=self.processes.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+            if let Some(existing)=clients.get(&key){if existing.peer!=*peer{return Err(ErrorCode::TargetChanged);}existing.client.clone()}
+            else{
+                if clients.len()>=4{return Err(ErrorCode::ResourceExhausted);}
+                clients.insert(key.clone(),ProcessConnection{peer:peer.clone(),expires:now.checked_add(95_000).ok_or(ErrorCode::ResourceExhausted)?,client:client.clone(),control});client
+            }
+        };
+        let result=client.lock().map_err(|_|ErrorCode::ResourceExhausted)?.call(action);
         identity::verify_peer(peer)?;
         // Domain permission errors (e.g. another caller's process handle) do
         // not invalidate this caller's other retained handles or cursor.
-        if matches!(result,Err(ErrorCode::TargetChanged)){clients.remove(&key);}
+        if matches!(result,Err(ErrorCode::TargetChanged)){self.processes.lock().map_err(|_|ErrorCode::ResourceExhausted)?.remove(&key);}
         result
+    }
+    fn process_control(&self,peer:&Peer,operation:Operation)->std::result::Result<Value,ErrorCode>{
+        let now=aios_policy::boottime_ms()?;
+        let key=(peer.bus_id.clone().ok_or(ErrorCode::PermissionDenied)?,peer.bus_sender.clone().ok_or(ErrorCode::PermissionDenied)?);
+        let control={let mut clients=self.processes.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+            clients.retain(|_,client|client.expires>now);
+            let client=clients.get_mut(&key).ok_or(ErrorCode::TargetNotFound)?;
+            if client.peer!=*peer{return Err(ErrorCode::TargetChanged);}
+            client.expires=now.checked_add(95_000).ok_or(ErrorCode::ResourceExhausted)?;client.control.clone()};
+        control.execute(&self.state,peer,operation)
     }
     fn submit_process(&self,peer:&Peer,request:crate::Submit)->std::result::Result<Value,ErrorCode>{
         if let Some(value)=self.state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.existing_submission(peer,&request)?{return Ok(value);}
@@ -197,6 +223,27 @@ impl Agent {
 
 #[zbus::interface(name = "org.aios.Agent1")]
 impl Agent {
+    async fn start_process_termination(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
+        let request:Request=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
+        if request.schema_version!=1{return Err(ErrorCode::UnsupportedSchema.into());}
+        if !crate::uuid(&request.request_id){return Err(ErrorCode::InvalidArgument.into());}
+        let operation=parse_operation(request.operation.get())?;
+        if !matches!(operation,Operation::StartProcessTermination{..}){return Err(ErrorCode::InvalidArgument.into());}
+        self.json(connection,header,operation).await
+    }
+    async fn get_process_termination(&self,task_id:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        if task_id.len()>128 || !crate::uuid(task_id){return Err(ErrorCode::InvalidArgument.into());}
+        self.json(connection,header,Operation::GetProcessTermination{task_id:task_id.into()}).await
+    }
+    async fn cancel_process_termination(&self,task_id:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        if task_id.len()>128 || !crate::uuid(task_id){return Err(ErrorCode::InvalidArgument.into());}
+        self.json(connection,header,Operation::CancelProcessTermination{task_id:task_id.into()}).await
+    }
+    async fn forget_process_termination(&self,task_id:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        if task_id.len()>128 || !crate::uuid(task_id){return Err(ErrorCode::InvalidArgument.into());}
+        self.json(connection,header,Operation::ForgetProcessTermination{task_id:task_id.into()}).await
+    }
     async fn list_processes(&self, request_json: &str, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
         self.action(connection, header, request_json, "process.list").await
     }
@@ -294,6 +341,43 @@ pub fn export_user_bus(state: SharedState) -> zbus::Result<zbus::blocking::Conne
 /// Headless client with a fixed bus endpoint and pinned live daemon owner.
 pub struct Client { connection: zbus::blocking::Connection, owner: String, peer: Peer }
 impl Client {
+    pub fn list_processes(&self,cursor:Option<&str>)->std::result::Result<Value,ErrorCode>{
+        let arguments=if let Some(cursor)=cursor{serde_json::json!({"limit":100,"cursor":cursor})}else{serde_json::json!({"limit":100})};
+        self.process_read("ListProcesses","process.list",arguments)
+    }
+    pub fn inspect_process(&self,id:&str)->std::result::Result<Value,ErrorCode>{
+        if !crate::uuid(id){return Err(ErrorCode::InvalidArgument);}
+        self.process_read("InspectProcess","process.inspect",serde_json::json!({"process_id":id}))
+    }
+    fn process_read(&self,method:&str,action:&str,arguments:Value)->std::result::Result<Value,ErrorCode>{
+        let raw=serde_json::json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),"operation":{"kind":"invoke","tool_call":{"kind":"tool_call","action_id":action,"arguments":arguments}}}).to_string();
+        let result=self.call(method,&(raw.as_str(),))?;
+        aios_protocol::validation::validate_result(action,result.as_bytes())
+    }
+    pub fn start_process_termination(&self,id:&str,process:&str,session:&str,goal:&str)->std::result::Result<Value,ErrorCode>{
+        if !crate::uuid(id) || !crate::uuid(process) || !crate::uuid(session){return Err(ErrorCode::InvalidArgument);}
+        let raw=serde_json::json!({"schema_version":1,"request_id":id,"operation":{"kind":"start_process_termination","task_id":id,"process_id":process,"session_handle":session,"goal":goal,"mode":"act"}}).to_string();
+        if raw.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted);}
+        let value=serde_json::from_str(&self.call("StartProcessTermination",&(raw.as_str(),))?).map_err(|_|ErrorCode::InvalidArgument)?;
+        crate::process_control::validate_status(value,id)
+    }
+    pub fn process_termination_status(&self,id:&str)->std::result::Result<Value,ErrorCode>{
+        if !crate::uuid(id){return Err(ErrorCode::InvalidArgument);}
+        let value=serde_json::from_str(&self.call("GetProcessTermination",&(id,))?).map_err(|_|ErrorCode::InvalidArgument)?;
+        crate::process_control::validate_status(value,id)
+    }
+    pub fn cancel_process_termination(&self,id:&str)->std::result::Result<Value,ErrorCode>{
+        if !crate::uuid(id){return Err(ErrorCode::InvalidArgument);}
+        let value:Value=serde_json::from_str(&self.call("CancelProcessTermination",&(id,))?).map_err(|_|ErrorCode::InvalidArgument)?;
+        #[derive(serde::Deserialize)]#[serde(deny_unknown_fields)]struct Cancel{schema_version:u32,task_id:String,cancel_requested:bool}
+        let receipt:Cancel=serde_json::from_value(value.clone()).map_err(|_|ErrorCode::InvalidArgument)?;
+        if receipt.schema_version!=1 || receipt.task_id!=id || !receipt.cancel_requested{return Err(ErrorCode::TargetChanged);}Ok(value)
+    }
+    pub fn forget_process_termination(&self,id:&str)->std::result::Result<Value,ErrorCode>{
+        if !crate::uuid(id){return Err(ErrorCode::InvalidArgument);}
+        let value=serde_json::from_str(&self.call("ForgetProcessTermination",&(id,))?).map_err(|_|ErrorCode::InvalidArgument)?;
+        crate::process_control::validate_deleted(value,id)
+    }
     fn subject(connection: &zbus::blocking::Connection) -> std::result::Result<(String, Peer), ErrorCode> {
         let bus = zbus::blocking::Proxy::new(connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus").map_err(|_| ErrorCode::AuthRequired)?;
         let owner: String = bus.call("GetNameOwner", &(NAME,)).map_err(|_| ErrorCode::UnsupportedCapability)?;
@@ -386,5 +470,18 @@ fn client_error(error: zbus::Error) -> ErrorCode {
     match error {
         zbus::Error::InputOutput(error) if error.kind() == std::io::ErrorKind::TimedOut => ErrorCode::DeadlineExceeded,
         _ => ErrorCode::PartialResult,
+    }
+}
+
+#[cfg(test)]mod tests{
+    use super::*;
+    #[test]fn stop_has_reserved_bounded_admission_when_observations_are_saturated(){
+        let agent=Agent::new(Arc::new(Mutex::new(crate::State::default())));
+        let normal=(0..16).map(|_|agent.admit().unwrap()).collect::<Vec<_>>();
+        assert!(agent.admit().is_err());
+        let stops=(0..4).map(|_|agent.admit_control().unwrap()).collect::<Vec<_>>();
+        assert!(agent.admit_control().is_err());
+        drop(stops);assert_eq!(agent.control_active.load(Ordering::Acquire),0);
+        assert!(agent.admit().is_err());drop(normal);assert_eq!(agent.active.load(Ordering::Acquire),0);
     }
 }

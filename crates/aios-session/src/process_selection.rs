@@ -8,7 +8,7 @@ type Result<T>=std::result::Result<T,ErrorCode>;
 pub(crate) type Connection=Arc<Mutex<process_bridge::Client>>;
 pub(crate) struct Selection{owner:Peer,connection:Connection,resources:Vec<aios_policy::Resource>}
 fn inspect(id:&str)->Result<Action>{parse_tool_call(json!({"kind":"tool_call","action_id":"process.inspect","arguments":{"process_id":id}}).to_string().as_bytes())}
-fn resource(peer:&Peer,id:&str,value:&Value)->Result<aios_policy::Resource>{
+pub(crate) fn resource(peer:&Peer,id:&str,value:&Value)->Result<aios_policy::Resource>{
     if value["complete"]!=true || value["data"]["process_id"]!=id{return Err(ErrorCode::PartialResult);}
     let data=&value["data"];
     let identity=aios_system::processes::Identity{pid:u32::try_from(data["pid"].as_u64().ok_or(ErrorCode::InvalidArgument)?).map_err(|_|ErrorCode::InvalidArgument)?,

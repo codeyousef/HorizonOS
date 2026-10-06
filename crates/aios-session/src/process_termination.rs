@@ -35,7 +35,7 @@ impl CurrentResources for Resources<'_>{
     fn dynamic_arguments(&self,_:&str,_:&Value,_:&policy::Scope)->Result<()>{Err(ErrorCode::UnsupportedCapability)}
 }
 pub(crate) struct NativeTerminationTask {
-    broker:Option<(crate::managed_service::ManagedService,std::os::unix::net::UnixStream)>,
+    broker:Option<(crate::managed_service::ManagedService,std::os::unix::net::UnixStream,std::os::unix::net::UnixStream)>,
     origin:OriginatingClient,selection:SelectedProcess,display:DisplayBinding,closure:String,
     policy:policy::Policy,request_id:String,control:Arc<AtomicU8>,
     pending:Option<TerminationConfirmation>,delivery:Option<TerminationDelivery>,prepared:Option<Prepared>,
@@ -74,15 +74,16 @@ impl NativeTerminationTask {
     }
     /// The managed transport is retained only as native lifetime evidence.
     /// It cannot be reconstructed from a serialized PID or service name.
-    pub(crate) fn bind_broker(&mut self,broker:crate::managed_service::ManagedService,stream:std::os::unix::net::UnixStream)->Result<()>{
+    pub(crate) fn bind_broker(&mut self,broker:crate::managed_service::ManagedService,stream:std::os::unix::net::UnixStream,cancellation:std::os::unix::net::UnixStream)->Result<()>{
         if self.broker.is_some(){return Err(ErrorCode::Conflict);}
-        broker.verify(&stream)?;self.broker=Some((broker,stream));self.check()
+        broker.verify(&stream)?;broker.verify_cancellation_peer(&cancellation)?;
+        self.broker=Some((broker,stream,cancellation));self.check()
     }
     fn resources(&self)->Resources<'_>{Resources{selection:&self.selection,origin:&self.origin,display:&self.display,closure:&self.closure}}
     fn check(&mut self)->Result<()>{
         let result=(||{
             if self.control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
-            if let Some((broker,stream))=&self.broker{broker.verify(stream)?;}
+            if let Some((broker,stream,cancellation))=&self.broker{broker.verify(stream)?;check_cancellation(cancellation)?;}
             self.origin.verify()?;self.selection.verify(&self.origin.peer()?)?;self.display.verify()?;
             if closure()?!=self.closure{return Err(ErrorCode::TargetChanged);}Ok(())
         })();
@@ -99,7 +100,7 @@ impl NativeTerminationTask {
         if let Some(code)=self.failure{return Err(code);}
         if let Some(attempt)=&mut self.attempt{
             if self.control.load(Ordering::Acquire)!=0 || self.origin.verify().is_err()
-                || self.broker.as_ref().map_or(true,|(broker,stream)|broker.verify(stream).is_err()){self.signal_cancel.cancel();}
+                || self.broker.as_ref().map_or(true,|(broker,stream,cancellation)|broker.verify(stream).is_err() || check_cancellation(cancellation).is_err()){self.signal_cancel.cancel();}
             let receipt=attempt.poll();if let Some(value)=&receipt{self.terminal=Some(value.clone());}return Ok(receipt);
         }
         let result=self.poll_before_effect();
@@ -122,14 +123,31 @@ impl NativeTerminationTask {
             delivery.revalidate(&self.policy,&subject,&self.request_id,&policy::digest(preview)?,&self.resources())?;
             if self.control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
             self.origin.verify()?;self.selection.verify_lifetime(&self.origin.peer()?)?;
-            let (broker,stream)=self.broker.as_ref().ok_or(ErrorCode::PermissionDenied)?;broker.verify(stream)?;
+            let (broker,stream,cancellation)=self.broker.as_ref().ok_or(ErrorCode::PermissionDenied)?;broker.verify(stream)?;
             if self.control.load(Ordering::Acquire)!=0{return Err(ErrorCode::Cancelled);}
             self.selection.verify_lifetime(&self.origin.peer()?)?;
+            check_cancellation(cancellation)?;
             delivery.check_deadline()
         })?;
         self.attempt=Some(attempt);self.poll()
     }
 }
+fn check_cancellation(stream:&std::os::unix::net::UnixStream)->Result<()>{
+    use std::os::fd::AsRawFd;
+    let mut descriptor=nix::libc::pollfd{fd:stream.as_raw_fd(),events:nix::libc::POLLIN|nix::libc::POLLRDHUP,revents:0};
+    if unsafe{nix::libc::poll(&mut descriptor,1,0)}<0 || descriptor.revents!=0{return Err(ErrorCode::Cancelled);}Ok(())
+}
 impl Drop for NativeTerminationTask {fn drop(&mut self){
     self.control.store(1,Ordering::Release);self.signal_cancel.cancel();self.pending.take();self.delivery.take();
 }}
+
+#[cfg(test)]mod tests{
+    use super::*;
+    #[test]fn final_native_stop_probe_observes_bytes_and_eof_without_watcher(){
+        use std::{io::Write,os::unix::net::UnixStream};
+        let (mut sender,receiver)=UnixStream::pair().unwrap();assert_eq!(check_cancellation(&receiver),Ok(()));
+        sender.write_all(&[1]).unwrap();assert_eq!(check_cancellation(&receiver),Err(ErrorCode::Cancelled));
+        let (sender,receiver)=UnixStream::pair().unwrap();assert_eq!(check_cancellation(&receiver),Ok(()));
+        sender.shutdown(std::net::Shutdown::Both).unwrap();assert_eq!(check_cancellation(&receiver),Err(ErrorCode::Cancelled));
+    }
+}

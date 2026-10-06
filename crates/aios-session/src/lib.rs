@@ -10,6 +10,7 @@ pub mod ui_bridge;
 pub mod process_bridge;
 pub(crate) mod process_termination;
 mod process_tasks;
+mod process_control;
 pub mod native_startup;
 pub mod bus;
 pub mod inference;
@@ -42,6 +43,8 @@ pub struct Submit {
 
 #[derive(Debug)]
 pub enum Operation {
+    StartProcessTermination { task_id:String,process_id:String,session_handle:String,goal:String,mode:Mode },
+    GetProcessTermination { task_id:String },CancelProcessTermination { task_id:String },ForgetProcessTermination { task_id:String },
     GetCapabilities,
     GetSystemInfo,
     SelectUiSession { session_id: String },
@@ -82,6 +85,10 @@ fn parse_operation(raw: &str) -> Result<Operation, ErrorCode> {
         }};
     }
     match kind.kind.as_str() {
+        "start_process_termination"=>fields!(StartProcessTermination{task_id:String,process_id:String,session_handle:String,goal:String,mode:Mode}),
+        "get_process_termination"=>fields!(GetProcessTermination{task_id:String}),
+        "cancel_process_termination"=>fields!(CancelProcessTermination{task_id:String}),
+        "forget_process_termination"=>fields!(ForgetProcessTermination{task_id:String}),
         "get_capabilities" | "get_system_info" => {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -404,6 +411,7 @@ impl State {
     pub fn dispatch(&mut self, peer: &Peer, operation: Operation) -> Result<Value, ErrorCode> {
         self.prune();
         match operation {
+            Operation::StartProcessTermination{..}|Operation::GetProcessTermination{..}|Operation::CancelProcessTermination{..}|Operation::ForgetProcessTermination{..}=>Err(ErrorCode::AuthRequired),
             Operation::GetCapabilities => Ok(json!({"schema_version":1,"request_id":Uuid::new_v4().to_string(),"operation":"capabilities","actions":["system.info","system.service_status"],
                 "read_only":true,"inference_available":self.inference_available,"inference_configured":self.inference_configured,"ui_enabled":false,"ui_session_selection_available":true,"transport":"private-unix",
                 "session_history":{"opt_in_required":true,"max_selected":4,"retention_ms":300000,"owner":"authenticated_client","persistent":false},"task_request_max_bytes":MAX_TASK_BYTES,"session_associated":peer.logind_session.is_some()})),
@@ -507,6 +515,7 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
     let _owner = ConnectionOwner { state: state.clone(), peer: peer.clone() };
     let mut ui:Option<Arc<graphical::Connection>>=None;
     let mut processes:Option<process_selection::Connection>=None;
+    let mut process_control:Option<Arc<process_control::Connection>>=None;
     // A 90-second task must remain inspectable/cancellable on its original
     // authenticated connection; short polling cannot force a reconnect.
     for _ in 0..4096 {
@@ -524,6 +533,16 @@ pub fn serve_connection(mut stream: UnixStream, state: SharedState) -> io::Resul
                     match process_bridge::action(&operation){
                         Ok(Some(action))=>process_dispatch(&stream,&peer,&mut processes,&action),
                         Ok(None)=>match operation{
+                            operation if process_control::is_operation(&operation)=>{
+                                (||->Result<Value,ErrorCode>{
+                                    if process_control.is_none(){
+                                        if !matches!(operation,Operation::StartProcessTermination{..}){return Err(ErrorCode::TargetNotFound);}
+                                        let client=processes.as_ref().ok_or(ErrorCode::AuthRequired)?.clone();
+                                        process_control=Some(Arc::new(process_control::Connection::new(peer.clone(),client)));
+                                    }
+                                    process_control.as_ref().ok_or(ErrorCode::TargetNotFound)?.execute(&state,&peer,operation)
+                                })()
+                            },
                             Operation::Submit{request} if request.selected_session_handle.is_none() && request.selected_app_handle.is_none() && !request.context_handles.is_empty()=>{
                                 (||->Result<Value,ErrorCode>{
                                     if let Some(value)=state.lock().map_err(|_|ErrorCode::ResourceExhausted)?.existing_submission(&peer,&request)?{return Ok(value);}

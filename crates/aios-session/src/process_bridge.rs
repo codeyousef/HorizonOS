@@ -49,7 +49,10 @@ pub fn serve(mut stream:UnixStream,state:SharedState)->Result<()>{
         let selected=serde_json::from_str::<SelectedRead>(request.operation.get()).ok();
         let managed=crate::process_tasks::parse(request.operation.get());
         let result=if request.schema_version!=1{Err(ErrorCode::UnsupportedSchema)}else if let Err(code)=managed{Err(code)}else if let Some(operation)=managed?{
-            owner.tasks.execute(operation,&request.request_id,&origin,&broker,&stream,&state)
+            let cancellation=if matches!(operation,crate::process_tasks::Operation::Start{..}){
+                Some(crate::ui_bridge::receive_cancellation(&stream,&broker)?)
+            }else{None};
+            owner.tasks.execute(operation,&request.request_id,&origin,&broker,&stream,&state,cancellation)
         }else if let Some(selected)=selected{
             if selected.kind!="task_process_inspect" || !crate::uuid(&selected.task_id) || !crate::uuid(&selected.process_id){Err(ErrorCode::InvalidArgument)}else{
                 // Only the fixed managed broker can enter this branch. It owns
@@ -73,6 +76,19 @@ pub fn serve(mut stream:UnixStream,state:SharedState)->Result<()>{
 }
 pub(crate) struct Client{inner:crate::ui_bridge::Client}
 impl Client{
+    pub(crate) fn start_termination(&mut self,id:&str,process:&str,session:&str,goal:&str,receiver:&UnixStream)->Result<Value>{
+        let value=self.inner.start_task_with_id(json!({"kind":"start_process_termination","task_id":id,"process_id":process,
+            "session_id":session,"goal":goal,"mode":"act"}),receiver,id)?;
+        crate::process_control::validate_status(value,id)
+    }
+    pub(crate) fn termination_status(&mut self,id:&str)->Result<Value>{
+        let value=self.inner.call(json!({"kind":"get_process_termination","task_id":id}))?;
+        crate::process_control::validate_status(value,id)
+    }
+    pub(crate) fn forget_termination(&mut self,id:&str)->Result<Value>{
+        let value=self.inner.call(json!({"kind":"forget_process_termination","task_id":id}))?;
+        crate::process_control::validate_deleted(value,id)
+    }
     pub(crate) fn observe_selected(&mut self,task:&str,id:&str)->Result<Value>{
         if !crate::uuid(task) || !crate::uuid(id){return Err(ErrorCode::InvalidArgument);}
         let value=self.inner.call(json!({"kind":"task_process_inspect","task_id":task,"process_id":id}))?;

@@ -5,7 +5,7 @@ use aios_protocol::contracts::ErrorCode;
 use aios_system::processes::termination::Receipt;
 use serde::{Deserialize,Serialize};
 use serde_json::{Value,json};
-use std::{collections::{HashMap,HashSet},os::unix::net::UnixStream,sync::{Arc,Mutex,atomic::{AtomicU8,AtomicUsize,Ordering}},time::Duration};
+use std::{collections::{HashMap,HashSet},io::Read,os::unix::net::UnixStream,sync::{Arc,Mutex,atomic::{AtomicU8,AtomicUsize,Ordering}},time::Duration};
 type Result<T>=std::result::Result<T,ErrorCode>;
 static ACTIVE:AtomicUsize=AtomicUsize::new(0);
 const MAX_ACTIVE:usize=4;
@@ -82,12 +82,14 @@ impl Context{
         self.tasks.get(id).ok_or(ErrorCode::TargetNotFound)
     }
     pub(crate) fn execute(&mut self,operation:Operation,request_id:&str,origin:&OriginatingClient,
-        broker:&ManagedService,stream:&UnixStream,state:&SharedState)->Result<Value>{
+        broker:&ManagedService,stream:&UnixStream,state:&SharedState,cancellation:Option<UnixStream>)->Result<Value>{
         origin.verify()?;broker.verify(stream)?;
         let now=aios_policy::boottime_ms()?;
         for work in self.tasks.values(){if now>=work.deadline{work.cancel();}}
         match operation{
             Operation::Start{task_id,process_id,session_id,goal,mode}=>{
+                if request_id!=task_id{return Err(ErrorCode::InvalidArgument);}
+                let receiver=cancellation.ok_or(ErrorCode::PermissionDenied)?;
                 if !crate::uuid(request_id) || !crate::uuid(&process_id) || goal.trim().is_empty() || goal.len()>4096
                     || session_id.is_empty() || session_id.len()>128 || session_id.chars().any(char::is_control){return Err(ErrorCode::InvalidArgument);}
                 if mode!="act"{return Err(ErrorCode::PermissionDenied);}
@@ -99,9 +101,14 @@ impl Context{
                 let transport=stream.try_clone().map_err(|_|ErrorCode::TargetChanged)?;
                 let deadline=now.checked_add(90_000).ok_or(ErrorCode::TargetChanged)?;
                 let work=Arc::new(Work::new(task_id.clone(),deadline));
+                let native_cancel=receiver.try_clone().map_err(|_|ErrorCode::TargetChanged)?;
                 let status=serde_json::to_value(work.status.lock().map_err(|_|ErrorCode::ResourceExhausted)?.clone()).map_err(|_|ErrorCode::InvalidArgument)?;
                 let request_id=request_id.to_owned();let worker=work.clone();
                 self.tasks.insert(task_id.clone(),work);
+                let watcher=worker.clone();
+                if std::thread::Builder::new().name("process-stop".into()).spawn(move||watch_cancellation(receiver,watcher)).is_err(){
+                    if let Some(work)=self.tasks.remove(&task_id){work.cancel();}return Err(ErrorCode::ResourceExhausted);
+                }
                 if std::thread::Builder::new().name("process-termination".into()).spawn(move||{
                     let _admission=admission;
                     let result=(||->Result<Receipt>{
@@ -113,7 +120,7 @@ impl Context{
                         if aios_policy::boottime_ms()?>=worker.deadline{worker.cancel();return Err(ErrorCode::DeadlineExceeded);}
                         let mut task=NativeTerminationTask::begin(origin,selection,display,request_id,&goal,aios_policy::Mode::Act,
                             target,"Human-confirmed own-user process termination".into(),worker.control.clone())?;
-                        task.bind_broker(broker,transport)?;
+                        task.bind_broker(broker,transport,native_cancel)?;
                         worker.publish_stop(task.stop_handle()?)?;
                         {let mut status=worker.status.lock().map_err(|_|ErrorCode::ResourceExhausted)?;status.state="needs_permission".into();}
                         loop{
@@ -127,7 +134,7 @@ impl Context{
                         }
                     })();
                     worker.finish(result);
-                }).is_err(){self.tasks.remove(&task_id);return Err(ErrorCode::ResourceExhausted);}
+                }).is_err(){if let Some(work)=self.tasks.remove(&task_id){work.cancel();}return Err(ErrorCode::ResourceExhausted);}
                 Ok(status)
             },
             Operation::Status{task_id}=>serde_json::to_value(self.task(&task_id)?.status.lock().map_err(|_|ErrorCode::ResourceExhausted)?.clone()).map_err(|_|ErrorCode::InvalidArgument),
@@ -136,9 +143,35 @@ impl Context{
         }
     }
 }
+fn watch_cancellation(mut receiver:UnixStream,work:Arc<Work>){
+    if receiver.set_read_timeout(Some(Duration::from_millis(100))).is_err(){work.cancel();return;}
+    loop{
+        if work.control.load(Ordering::Acquire)!=0{return;}
+        match work.status.try_lock(){
+            Ok(status)=>if matches!(status.state.as_str(),"completed"|"partial"|"failed"|"cancelled"){return;},
+            Err(std::sync::TryLockError::WouldBlock)=>{},
+            Err(std::sync::TryLockError::Poisoned(_))=>{work.cancel();return;},
+        }
+        if aios_policy::boottime_ms().map_or(true,|now|now>=work.deadline){work.cancel();return;}
+        let mut byte=[0u8];match receiver.read(&mut byte){
+            Err(error) if matches!(error.kind(),std::io::ErrorKind::TimedOut|std::io::ErrorKind::WouldBlock)=>{},
+            // Any byte, EOF or error only revokes this original task.
+            _=>{work.cancel();return;},
+        }
+    }
+}
 
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]fn native_cancel_socket_withdraws_worker_while_status_is_busy(){
+        let id=uuid::Uuid::new_v4().to_string();let work=Arc::new(Work::new(id,aios_policy::boottime_ms().unwrap()+5000));
+        let (sender,receiver)=UnixStream::pair().unwrap();
+        let locked=work.status.lock().unwrap();let other=work.clone();let watcher=std::thread::spawn(move||watch_cancellation(receiver,other));
+        sender.shutdown(std::net::Shutdown::Both).unwrap();
+        let deadline=std::time::Instant::now()+Duration::from_secs(1);
+        while work.control.load(Ordering::Acquire)==0{assert!(std::time::Instant::now()<deadline);std::thread::sleep(Duration::from_millis(1));}
+        drop(locked);watcher.join().unwrap();
+    }
     #[test]fn managed_shapes_reject_authority_and_effect_overrides(){
         let id=uuid::Uuid::new_v4().to_string();
         let start=json!({"kind":"start_process_termination","task_id":id,"process_id":id,"session_id":"2","goal":"Stop my worker","mode":"act"});

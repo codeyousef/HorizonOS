@@ -150,7 +150,7 @@ policy/boot/closure, current resource and expiry on both checks before delivery.
 Native child tests use synthetic authority callbacks and independently observe
 SIGTERM acknowledgement, natural exit, refusal and ignored-signal survival.
 Those tests are library evidence, not installed consent or public termination
-qualification. The public process bridge still rejects signal actions and the
+qualification. The generic public tool bridge still rejects signal actions and the
 registry remains contract-only until native consent and original task ownership
 are connected and installed verification succeeds. A pidfd prevents PID reuse;
 process executable identity is rechecked before delivery, without promising
@@ -200,7 +200,51 @@ Cancel acknowledges the request separately from the final outcome. A signal
 already sent remains in the final partial receipt, with verified exit and
 completion reported independently. Terminal facts are not erased by Stop.
 Records are accessible only through their original managed bridge connection;
-reconnection cannot recover or control another connection's task. The public
-broker/model action route still refuses termination. Installed production
-consent, broker/client lifecycle and end-to-end effect qualification remain
-required before advertising this capability in the registry.
+reconnection cannot recover or control another connection's task. The model
+tool route still refuses termination. Installed production consent and
+end-to-end effect qualification remain required before advertising this
+capability in the registry.
+
+Authenticated human clients can use the separate public termination lifecycle
+on the private Unix connection or original native D-Bus unique sender. Start
+requires Act mode, a UUID task ID, an existing process handle and an owner-bound
+selected desktop handle. The broker resolves that desktop selection and checks
+the process observation before queuing work on the same retained native helper
+connection. It freezes the observed process identity and compares any final
+receipt against that identity, the original UID and boot. A plain State call,
+claimed credentials, native session string or model tool invocation cannot
+construct this route's authority. Approval remains exclusively native.
+
+Start transfers a one-way cancellation socket from the verified broker. Stop
+closes it without waiting for the process observation/client lock; the helper
+watcher latches cancellation and withdraws its prompt even while status state
+is contended. Final delivery also polls the native socket directly, independently
+of watcher scheduling. Any byte, EOF, socket failure or deadline expiry only
+revokes the task. It cannot select a target, renew authority or approve work.
+Forget requests Stop first. If the native channel is busy, it returns a bounded
+resource error while retaining owner state so deletion can be retried. Terminal
+partial receipts remain truthful. A failed/unconfirmed start is never replayed;
+transport errors do not imply that an irreversible effect was rolled back.
+Four reserved public control admissions keep process Stop/Forget separate from
+the sixteen ordinary request slots; both pools remain bounded. Native provider
+connection setup and reads run outside the broker's connection-table lock.
+
+The deterministic CLI keeps one native bus sender through inventory, session
+selection, start and polling:
+
+```text
+aiosctl process list --json
+aiosctl process terminate SESSION BOOT_UUID PID START_TICKS GOAL --json
+```
+
+Inventory includes its observed native boot UUID. Termination re-lists on its
+own connection and requires that exact boot/PID/start tuple. It refuses a reused
+PID, ambiguous inventory or a target not observed in the bounded own-user
+snapshot. Numeric selectors are never sent to the provider's effect route;
+only the retained process handle is passed. The native desktop shows the exact
+SIGTERM preview and defaults to Cancel. The CLI returns the final receipt and
+uses a nonzero exit for partial, failed or cancelled outcomes. Its source/API
+presence alone does not establish installed desktop/effect qualification.
+If start acknowledgement or later status cannot be obtained, the CLI requests
+Stop and reports an explicitly unverified effect outcome with the real error.
+It does not label a missing receipt as no mutation or retry termination.

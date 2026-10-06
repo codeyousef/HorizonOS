@@ -15,7 +15,9 @@ RestrictAddressFamilies=AF_UNIX
 # Native /proc/exe verification needs the original user namespace. User-unit
 # mount/network isolation and bounding-set changes create another namespace.
 # This fixed component drops and verifies all usable capability sets itself.
-# It has no model, signal, shell or arbitrary-file route. See threat-model.md.
+# It has no model, shell or arbitrary-file route. Its fixed SIGTERM task route
+# requires original caller/desktop binding and native exact confirmation.
+# See threat-model.md and process-observations.md.
 PrivateUsers=no
 PrivateNetwork=no
 PrivateTmp=no
