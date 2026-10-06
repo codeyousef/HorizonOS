@@ -139,6 +139,8 @@ class SystemCandidateTests(unittest.TestCase):
         self.assertNotIn("--impure", args)
         self.assertIn("pure-eval", args)
         self.assertIn("allow-import-from-derivation", args)
+        self.assertEqual(args[args.index("--max-jobs") + 1], "1")
+        self.assertEqual(args[args.index("--cores") + 1], "2")
         self.assertEqual(args[-1], "path:/home/dev/candidate#nixosConfigurations.aios-dev.config.system.build.toplevel")
 
     def test_desktop_build_target_is_registered_and_arbitrary_targets_are_denied(self):

@@ -26,7 +26,11 @@ LOCKED = ["--no-update-lock-file", "--no-write-lock-file"]
 def build_arguments(working, output_link, target="aios-dev"):
     if target not in {"aios-dev", "aios-desktop-test"}:
         raise ValueError("unregistered image target")
+    # Keep the fixed development VM responsive during a complete OS build.
+    # These limit derivation concurrency and request two cores per builder;
+    # they are not a guarantee of peak memory use or a cgroup memory limit.
     return ["nix", "build", "--json", "--out-link", str(output_link), *LOCKED,
+            "--max-jobs", "1", "--cores", "2",
             "--option", "pure-eval", "true", "--option", "allow-import-from-derivation", "false",
             "--option", "substituters", "https://cache.nixos.org",
             "path:" + str(working) + "#nixosConfigurations." + target + ".config.system.build.toplevel"]
