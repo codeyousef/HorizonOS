@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
+pub mod graph;
+
 pub const MAX_MANIFEST_BYTES: usize = 65536;
 pub const MAX_CATALOG_BYTES: usize = 262144;
 pub type Result<T> = std::result::Result<T, Error>;
