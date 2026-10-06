@@ -64,6 +64,40 @@ def metadata_proof_valid(value, identity):
         return False
 
 
+def service_evidence_proof_valid(value, identity):
+    try:
+        descriptor, view, native = value['descriptor'], value['view'], value['native']
+        data = view['data']
+        captured, compared = view['captured'], view['live_compared_at']
+        return (type(descriptor['schema_version']) is int and descriptor['schema_version'] == 1
+                and descriptor['execution_authority'] is False
+                and type(descriptor['evidence_id']) is str
+                and re.fullmatch('service-evidence:[0-9a-f]{64}', descriptor['evidence_id']) is not None
+                and view['evidence_id'] == descriptor['evidence_id']
+                and type(view['schema_version']) is int and view['schema_version'] == 1
+                and view['viewer'] == 'native-systemd-service-properties'
+                and view['freshness'] == 'Current' and view['source_truth'] == 'running'
+                and view['execution_authority'] is False and view['executable_uri'] is False
+                and view['complete_service_inventory_verified'] is False
+                and all(type(view[key]) is str and re.fullmatch('[0-9a-f]{64}', view[key]) is not None
+                        for key in ('observation_sha256', 'evidence_sha256'))
+                and captured['boot'] == compared['boot'] == identity['boot_id']
+                and type(captured['monotonic_ns']) is int and type(compared['monotonic_ns']) is int
+                and 0 <= captured['monotonic_ns'] <= compared['monotonic_ns']
+                and compared['monotonic_ns'] - captured['monotonic_ns'] < 5_000_000_000
+                and data['unit_name'] == 'sshd.service' and data['scope'] == 'system'
+                and data['boot_id'] == identity['boot_id'] and data['ordering_is_not_causation'] is True
+                and all(data[k] == native[n] for k, n in [('load_state', 'LoadState'),
+                        ('active_state', 'ActiveState'), ('sub_state', 'SubState'), ('result', 'Result')])
+                and type(data['main_pid']) is int and data['main_pid'] > 0
+                and str(data['main_pid']) == native['MainPID']
+                and type(value['expiry_elapsed_ns']) is int and value['expiry_elapsed_ns'] >= 5_100_000_000
+                and type(value['expired_upstream_exit']) is int and value['expired_upstream_exit'] == 0
+                and value['expired_response'] == {'ok': False, 'error': 'Native(Graph(StaleEvidence))'})
+    except (KeyError, TypeError):
+        return False
+
+
 def event_status_ready(observed, boot):
     try:
         return (observed['boot'] == boot and observed['event_watcher_installed'] is True
@@ -364,6 +398,21 @@ def main():
         proof['steps']['service_comparison'] = {'native': native, 'captured': cached['data']['properties']['captured'], 'unknown_properties_preserved': all(cached['data']['properties'][k] is None for k in ('main_pid', 'result', 'ordering_after'))}
         if not proof['steps']['service_comparison']['unknown_properties_preserved']:
             raise RuntimeError('unobserved service properties were invented')
+        # Exercise the original installed binary, private socket and owner.
+        # No replacement executable or fixture payload supplies the citation.
+        descriptor = graph(expected, executable, '--service-evidence', 'sshd.service')
+        view = graph(expected, executable, '--evidence', descriptor['evidence_id'])
+        native = properties(expected, 'sshd.service', ['LoadState', 'ActiveState', 'SubState', 'Result', 'MainPID'])
+        expiry_started = time.monotonic_ns()
+        time.sleep(5.1)
+        expired = command(expected, [executable, '--evidence', descriptor['evidence_id']])
+        service_evidence = {'descriptor': descriptor, 'view': view, 'native': native,
+            'expiry_elapsed_ns': time.monotonic_ns() - expiry_started,
+            'expired_upstream_exit': expired.returncode, 'expired_response': snapshot.decode(expired.stdout)}
+        if not service_evidence_proof_valid(service_evidence, expected):
+            proof['failed_service_evidence'] = service_evidence
+            raise RuntimeError('installed service citation properties, scope, seal or expiry differ')
+        proof['steps']['service_evidence'] = service_evidence
         # Boot notifications can deliberately exhaust the bounded drain and
         # disconnect the watcher. Require recovery BEFORE taking the baseline
         # and starting the fixed probe; older boot counters cannot prove it.

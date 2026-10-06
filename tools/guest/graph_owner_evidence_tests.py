@@ -2,7 +2,7 @@
 import copy
 import unittest
 import installed_graph_owner_smoke as gate
-from graph_owner_preflight import raw_timer_trigger, denied_probe_valid, event_proof_valid, event_status_ready, device_proof_valid, metadata_proof_valid
+from graph_owner_preflight import raw_timer_trigger, denied_probe_valid, event_proof_valid, event_status_ready, device_proof_valid, metadata_proof_valid, service_evidence_proof_valid
 
 class GraphEvidenceTests(unittest.TestCase):
     def test_denial_requires_original_dev_process_exit(self):
@@ -70,6 +70,45 @@ class GraphEvidenceTests(unittest.TestCase):
         value['before'] = unavailable
         self.assertFalse(event_proof_valid(value, 'fixture-boot'))
 
+    def service_evidence_fixture(self):
+        identifier = 'service-evidence:' + 'c'*64
+        return {'descriptor': {'schema_version': 1, 'evidence_id': identifier, 'execution_authority': False},
+            'view': {'schema_version': 1, 'evidence_id': identifier, 'viewer': 'native-systemd-service-properties',
+                'freshness': 'Current', 'source_truth': 'running', 'execution_authority': False,
+                'executable_uri': False, 'complete_service_inventory_verified': False,
+                'observation_sha256': 'a'*64, 'evidence_sha256': 'b'*64,
+                'captured': {'boot': 'fixture-boot', 'monotonic_ns': 10},
+                'live_compared_at': {'boot': 'fixture-boot', 'monotonic_ns': 20},
+                'data': {'unit_name': 'sshd.service', 'scope': 'system', 'boot_id': 'fixture-boot',
+                    'ordering_is_not_causation': True, 'load_state': 'loaded', 'active_state': 'active',
+                    'sub_state': 'running', 'result': 'success', 'main_pid': 123}},
+            'native': {'LoadState': 'loaded', 'ActiveState': 'active', 'SubState': 'running', 'Result': 'success', 'MainPID': '123'},
+            'expiry_elapsed_ns': 5_100_000_000, 'expired_upstream_exit': 0,
+            'expired_response': {'ok': False, 'error': 'Native(Graph(StaleEvidence))'}}
+
+    def test_service_viewer_gate_refuses_wrong_native_target_authority_or_expiry(self):
+        identity = {'boot_id': 'fixture-boot'}
+        value = self.service_evidence_fixture()
+        self.assertTrue(service_evidence_proof_valid(value, identity))
+        cases = [(['view', 'viewer'], 'file-uri'), (['view', 'evidence_id'], 'foreign'),
+            (['view', 'freshness'], 'Stale'), (['view', 'execution_authority'], True),
+            (['view', 'executable_uri'], True), (['view', 'complete_service_inventory_verified'], True),
+            (['view', 'observation_sha256'], 'A'*64), (['view', 'data', 'scope'], 'user'),
+            (['view', 'data', 'boot_id'], 'foreign'), (['view', 'data', 'unit_name'], 'other.service'),
+            (['view', 'data', 'main_pid'], True), (['view', 'data', 'ordering_is_not_causation'], False),
+            (['native', 'MainPID'], '124'), (['native', 'Result'], 'failed'),
+            (['view', 'captured', 'monotonic_ns'], True), (['view', 'live_compared_at', 'boot'], 'foreign'),
+            (['view', 'live_compared_at', 'monotonic_ns'], 5_000_000_010),
+            (['expiry_elapsed_ns'], 5_099_999_999), (['expiry_elapsed_ns'], True),
+            (['expired_upstream_exit'], True), (['expired_upstream_exit'], 1),
+            (['expired_response'], {'ok': True, 'data': {}}),
+            (['expired_response'], {'ok': False, 'error': 'Native(Graph(Corrupt))'})]
+        for path, other in cases:
+            altered = copy.deepcopy(value); target = altered
+            for key in path[:-1]: target = target[key]
+            target[path[-1]] = other
+            with self.subTest(path=path): self.assertFalse(service_evidence_proof_valid(altered, identity))
+
     def device_fixture(self):
         return {'execution_authority': False, 'native_syspath': '/sys/devices/fixture', 'native_devnum': [252, 0],
             'native_properties': {'ID_SERIAL': 'fixture-native-serial'},
@@ -126,6 +165,7 @@ class GraphEvidenceTests(unittest.TestCase):
             "systemd_events": self.event_fixture(),
             "startup_devices": self.device_fixture(),
             "startup_metadata": self.metadata_fixture(),
+            "service_evidence": self.service_evidence_fixture(),
             "startup_generations": {"execution_authority": False, "data": {"freshness": "Current", "pointers": {"running_closure": "fixture-system", "bootloader_entry": None, "managed_transaction": None}}},
             "foreign_uid_denied": {"upstream_exit": 1, "native_unit": self.denial_unit()},
             "corruption_recovery": {"ledger_unchanged": True},
