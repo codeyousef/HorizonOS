@@ -6,13 +6,16 @@ use serde_json::Value;
 use std::{fs::{self,File,OpenOptions},os::unix::{fs::{MetadataExt,OpenOptionsExt},io::AsRawFd},
     path::Path,sync::mpsc::{self,SyncSender,TrySendError},thread::{self,JoinHandle},time::Duration};
 
+mod evidence;
+pub use evidence::{EvidenceInput, ObservationInput, ResolvedEvidence, SourceLocator, ViewerTarget, DocumentRange, Sensitivity, ReadPurpose};
+
 const SCHEMA: &str = include_str!("schema.sql");
 const APPLICATION_ID: i64 = 0x484f4752;
 const VERSION: i64 = 1;
 const QUEUE: usize = 16;
 const BATCH: usize = 64;
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
-pub enum Error { Invalid, Storage, Corrupt, Incompatible, WrongScope, Busy, ResourceExhausted, IdentityChanged }
+pub enum Error { Invalid, Storage, Corrupt, Incompatible, WrongScope, Busy, ResourceExhausted, IdentityChanged, StaleEvidence, NotFound }
 pub type Result<T> = std::result::Result<T,Error>;
 fn sql(error: rusqlite::Error) -> Error {
     match error.sqlite_error_code() {
@@ -181,7 +184,9 @@ impl Database {
         Ok(result)
     }
 }
-enum Request { Write(Vec<Node>,SyncSender<Result<()>>), Read(Vec<String>,SyncSender<Result<Vec<StoredNode>>>) }
+enum Request { Write(Vec<Node>,SyncSender<Result<()>>), Read(Vec<String>,SyncSender<Result<Vec<StoredNode>>>),
+    AppendEvidence(ObservationInput,EvidenceInput,SyncSender<Result<()>>),
+    ResolveEvidence(String,String,super::ObservationTime,super::SourceRevision,ReadPurpose,SyncSender<Result<ResolvedEvidence>>) }
 pub struct GraphStore { sender:Option<SyncSender<Request>>,worker:Option<JoinHandle<()>> }
 impl GraphStore {
     /// The trusted owner selects Scope from authenticated native identity.
@@ -192,6 +197,8 @@ impl GraphStore {
             while let Ok(request)=receiver.recv(){match request {
                 Request::Write(nodes,reply)=>{let _=reply.send(db.write(scope,nodes));},
                 Request::Read(ids,reply)=>{let _=reply.send(db.read(scope,ids));},
+                Request::AppendEvidence(observation,evidence,reply)=>{let _=reply.send(db.append_evidence(scope,observation,evidence));},
+                Request::ResolveEvidence(id,binding,now,revision,purpose,reply)=>{let _=reply.send(db.resolve_evidence(scope,&id,&binding,&now,&revision,purpose));},
             }}
         }).map_err(|_|Error::Storage)?;
         Ok(Self{sender:Some(sender),worker:Some(worker)})
@@ -211,6 +218,20 @@ impl GraphStore {
     pub fn nodes(&self,ids:Vec<String>)->Result<Vec<StoredNode>> {
         if ids.is_empty() || ids.len()>BATCH || ids.iter().any(|id|id.len()>128) {return Err(Error::ResourceExhausted);}
         let (reply,receiver)=mpsc::sync_channel(1);self.send(Request::Read(ids,reply))?;receiver.recv().map_err(|_|Error::Storage)?
+    }
+    /// Bindings are selected by trusted code from the originating native client
+    /// and active read scope. They are never accepted as model-issued grants.
+    pub fn append_evidence(&self,observation:ObservationInput,evidence:EvidenceInput)->Result<()> {
+        evidence::validate(&observation,&evidence)?;
+        let (reply,receiver)=mpsc::sync_channel(1);self.send(Request::AppendEvidence(observation,evidence,reply))?;receiver.recv().map_err(|_|Error::Storage)?
+    }
+    /// This returns an evidence/viewer descriptor, not permission to open the
+    /// source or execute an effect. Native viewers must recheck live authority.
+    pub fn resolve_evidence(&self,id:String,authenticated_binding:String,now:super::ObservationTime,
+        live_revision:super::SourceRevision,purpose:ReadPurpose)->Result<ResolvedEvidence> {
+        if !key(&id,128) || !key(&authenticated_binding,128) {return Err(Error::Invalid);}
+        let (reply,receiver)=mpsc::sync_channel(1);
+        self.send(Request::ResolveEvidence(id,authenticated_binding,now,live_revision,purpose,reply))?;receiver.recv().map_err(|_|Error::Storage)?
     }
 }
 impl Drop for GraphStore {fn drop(&mut self){self.sender.take();if let Some(worker)=self.worker.take(){let _=worker.join();}}}

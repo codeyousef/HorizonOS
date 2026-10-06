@@ -43,7 +43,8 @@ pub struct ObservationTime { pub boot: BootId, pub realtime_ns: u64, pub monoton
 
 /// Revision inputs come from authoritative providers. Absent revisions remain
 /// unknown; equality between two absent values must not establish freshness.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SourceRevision {
     pub generation: Option<String>,
     pub profile: Option<String>,
