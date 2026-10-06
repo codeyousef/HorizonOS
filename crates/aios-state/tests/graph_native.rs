@@ -7,6 +7,34 @@ use serde_json::json;
 use sha2::{Digest,Sha256};
 struct Fixture(PathBuf);
 impl Drop for Fixture{fn drop(&mut self){fs::remove_dir_all(&self.0).unwrap();}}
+
+#[test]
+#[ignore="requires an enrolled NixOS guest; reads fixed system pointers only"]
+fn real_system_pointers_are_separate_and_do_not_infer_boot_or_management() {
+    use aios_state::graph::generations::{self, NativeGenerationSnapshot, RUNNING_PROVIDER, PROFILE_PROVIDER};
+    let fixture=Fixture(std::env::temp_dir().join(format!("aios-graph-system-pointers-{}-{}",std::process::id(),time().monotonic_ns)));
+    fs::create_dir(&fixture.0).unwrap();fs::set_permissions(&fixture.0,fs::Permissions::from_mode(0o700)).unwrap();
+    let graph=fixture.0.join("graph");fs::create_dir(&graph).unwrap();fs::set_permissions(&graph,fs::Permissions::from_mode(0o700)).unwrap();
+    let store=GraphStore::open(&graph,Scope::System).unwrap();
+    let snapshot=NativeGenerationSnapshot::collect(&store).unwrap();let pointers=snapshot.pointers().clone();
+    assert_eq!(pointers.running_closure,fs::canonicalize("/run/current-system").unwrap().to_str().unwrap());
+    assert_eq!(pointers.selected_profile_closure.as_deref(),fs::canonicalize("/nix/var/nix/profiles/system").ok().as_ref().and_then(|p|p.to_str()));
+    assert_eq!(pointers.bootloader_entry,None);assert_eq!(pointers.managed_transaction,None);
+    let states=snapshot.apply(&store).unwrap();assert_eq!(states.0.status,ProviderStatus::Ready);
+    assert_eq!(states.1.status,if pointers.selected_profile_generation.is_some(){ProviderStatus::Ready}else{ProviderStatus::Partial});
+    let rows=store.nodes(vec!["generation:running-system".into(),"generation:selected-system-profile".into()]).unwrap();
+    assert_eq!(rows.len(),2);assert_eq!(rows[0].provider,RUNNING_PROVIDER);assert_eq!(rows[0].source_truth,SourceTruth::Running);
+    assert_eq!(rows[1].provider,PROFILE_PROVIDER);assert_eq!(rows[1].source_truth,SourceTruth::BootSelected);
+    assert_eq!(generations::observe().unwrap().1,pointers);
+    let other=fixture.0.join("other");fs::create_dir(&other).unwrap();fs::set_permissions(&other,fs::Permissions::from_mode(0o700)).unwrap();
+    let user=GraphStore::open(&other,Scope::User(unsafe{libc::geteuid()})).unwrap();
+    assert!(matches!(NativeGenerationSnapshot::collect(&user),Err(aios_state::graph::native::Error::WrongScope)));
+    let expired=NativeGenerationSnapshot::collect(&store).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2100));
+    assert!(matches!(expired.apply(&store),Err(aios_state::graph::native::Error::Native(aios_protocol::contracts::ErrorCode::TargetChanged))));
+    println!("AIOS_NATIVE_SYSTEM_POINTERS={}",json!({"evidence_kind":"native-system-pointer-graph-library","pointers":pointers,
+        "source_truths_separate":true,"read_only_system_pointers":true,"boot_and_management_unknown":true,"expired_snapshot_refused":true,"installed_owner_wiring":false}));
+}
 fn time()->ObservationTime {
     let boot=BootId::parse(fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim()).unwrap();
     let mut t=libc::timespec{tv_sec:0,tv_nsec:0};assert_eq!(unsafe{libc::clock_gettime(libc::CLOCK_MONOTONIC,&mut t)},0);
