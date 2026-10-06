@@ -1,0 +1,15 @@
+# Render explicit cache/runtime/socket paths through the trial environment.
+# Use only newly allocated trial Cargo targets, never existing project targets.
+[cache]
+local_only = true
+local_max_size = "1GiB"
+auto_gc = false
+gc_max_age_hours = 0
+index_auto_compact = false
+auto_clean_orphaned_targets = false
+auto_clean_idle_targets_days = 0
+auto_clean_unused_units_days = 0
+clean_incremental = false
+seed_new_targets = false
+event_log_max_size = "4MiB"
+event_log_keep_lines = 100
