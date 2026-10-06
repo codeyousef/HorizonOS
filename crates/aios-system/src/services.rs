@@ -1,4 +1,5 @@
 //! Fixed, read-only native systemd operations. No caller-selected D-Bus method.
+pub mod events;
 use aios_protocol::contracts::{ErrorCode, ProviderError, ProviderResult, ResultStatus, Source};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};

@@ -26,6 +26,30 @@ SYSTEMCTL = '/run/current-system/sw/bin/systemctl'
 PROFILE = 'fixed-installed-graph-owner-v1'
 
 
+def event_proof_valid(value, boot):
+    try:
+        before, after = value['before'], value['after']
+        for observed in (before, after):
+            if (observed['boot'] != boot or observed['event_watcher_installed'] is not True
+                    or observed['event_watcher_error'] is not None or observed['model_invoked'] is not False
+                    or observed['execution_authority'] is not False):
+                return False
+            for field in ('systemd_notifications', 'event_reconciliations'):
+                if type(observed[field]) is not int or observed[field] < 0:
+                    return False
+        captured = value['service']['properties']['captured']
+        previous = before['last_attempt']
+        return (after['systemd_notifications'] > before['systemd_notifications']
+                and after['event_reconciliations'] > before['event_reconciliations']
+                and captured['boot'] == boot and previous['boot'] == boot
+                and type(captured['monotonic_ns']) is int and type(previous['monotonic_ns']) is int
+                and captured['monotonic_ns'] > previous['monotonic_ns']
+                and all(value['service']['properties']['observation'][k] == value['native'][n]
+                        for k, n in [('load_state', 'LoadState'), ('active_state', 'ActiveState'), ('sub_state', 'SubState')]))
+    except (KeyError, TypeError):
+        return False
+
+
 def identity():
     value = snapshot.identity()
     authority = Path('/run/current-system/etc/aios/target-authority.json').resolve(strict=True)
@@ -256,7 +280,20 @@ def main():
         proof['steps']['service_comparison'] = {'native': native, 'captured': cached['data']['properties']['captured'], 'unknown_properties_preserved': all(cached['data']['properties'][k] is None for k in ('main_pid', 'result', 'ordering_after'))}
         if not proof['steps']['service_comparison']['unknown_properties_preserved']:
             raise RuntimeError('unobserved service properties were invented')
+        event_before = graph(expected, executable, '--inspect')
         proof['steps']['foreign_uid_denied'] = denied_probe(expected)
+        deadline = time.monotonic() + 15
+        while True:
+            event_after = graph(expected, executable, '--inspect')
+            event_proof = {'before': event_before, 'after': event_after,
+                'service': graph(expected, executable, '--service', 'sshd.service')['data'],
+                'native': properties(expected, 'sshd.service', ['LoadState', 'ActiveState', 'SubState'])}
+            if event_proof_valid(event_proof, expected['boot_id']):
+                proof['steps']['systemd_events'] = event_proof
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError('actual native systemd notification and snapshot refresh were not verified')
+            time.sleep(0.2)
         before = proof['steps']['startup']['process']
         control(expected, 'restart'); ready(expected, executable)
         after = installed_process(expected, executable)

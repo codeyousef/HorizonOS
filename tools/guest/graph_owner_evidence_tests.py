@@ -2,7 +2,7 @@
 import copy
 import unittest
 import installed_graph_owner_smoke as gate
-from graph_owner_preflight import raw_timer_trigger, denied_probe_valid
+from graph_owner_preflight import raw_timer_trigger, denied_probe_valid, event_proof_valid
 
 class GraphEvidenceTests(unittest.TestCase):
     def test_denial_requires_original_dev_process_exit(self):
@@ -23,10 +23,36 @@ class GraphEvidenceTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(RuntimeError):
                 raw_timer_trigger(text)
 
+    def event_fixture(self):
+        status = {'boot': 'fixture-boot', 'event_watcher_installed': True, 'event_watcher_error': None,
+                  'model_invoked': False, 'execution_authority': False, 'systemd_notifications': 0,
+                  'event_reconciliations': 0, 'last_attempt': {'boot': 'fixture-boot', 'monotonic_ns': 10}}
+        after = dict(status, systemd_notifications=3, event_reconciliations=1)
+        return {'before': status, 'after': after, 'service': {'properties': {
+            'captured': {'boot': 'fixture-boot', 'monotonic_ns': 20},
+            'observation': {'load_state': 'loaded', 'active_state': 'active', 'sub_state': 'running'}}},
+            'native': {'LoadState': 'loaded', 'ActiveState': 'active', 'SubState': 'running'}}
+
+    def test_event_gate_requires_real_notifications_and_new_committed_observation(self):
+        value = self.event_fixture()
+        self.assertTrue(event_proof_valid(value, 'fixture-boot'))
+        for field, other in [('event_watcher_installed', False), ('event_watcher_error', 'disconnected'),
+                             ('systemd_notifications', 0), ('systemd_notifications', True),
+                             ('event_reconciliations', 0), ('event_reconciliations', True),
+                             ('boot', 'foreign-boot'), ('model_invoked', True)]:
+            altered = copy.deepcopy(value); altered['after'][field] = other
+            self.assertFalse(event_proof_valid(altered, 'fixture-boot'))
+        for field, other in [('boot', 'foreign-boot'), ('monotonic_ns', 9), ('monotonic_ns', True)]:
+            altered = copy.deepcopy(value); altered['service']['properties']['captured'][field] = other
+            self.assertFalse(event_proof_valid(altered, 'fixture-boot'))
+        altered = copy.deepcopy(value); altered['native']['ActiveState'] = 'failed'
+        self.assertFalse(event_proof_valid(altered, 'fixture-boot'))
+
     def fixture(self):
         identity = {"boot_id": "fixture-boot", "current_system": "fixture-system"}
         steps = {k: {} for k in gate.REQUIRED}
         steps.update({"service_comparison": {"unknown_properties_preserved": True},
+            "systemd_events": self.event_fixture(),
             "startup_generations": {"execution_authority": False, "data": {"freshness": "Current", "pointers": {"running_closure": "fixture-system", "bootloader_entry": None, "managed_transaction": None}}},
             "foreign_uid_denied": {"upstream_exit": 1, "native_unit": self.denial_unit()},
             "corruption_recovery": {"ledger_unchanged": True},

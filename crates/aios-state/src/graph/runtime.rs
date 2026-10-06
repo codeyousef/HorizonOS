@@ -38,8 +38,20 @@ fn frame_write(stream:&mut UnixStream,value:&Value)->Result<()>{
 struct GenerationCache{captured:ObservationTime,pointers:SystemPointers}
 fn generation_refresh_needed(previous:Option<&SystemPointers>,observed:&SystemPointers,failed:bool)->bool{failed || previous!=Some(observed)}
 struct Owner{graph:GraphStore,ids:Vec<String>,attempts:u64,successful:u64,last_attempt:ObservationTime,last_error:Option<String>,
-    generations:Option<GenerationCache>,generation_error:Option<String>,last_generation_probe:ObservationTime,generation_changes:u64}
+    generations:Option<GenerationCache>,generation_error:Option<String>,last_generation_probe:ObservationTime,generation_changes:u64,event_watcher:bool,event_error:Option<String>,systemd_notifications:u64,event_refreshes:u64}
 impl Owner{
+    fn systemd_event(&mut self,notifications:u64,loss:bool)->Result<()>{
+        let captured=NativeTime::observe()?.observation().clone();
+        self.systemd_notifications=self.systemd_notifications.saturating_add(notifications);
+        self.event_refreshes=self.event_refreshes.checked_add(1).ok_or(Error::Protocol)?;
+        self.graph.ingest_provider_events(SYSTEMD_PROVIDER.into(),vec![ProviderEvent{
+            id:format!("systemd:{}:{}:{}",captured.boot.0,captured.monotonic_ns,self.event_refreshes),entity_id:None,
+            kind:if loss{EventKind::Lost}else{EventKind::Changed},time:captured,origin_transaction_id:None,
+            payload:json!({"source":"pinned-root-systemd-signals","coalesced_notifications":notifications,"possible_loss":loss})}])?;
+        // Notification content never becomes state. Rebuild through native
+        // providers even on loss/disconnect/reconnection, without inference.
+        self.reconcile()
+    }
     fn reconcile_generations(&mut self)->Result<()>{
         let result=(||{
             let snapshot=NativeGenerationSnapshot::collect(&self.graph)?;snapshot.apply(&self.graph)?;
@@ -108,7 +120,8 @@ impl Owner{
         let provider=plan.state.map(|s|json!({"provider":s.provider,"status":s.status,"last_success":s.last_success,"error":s.error}));
         Ok(json!({"schema_version":1,"scope":"system","boot":now.observation().boot,"provider":provider,"reconciliations_attempted":self.attempts,
             "complete_reconciliations":self.successful,"last_attempt":self.last_attempt,"last_error":self.last_error,"observed_loaded_services":self.ids.len(),
-            "period_seconds":900,"model_invoked":false,"execution_authority":false,"event_watcher_installed":false,
+            "period_seconds":900,"model_invoked":false,"execution_authority":false,"event_watcher_installed":self.event_watcher,"event_watcher_error":self.event_error,
+            "systemd_notifications":self.systemd_notifications,"event_reconciliations":self.event_refreshes,
             "generation_poll_seconds":1,"observed_generation_changes":self.generation_changes,"generation_error":self.generation_error,
             "quarantine":self.graph.recovery_receipt().map(|r|r.quarantine_directory.file_name().unwrap_or_default().to_string_lossy())}))
     }
@@ -152,9 +165,34 @@ fn run(uid:u32)->Result<()>{
     let listener=UnixListener::bind(SOCKET)?;fs::set_permissions(SOCKET,fs::Permissions::from_mode(0o600))?;listener.set_nonblocking(true)?;
     let now=NativeTime::observe()?.observation().clone();
     let mut owner=Owner{graph,ids:Vec::new(),attempts:0,successful:0,last_attempt:now.clone(),last_error:None,
-        generations:None,generation_error:None,last_generation_probe:now,generation_changes:0};
+        generations:None,generation_error:None,last_generation_probe:now,generation_changes:0,event_watcher:false,event_error:None,systemd_notifications:0,event_refreshes:0};
+    let mut watcher=aios_system::services::events::SystemdEvents::connect().ok();
+    owner.event_watcher=watcher.is_some();
+    if watcher.is_none(){owner.event_error=Some("SUBSCRIPTION_UNAVAILABLE".into());owner.graph.report_event_loss();}
+    let mut last_connection=std::time::Instant::now();
     if let Err(error)=owner.reconcile(){eprintln!("aios-stated: startup snapshot unavailable: {error:?}");}
     loop{
+        if let Some(events)=watcher.as_mut(){
+            match events.poll(){
+                Ok(batch)=>{
+                    if batch.notifications>0 || batch.loss{
+                        if let Err(error)=owner.systemd_event(batch.notifications,batch.loss){eprintln!("aios-stated: event reconciliation unavailable: {error:?}");}
+                    }
+                    if batch.loss{watcher=None;owner.event_watcher=false;owner.event_error=Some("BOUNDED_DRAIN_LOSS".into());last_connection=std::time::Instant::now();}
+                },
+                Err(error)=>{
+                    watcher=None;owner.event_watcher=false;owner.event_error=Some(format!("{error:?}"));last_connection=std::time::Instant::now();
+                    if let Err(error)=owner.systemd_event(0,true){eprintln!("aios-stated: event loss reconciliation unavailable: {error:?}");}
+                }
+            }
+        }else if last_connection.elapsed()>=Duration::from_secs(5){
+            last_connection=std::time::Instant::now();
+            match aios_system::services::events::SystemdEvents::connect(){
+                Ok(events)=>{watcher=Some(events);owner.event_watcher=true;owner.event_error=None;
+                    if let Err(error)=owner.systemd_event(0,true){eprintln!("aios-stated: reconnected snapshot unavailable: {error:?}");}},
+                Err(error)=>owner.event_error=Some(format!("{error:?}"))
+            }
+        }
         // Fixed periodic fallback also covers a timer signal that was lost.
         if let Err(error)=owner.poll_generations(){eprintln!("aios-stated: native generation sampling unavailable: {error:?}");}
         let now=NativeTime::observe()?;
@@ -205,7 +243,7 @@ pub fn entry()->Result<()>{
         fs::create_dir(&root).unwrap();fs::set_permissions(&root,fs::Permissions::from_mode(0o700)).unwrap();
         let graph=GraphStore::open(&root,Scope::System).unwrap();
         let mut owner=Owner{graph,ids:vec![],attempts:0,successful:0,last_attempt:now.clone(),last_error:None,
-            generations:None,generation_error:None,last_generation_probe:now,generation_changes:0};
+            generations:None,generation_error:None,last_generation_probe:now,generation_changes:0,event_watcher:false,event_error:None,systemd_notifications:0,event_refreshes:0};
         owner.reconcile().unwrap();
         let observed=generations::observe().unwrap().1;
         let view=owner.generation_view().unwrap();assert_eq!(view["data"]["pointers"],serde_json::to_value(&observed).unwrap());
@@ -221,8 +259,15 @@ pub fn entry()->Result<()>{
         assert_eq!(owner.generation_changes,1);assert_eq!(owner.attempts,before+1);
         assert_eq!(owner.generation_view().unwrap()["data"]["freshness"],"Current");
         assert_eq!(owner.generations.as_ref().unwrap().pointers,observed);
+        let before=owner.attempts;
+        // Fixture notifications exercise native rebuild and explicit loss handling,
+        // not actual unit transitions or the installed event subscription.
+        owner.systemd_event(3,false).unwrap();assert_eq!(owner.attempts,before+1);
+        assert_eq!(owner.systemd_notifications,3);assert_eq!(owner.event_refreshes,1);
+        owner.systemd_event(0,true).unwrap();assert_eq!(owner.attempts,before+2);
+        assert_eq!(owner.event_refreshes,2);
         println!("AIOS_NATIVE_OWNER_GENERATIONS={}",json!({"native_pointers":observed,"unchanged_samples_coalesced":true,
-            "injected_old_cache_invalidated":true,"native_reconciliation_restored":true,"system_profile_mutated":false,"installed_owner_verified":false}));
+            "injected_old_cache_invalidated":true,"native_reconciliation_restored":true,"system_profile_mutated":false,"installed_owner_verified":false,"fixture_event_batches_reconcile_native_snapshots":true}));
         drop(owner);fs::remove_dir_all(root).unwrap();
     }
     #[test]fn oversized_or_empty_frames_are_refused_before_allocation(){

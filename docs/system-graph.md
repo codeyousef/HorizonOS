@@ -141,7 +141,16 @@ or failed reads cannot claim current state. The profile does not prove a
 bootloader entry or approved managed transaction; those fields remain unknown.
 Once per second, the owner samples the two fixed pointers. An observed change
 invalidates generation and service snapshots, records bounded native generation
-events and reconciles without inference. Unchanged samples coalesce. This polling
-does not claim a systemd event subscription, complete closure metadata or user
-overlay reconciliation. The fifteen-minute timer/fallback remains independent.
-This system owner does not yet provide user overlays or native systemd event watching.
+events and reconciles without inference. Unchanged samples coalesce.
+
+A separate native sd-bus connection subscribes to the UID-0 system manager at
+its fixed system-bus endpoint. Manager and unit-property notifications from
+that pinned unique sender invalidate the service provider; signal bodies never
+become graph facts. Each drain has a 64-operation/20ms budget. Notifications
+coalesce into one fresh native reconciliation. A bounded drain, disconnected
+bus or changed manager identity reports possible loss and drops the old
+subscription. Reconnection every five seconds rebuilds the native snapshot;
+there is no inferred healthy state during loss. Status exposes subscription
+availability and errors separately from snapshot completeness. The independent
+fifteen-minute timer/fallback remains active. Complete closure metadata and user
+overlay reconciliation remain separate providers.
