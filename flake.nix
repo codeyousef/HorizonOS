@@ -66,6 +66,9 @@
         postInstall = (old.postInstall or "") + ''
           install -Dm644 ${./nix/packages/aios-sessiond.service} "$out/share/systemd/user/aios-sessiond.service"
           substituteInPlace "$out/share/systemd/user/aios-sessiond.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-sessiond"
+          install -Dm644 ${./nix/packages/aios-sessiond-settings.path} "$out/share/systemd/user/aios-sessiond-settings.path"
+          install -Dm644 ${./nix/packages/aios-sessiond-settings-refresh.service} "$out/share/systemd/user/aios-sessiond-settings-refresh.service"
+          substituteInPlace "$out/share/systemd/user/aios-sessiond-settings-refresh.service" --replace-fail @SYSTEMCTL@ "${self.nixosConfigurations.aios-dev.config.systemd.package}/bin/systemctl"
           install -Dm644 ${./nix/packages/aios-ui-agent.service} "$out/share/systemd/user/aios-ui-agent.service"
           substituteInPlace "$out/share/systemd/user/aios-ui-agent.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-ui-agent"
           install -Dm644 ${./nix/packages/aios-processd.service} "$out/share/systemd/user/aios-processd.service"

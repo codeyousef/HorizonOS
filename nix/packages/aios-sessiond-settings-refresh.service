@@ -1,0 +1,31 @@
+[Unit]
+Description=Refresh AIOS broker settings visibility
+ConditionUser=!root
+
+[Service]
+Type=oneshot
+ExecStart=@SYSTEMCTL@ --user try-restart aios-sessiond.service
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+PrivateNetwork=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=%t
+PrivateUsers=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+MemoryMax=64M
+TasksMax=16
+TimeoutStartSec=10

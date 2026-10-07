@@ -20,6 +20,10 @@ in {
       wantedBy = [ "default.target" ];
       overrideStrategy = "asDropin";
     };
+    systemd.user.paths.aios-sessiond-settings = {
+      wantedBy = [ "default.target" ];
+      overrideStrategy = "asDropin";
+    };
     systemd.user.services.aios-processd = {
       wantedBy = [ "default.target" ];
       overrideStrategy = "asDropin";
