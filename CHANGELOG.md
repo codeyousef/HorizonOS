@@ -13,6 +13,7 @@
   selection, and verify declared runtime artifacts against the running Nix closure.
 - Export a revision-bound typed catalog for the seven managed configuration
   options with explicit access and completeness semantics.
-- Enumerate bounded root-owned system profile generation history while keeping
-  user profiles and unattributed management provenance explicitly unknown.
+- Enumerate bounded system and per-user profile generation history using
+  separate native owners without cross-user profile leakage, while keeping
+  ephemeral inventory and unattributed management provenance explicitly unknown.
 - Initial Rust protocol framing and NixOS engineering scaffold.

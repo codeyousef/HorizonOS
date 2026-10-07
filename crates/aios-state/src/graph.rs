@@ -10,6 +10,7 @@ pub mod generations;
 pub mod devices;
 pub mod built;
 pub mod service_evidence;
+pub mod user_profiles;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]

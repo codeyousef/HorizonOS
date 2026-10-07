@@ -151,9 +151,14 @@ The provider also performs a bounded, stable enumeration of root-owned
 `system-N-link` history. Each entry records its generation, realized closure,
 running/selected status, `declarative_system_profile` ownership and null
 management attribution. Null attribution is unknown—not evidence that a user or
-transaction created it. User profiles are explicitly not observed by this
-system-scoped owner; they require a user-scoped owner rather than cross-user
-enumeration.
+transaction created it. The system owner never enumerates another account's
+profiles. A separately sandboxed user timer derives only its effective account
+from the native account database and inventories the two documented Nix profile
+locations for that account. It stores a private `Scope::User(uid)` graph under
+the user's state directory, reports stable selected/history closures as
+`user_profile`, and accepts no account, path, profile name, command or SQL input.
+Absence is explicit and ephemeral/non-profile store references remain incomplete
+until a separate scoped provider observes them.
 
 The native pointers and history are rechecked before/after persistence.
 Generation diagnostics compare the cache with a new native read; missing,

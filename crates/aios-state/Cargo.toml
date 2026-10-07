@@ -20,3 +20,7 @@ path = "src/main.rs"
 [[bin]]
 name = "aios-stated"
 path = "src/state_main.rs"
+
+[[bin]]
+name = "aios-user-stated"
+path = "src/user_state_main.rs"

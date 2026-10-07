@@ -42,5 +42,46 @@ in {
       wantedBy = [ "timers.target" ];
       timerConfig = { OnActiveSec = "15min"; OnUnitActiveSec = "15min"; AccuracySec = "1s"; Unit = "aios-reconcile.service"; };
     };
+    systemd.user.services.aios-user-profile-reconcile = {
+      description = "Horizon OS private per-user Nix profile reconciliation";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${aiosState}/bin/aios-user-stated --reconcile";
+        UMask = "0077";
+        StateDirectory = "aios/user-graph";
+        StateDirectoryMode = "0700";
+        NoNewPrivileges = true;
+        CapabilityBoundingSet = "";
+        ProtectSystem = "strict";
+        PrivateTmp = true;
+        PrivateDevices = true;
+        PrivateNetwork = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectKernelLogs = true;
+        ProtectControlGroups = true;
+        RestrictAddressFamilies = [ "AF_UNIX" ];
+        RestrictNamespaces = true;
+        RestrictSUIDSGID = true;
+        LockPersonality = true;
+        MemoryDenyWriteExecute = true;
+        SystemCallArchitectures = "native";
+        SystemCallFilter = [ "@system-service" ];
+        MemoryMax = "128M";
+        TasksMax = 16;
+        LimitNOFILE = 1024;
+        TimeoutStartSec = 15;
+      };
+    };
+    systemd.user.timers.aios-user-profile-reconcile = {
+      description = "Reconcile the private per-user Nix profile graph";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "1min";
+        OnUnitActiveSec = "15min";
+        AccuracySec = "1s";
+        Unit = "aios-user-profile-reconcile.service";
+      };
+    };
   };
 }
