@@ -265,6 +265,19 @@ impl Agent {
         value["transport"] = Value::String("session-dbus".into());
         serde_json::to_string(&value).map_err(|_| ErrorCode::InvalidArgument.into())
     }
+    async fn model_status(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        self.dispatch(connection, header, Operation::GetCapabilities).await?;
+        let value = blocking::unblock(|| crate::inference::Endpoint::installed().status()).await?;
+        serde_json::to_string(&serde_json::json!({"schema_version":1,"operation":"model_status","data":value,"mutation_performed":false}))
+            .map_err(|_| ErrorCode::InvalidArgument.into())
+    }
+    async fn unload_model(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        self.dispatch(connection, header, Operation::GetCapabilities).await?;
+        let value = blocking::unblock(|| crate::inference::Endpoint::installed().unload()).await?;
+        let mutation_performed=value["unload_requested"]==true;
+        serde_json::to_string(&serde_json::json!({"schema_version":1,"operation":"model_unload","data":value,"mutation_performed":mutation_performed}))
+            .map_err(|_| ErrorCode::InvalidArgument.into())
+    }
     async fn submit(&self, request_json: &str, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
         if request_json.len() > MAX_TASK_BYTES { return Err(ErrorCode::ResourceExhausted.into()); }
         let request: Request = serde_json::from_str(request_json).map_err(|_| ErrorCode::InvalidArgument)?;
@@ -472,6 +485,25 @@ impl Client {
     }
     pub fn capabilities(&self) -> std::result::Result<Value, ErrorCode> {
         serde_json::from_str(&self.call("GetCapabilities", &())?).map_err(|_| ErrorCode::InvalidArgument)
+    }
+    pub fn model_status(&self) -> std::result::Result<Value, ErrorCode> {
+        let value:Value=serde_json::from_str(&self.call("ModelStatus",&())?).map_err(|_|ErrorCode::InvalidArgument)?;
+        if value["schema_version"]!=1 || value["operation"]!="model_status" || value["mutation_performed"]!=false
+            || !value["data"]["loaded"].is_boolean() || !value["data"]["busy"].is_boolean()
+            || !value["data"]["own_queued"].is_u64() || !value["data"]["queue_limit"].is_u64()
+            || !value["data"]["threads"].is_u64() || !value["data"]["context_tokens"].is_u64() {
+            return Err(ErrorCode::TargetChanged);
+        }
+        Ok(value)
+    }
+    pub fn unload_model(&self) -> std::result::Result<Value, ErrorCode> {
+        let value:Value=serde_json::from_str(&self.call("UnloadModel",&())?).map_err(|_|ErrorCode::InvalidArgument)?;
+        if value["schema_version"]!=1 || value["operation"]!="model_unload"
+            || !value["data"]["unload_requested"].is_boolean()
+            || value["mutation_performed"]!=value["data"]["unload_requested"] {
+            return Err(ErrorCode::TargetChanged);
+        }
+        Ok(value)
     }
     pub fn submit(&self, request: &crate::Submit) -> std::result::Result<String, ErrorCode> {
         let value = serde_json::json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),"operation":{"kind":"submit","request":request}}).to_string();

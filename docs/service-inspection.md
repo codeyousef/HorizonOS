@@ -165,11 +165,12 @@ rechecks
 the daemon's live owner identity; default endpoints ignore environment
 variables that redirect the bus or select another user's runtime directory.
 
-`aiosctl model status` inspects lifecycle, queue and profile state over the
-credential-checked local model socket without loading model weights. `aiosctl
-model unload` requests an unload only when no generation or queue entry is
-active; otherwise it returns `CONFLICT`. Both commands accept `--json`, never
-submit model text and never expose a tool or shell capability.
+`aiosctl model status` asks the authenticated per-user session broker to inspect
+lifecycle, queue and profile state over its credential-checked local model
+socket without loading model weights. `aiosctl model unload` uses the same
+caller-pinned D-Bus route and requests an unload only when no generation or
+queue entry is active; otherwise it returns `CONFLICT`. Both commands accept
+`--json`, never submit model text and never expose a tool or shell capability.
 
 Public `Submit` takes the same versioned control request used by the private
 transport, with `operation.kind=submit` and a typed `operation.request`. Other

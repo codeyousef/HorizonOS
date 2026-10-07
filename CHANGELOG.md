@@ -12,8 +12,8 @@
   answer/citation output, optional typed JSON, and no shell-generation path.
 - Add human-readable `aiosctl inspect service` output while retaining complete
   typed observations behind `--json`.
-- Add deterministic `aiosctl model status` and `model unload` controls over the
-  credential-checked local socket without invoking inference.
+- Add deterministic `aiosctl model status` and `model unload` controls through
+  the caller-authenticated session API without invoking inference.
 - Recover verified installer downloads after interrupted partial transfers instead
   of leaving a cache entry that blocks every subsequent clean installation.
 - Isolate each QEMU process in a collected per-VM systemd user service with

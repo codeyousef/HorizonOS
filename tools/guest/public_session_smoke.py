@@ -70,10 +70,15 @@ def main():
         return int(match[1]) if match else None
     owner_pid=bus_owner_pid()
     fragment=Path(installed.get("FragmentPath",""))
-    fragment_info=fragment.stat() if fragment.is_file() else None
+    try:
+        resolved_fragment=fragment.resolve(strict=True)
+        fragment_info=resolved_fragment.stat()
+    except (OSError,RuntimeError):
+        resolved_fragment=Path("/")
+        fragment_info=None
     if (installed.get("LoadState")!="loaded" or installed.get("ActiveState")!="active"
             or installed.get("MainPID")!=str(owner_pid) or owner_pid is None
-            or not re.fullmatch(r"/nix/store/[a-z0-9]{32}-aios-core-[A-Za-z0-9._+-]+/share/systemd/user/aios-sessiond\.service",str(fragment))
+            or not re.fullmatch(r"/nix/store/[a-z0-9]{32}-aios-core-[A-Za-z0-9._+-]+/share/systemd/user/aios-sessiond\.service",str(resolved_fragment))
             or fragment_info is None or fragment_info.st_uid!=0 or fragment_info.st_mode&0o222):
         raise RuntimeError("existing broker is not the protected installed user service")
     restore_installed=False
@@ -140,6 +145,15 @@ def main():
         capabilities = json.loads(status.stdout)
         if capabilities["transport"] != "session-dbus" or capabilities["ui_enabled"] or capabilities["inference_available"]:
             raise RuntimeError("session availability scope mismatch")
+        model_controls=None
+        if not installed_model:
+            model_controls={}
+            for operation in ("status","unload"):
+                response=cli("model",operation,"--json")
+                value=json.loads(response.stdout)
+                if response.returncode!=1 or value["operation"]!="client_error" or value["error"]["code"]!="MODEL_UNAVAILABLE":
+                    raise RuntimeError("model-disabled CLI control did not return its typed unavailable result")
+                model_controls[operation]={"upstream_exit":response.returncode,"response":value}
         ui = cli("ui", "select-session", "aios-no-such-session", "--json")
         ui_denial = json.loads(ui.stdout)
         if ui.returncode != 1 or ui_denial["error"]["code"] != "TARGET_NOT_FOUND":
@@ -217,7 +231,7 @@ def main():
             "unit_name":UNIT,"package_unit_sha256":hashlib.sha256(unit_bytes).hexdigest(),"exact_unit_bytes":True,
             "binary_source":"installed-system-closure" if installed_model else "nix-built-packages",
             "executables":{k:{"path":str(v),"sha256":hashlib.sha256(v.read_bytes()).hexdigest()} for k,v in binaries.items()},
-            "capabilities":capabilities,"ui_selection_denial":ui_denial,"installed_model":installed_model,"model_answer":answer,"model_service_answer":service_answer,"history_test_client":str(history_client) if history_client else None,"public_history":history_proof,"service_observation":observed}), flush=True)
+            "capabilities":capabilities,"ui_selection_denial":ui_denial,"installed_model":installed_model,"model_controls":model_controls,"model_answer":answer,"model_service_answer":service_answer,"history_test_client":str(history_client) if history_client else None,"public_history":history_proof,"service_observation":observed}), flush=True)
     except Exception:
         print("AIOS_USER_SERVICE_FAILURE=" + json.dumps(show()), flush=True)
         journal = subprocess.run(["journalctl", "--user", "--user-unit=" + UNIT, "--boot", "--lines=20", "--no-pager", "--output=json", "--output-fields=MESSAGE,PRIORITY,_BOOT_ID,_UID"],

@@ -86,7 +86,7 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let conn = connect(); let api = proxy(&conn);
     let introspection = Proxy::new(&conn, NAME, PATH, "org.freedesktop.DBus.Introspectable").unwrap();
     let xml: String = introspection.call("Introspect", &()).unwrap();
-    for method in ["GetCapabilities", "Submit", "GetStatus", "GetEvents", "Cancel", "Forget", "ListProcesses", "InspectProcess"] {
+    for method in ["GetCapabilities", "ModelStatus", "UnloadModel", "Submit", "GetStatus", "GetEvents", "Cancel", "Forget", "ListProcesses", "InspectProcess"] {
         assert!(xml.contains(&format!("name=\"{method}\"")));
     }
     let agent_xml = xml.split("<interface name=\"org.aios.Agent1\">").nth(1).unwrap().split("</interface>").next().unwrap();
@@ -164,6 +164,8 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let caps: Value = serde_json::from_str(&caps).unwrap();
     assert_eq!(caps["transport"], "session-dbus"); assert_eq!(caps["ui_enabled"],false);
     println!("AIOS_DBUS_CAPABILITIES={caps}");
+    code(api.call::<_,_,String>("ModelStatus",&()).unwrap_err(),"MODEL_UNAVAILABLE");
+    code(api.call::<_,_,String>("UnloadModel",&()).unwrap_err(),"MODEL_UNAVAILABLE");
     let submitted = request("Private prompt must not be broadcast", "dbus-real-nonce");
     let task: String = api.call("Submit", &(submitted.as_str(),)).unwrap();
     let same: String = api.call("Submit", &(submitted.as_str(),)).unwrap(); assert_eq!(task,same);

@@ -105,18 +105,18 @@ fn run(args: Vec<String>) {
         _ => None,
     };
     if let Some((operation, json)) = model {
-        let endpoint = aios_session::inference::Endpoint::installed();
-        let result = if operation == "status" { endpoint.status() } else { endpoint.unload() };
+        let result = aios_session::bus::Client::connect_user_bus().and_then(|client|
+            if operation == "status" { client.model_status() } else { client.unload_model() });
         match result {
             Ok(value) => {
                 if json {
                     println!("{value}");
                 } else if operation == "status" {
-                    match human_model_status(&value) {
+                    match human_model_status(&value["data"]) {
                         Ok(output) => println!("{output}"),
                         Err(code) => api_error(code),
                     }
-                } else if value["unload_requested"] == true {
+                } else if value["data"]["unload_requested"] == true {
                     println!("Model unload requested.");
                 } else {
                     api_error(aios_protocol::contracts::ErrorCode::ModelOutputInvalid);
