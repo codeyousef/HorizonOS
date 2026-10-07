@@ -330,7 +330,36 @@ surface!(Applications,"org.aios.Applications1",[(list,"apps.list"),(launch,"apps
 surface!(Settings,"org.aios.Settings1",[(get,"settings.get"),(set,"settings.set")]);
 surface!(Audio,"org.aios.Audio1",[(outputs,"audio.outputs"),(inputs,"audio.inputs"),(default_get,"audio.default_get"),
     (default_set,"audio.default_set"),(mute_set,"audio.mute_set")]);
-surface!(Power,"org.aios.Power1",[(status,"power.status"),(profile_set,"power.profile_set")]);
+pub struct Power {agent:Agent}
+#[zbus::interface(name = "org.aios.Power1")]
+impl Power {
+    async fn get_capabilities(&self,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        self.agent.capabilities_for(connection,header,"org.aios.Power1",&["power.status","power.profile_set"]).await
+    }
+    async fn status(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        self.agent.action(connection,header,request_json,"power.status").await
+    }
+    async fn profile_set(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        self.agent.action(connection,header,request_json,"power.profile_set").await
+    }
+    async fn confirm_profile_set(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        let _admission=self.agent.admit()?;
+        if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
+        let request:Request=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
+        if request.schema_version!=1||!crate::uuid(&request.request_id){return Err(ErrorCode::InvalidArgument.into());}
+        let operation=parse_operation(request.operation.get())?;
+        let crate::Operation::ConfirmPowerProfile{task_id,session_handle,goal,mode,tool_call}=operation else{return Err(ErrorCode::InvalidArgument.into());};
+        if request.request_id!=task_id||mode!=crate::Mode::Act||!crate::uuid(&task_id)||!crate::uuid(&session_handle){return Err(ErrorCode::InvalidArgument.into());}
+        let action=aios_protocol::contracts::parse_tool_call(tool_call.get().as_bytes())?;
+        if action.action_id()!="power.profile_set"{return Err(ErrorCode::InvalidArgument.into());}
+        let peer=Agent::peer(connection,&header).await?;
+        let session=crate::selected_ui_session(&self.agent.state,&peer,&session_handle)?;
+        let original=peer.clone();let value=blocking::unblock(move||crate::power_profile_change::execute(original,session,task_id,goal,action)).await?;
+        if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
+        let result=serde_json::to_string(&value).map_err(|_|ErrorCode::InvalidArgument)?;
+        if result.len()>aios_protocol::MAX_FRAME_BYTES{return Err(ErrorCode::ResourceExhausted.into());}Ok(result)
+    }
+}
 
 pub fn export(address: &str, state: SharedState) -> zbus::Result<zbus::blocking::Connection> {
     let agent = Agent::new(state);

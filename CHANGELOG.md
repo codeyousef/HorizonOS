@@ -33,9 +33,9 @@
   observations instead of discarding truthful power data during validation.
 - Parse WirePlumber's actual `[vol: … MUTED]` status form and wait boundedly
   for asynchronous default/mute readback before issuing a verified receipt.
-- Add the fixed PowerDevil power-profile mutation adapter with allowlisted
-  choices, stale-state checks, bounded readback and prior-profile recovery;
-  execution remains on the R2 exact-confirmation path.
+- Add the R2 native-confirmed PowerDevil profile route with allowlisted choices,
+  stale-state and caller/desktop checks, bounded readback and prior-profile
+  recovery; direct and R1 execution remain denied.
 - Project only the two registered KDE settings files into the sandboxed
   session broker after late Plasma initialization or atomic configuration
   replacement.

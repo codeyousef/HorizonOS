@@ -83,9 +83,10 @@ at their corresponding `/org/aios/...` paths. The interfaces share the same
 Metadata, Read, Summarize, Copy, MoveFile, Trash and Restore; Applications
 exposes List, Launch, Actions and Invoke; Settings exposes Get and Set; Audio
 exposes Outputs, Inputs, DefaultGet, DefaultSet and MuteSet; Power exposes
-Status and ProfileSet. Each action method takes one versioned control request
-with `operation.kind=invoke` and a strict registry `tool_call`. The method fixes
-the permitted action ID: Search accepts only `files.search`, for example.
+Status, ProfileSet and ConfirmProfileSet. Ordinary action methods take one
+versioned control request with `operation.kind=invoke` and a strict registry
+`tool_call`. The method fixes the permitted action ID: Search accepts only
+`files.search`, for example.
 Callers cannot choose another dispatch namespace through its JSON.
 GetCapabilities reports registered contracts separately from available actions.
 File and application providers currently report unavailable. Settings Get is
@@ -105,20 +106,30 @@ provider identities fail closed.
 
 Direct provider-interface invocation carries no bounded task grant, so every
 write action returns `AUTH_REQUIRED`, including Audio DefaultSet and MuteSet and
-Power ProfileSet. An authenticated caller may instead use Agent1
-`ExecuteTaskAction` with an exact `act` goal and typed action. The R1 route
-accepts audio default/mute and all three registered desktop settings. It mints
-an opaque caller/boot/policy/action/resource/argument/expiry-bound task grant,
-revalidates the live caller and target immediately before a fixed provider
-effect, verifies provider readback, and returns the prior typed action as
-recovery data. Theme changes map only `light`/`dark` to the pinned Plasma
-color-scheme helper. Display idle writes only the current, allowlisted
-PowerDevil profile's fixed timeout key and reparses PowerDevil. Keyboard
-backlight uses only UPower's bounded brightness method and refuses percentages
-the hardware cannot represent and recover exactly. No arbitrary KConfig
-command, profile, key or scheme enters the API. It never accepts an approval
-boolean, command, numeric node ID or serialized grant. The R2 power profile
-remains confirmation-gated.
+Power ProfileSet. An authenticated caller may use Agent1 `ExecuteTaskAction`
+with an exact `act` goal and typed R1 action. That route accepts audio
+default/mute and all three registered desktop settings. It mints an opaque
+caller/boot/policy/action/resource/argument/expiry-bound task grant, revalidates
+the live caller and target immediately before a fixed provider effect, verifies
+provider readback, and returns the prior typed action as recovery data. Theme
+changes map only `light`/`dark` to the pinned Plasma color-scheme helper.
+Display idle writes only the current, allowlisted PowerDevil profile's fixed
+timeout key and reparses PowerDevil. Keyboard backlight uses only UPower's
+bounded brightness method and refuses percentages the hardware cannot represent
+and recover exactly. No arbitrary KConfig command, profile, key or scheme enters
+the API. It never accepts an approval boolean, command, numeric node ID or
+serialized grant.
+
+R2 `power.profile_set` uses Power1 `ConfirmProfileSet`, not the R1 route. Its
+strict `confirm_power_profile` request contains only a task ID, selected
+graphical-session handle, goal, `act` mode and typed tool call. The broker
+derives the prior profile and PowerDevil-advertised allowlist, binds both plus
+the authenticated caller, boot, native desktop, policy revision, nonce and
+expiry into the immutable native dialog, and revalidates the bus sender,
+desktop and provider state immediately before the effect. Only
+`power-saver`, `balanced` and `performance` can be displayed or executed.
+Readback and the prior-profile recovery action are mandatory. No decision,
+token, prior value, profile choices, bus name or object path enters the request.
 The shared `aios-policy` evaluator binds each available read to the authenticated
 caller, original connection, request, fixed action and concrete broker-issued
 resources.

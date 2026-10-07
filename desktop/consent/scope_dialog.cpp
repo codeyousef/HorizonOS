@@ -49,16 +49,18 @@ std::optional<ScopePreview> ScopePreview::parse(const QByteArray &canonical) {
     if (error.error != QJsonParseError::NoError || !parsed.isObject() || parsed.toJson(QJsonDocument::Compact) != canonical) return {};
     auto o = parsed.object();
     const bool termination = o["kind"] == "process_termination";
+    const bool powerProfile = o["kind"] == "power_profile_change";
     const QStringList fields = termination
         ? QStringList{"schema_version","kind","digest","uid","session_id","target","profile","mode","goal","process_id","preview","closure","actions","issued_ms","expires_ms","evidence"}
+        : powerProfile ? QStringList{"schema_version","kind","digest","uid","session_id","target","profile","mode","goal","preview","actions","issued_ms","expires_ms","evidence"}
         : QStringList{"schema_version","kind","digest","uid","session_id","target","profile","mode","goal","apps","actions","issued_ms","expires_ms","evidence"};
-    if (!keys(o, fields) || o["schema_version"] != 1 || (!termination && o["kind"] != "read_scope")) return {};
+    if (!keys(o, fields) || o["schema_version"] != 1 || (!termination && !powerProfile && o["kind"] != "read_scope")) return {};
     quint64 uid, issued, expires;
     auto now = boottimeMs();
     if (!integer(o["uid"], uid) || uid != geteuid() || uid == 0 || !integer(o["issued_ms"], issued) || !integer(o["expires_ms"], expires) || !now || issued > now || expires <= now || expires <= issued || expires-issued > 300000) return {};
     static const QRegularExpression hash("^[0-9a-f]{64}$");
     static const QRegularExpression session("^[A-Za-z0-9_-]{1,128}$");
-    if (!text(o["digest"],64) || !hash.match(o["digest"].toString()).hasMatch() || !text(o["session_id"],128) || !session.match(o["session_id"].toString()).hasMatch() || !text(o["target"],256) || !text(o["profile"],256) || !text(o["goal"],4096) || (termination ? o["mode"] != "act" : (o["mode"] != "ask" && o["mode"] != "diagnose"))) return {};
+    if (!text(o["digest"],64) || !hash.match(o["digest"].toString()).hasMatch() || !text(o["session_id"],128) || !session.match(o["session_id"].toString()).hasMatch() || !text(o["target"],256) || !text(o["profile"],256) || !text(o["goal"],4096) || ((termination || powerProfile) ? o["mode"] != "act" : (o["mode"] != "ask" && o["mode"] != "diagnose"))) return {};
     if (!o["evidence"].isArray() || o["evidence"].toArray().size() > 16) return {};
     for (auto e : o["evidence"].toArray()) if (!text(e,128)) return {};
     if (termination) {
@@ -80,6 +82,19 @@ std::optional<ScopePreview> ScopePreview::parse(const QByteArray &canonical) {
             || !text(i["executable_identity"],256)) return {};
         QFile boot("/proc/sys/kernel/random/boot_id");
         if (!boot.open(QIODevice::ReadOnly) || QString::fromLatin1(boot.read(64)).trimmed()!=i["boot_id"].toString()) return {};
+    } else if (powerProfile) {
+        if (!o["actions"].isArray() || o["actions"].toArray()!=QJsonArray{"power.profile_set"} || !o["preview"].isObject()) return {};
+        auto p=o["preview"].toObject();
+        if (!keys(p,{"prior","requested","available_profiles","reversible"}) || p["reversible"]!=true
+            || !text(p["prior"],32) || !text(p["requested"],32) || !p["available_profiles"].isArray()
+            || p["available_profiles"].toArray().isEmpty() || p["available_profiles"].toArray().size()>3) return {};
+        QSet<QString> profiles;
+        for (auto value:p["available_profiles"].toArray()) {
+            if (!value.isString() || (value!="power-saver" && value!="balanced" && value!="performance")
+                || profiles.contains(value.toString())) return {};
+            profiles.insert(value.toString());
+        }
+        if (!profiles.contains(p["prior"].toString()) || !profiles.contains(p["requested"].toString())) return {};
     } else {
     if (!o["apps"].isArray() || o["apps"].toArray().isEmpty() || o["apps"].toArray().size() > 16 || !o["actions"].isArray() || o["actions"].toArray().isEmpty() || o["actions"].toArray().size() > 2 || !o["evidence"].isArray() || o["evidence"].toArray().size() > 16) return {};
     QSet<QString> handles, actions;
@@ -100,7 +115,8 @@ ScopeDialog::ScopeDialog(const ScopePreview &preview) : preview_(preview) {
     setWindowTitle(tr("Horizon OS — Needs permission"));
     setObjectName("aios-protected-confirmation");
     const bool termination=preview.document["kind"]=="process_termination";
-    setAccessibleName(termination ? tr("Horizon OS process termination permission") : tr("Horizon OS application read permission"));
+    const bool powerProfile=preview.document["kind"]=="power_profile_change";
+    setAccessibleName(termination ? tr("Horizon OS process termination permission") : powerProfile ? tr("Horizon OS power profile permission") : tr("Horizon OS application read permission"));
     setModal(true); resize(600,540);
     auto layout = new QVBoxLayout(this);
     auto content = new QWidget; auto rows = new QVBoxLayout(content);
@@ -122,6 +138,10 @@ ScopeDialog::ScopeDialog(const ScopePreview &preview) : preview_(preview) {
         label("closure",tr("System closure: %1").arg(o["closure"].toString()));
         label("scope",tr("Action: process.terminate — R2\nSend one SIGTERM to this process. Verify exit within %1 milliseconds.\nThis may interrupt work or lose unsaved data. It cannot be undone.\nAn ignored signal or timeout reports a partial effect. No automatic SIGKILL or retry.")
             .arg(p["verification_timeout_ms"].toInt()));
+    } else if (powerProfile) {
+        auto p=o["preview"].toObject();QStringList choices;for(auto value:p["available_profiles"].toArray())choices<<value.toString();
+        label("scope",tr("Action: power.profile_set — R2\nChange power profile from %1 to %2.\nAvailable profiles: %3\nThe previous profile is recorded for recovery. The change is verified by native readback.")
+            .arg(p["prior"].toString(),p["requested"].toString(),choices.join(", ")));
     } else {
     QStringList apps;
     for (auto a : o["apps"].toArray()) {
@@ -138,11 +158,11 @@ ScopeDialog::ScopeDialog(const ScopePreview &preview) : preview_(preview) {
     auto scroll = new QScrollArea; scroll->setWidgetResizable(true); scroll->setWidget(content); layout->addWidget(scroll);
     auto buttons = new QDialogButtonBox;
     auto cancel = buttons->addButton(tr("Cancel"),QDialogButtonBox::RejectRole);
-    auto allow = buttons->addButton(termination ? tr("Terminate this process") : tr("Allow this read scope"),QDialogButtonBox::AcceptRole);
+    auto allow = buttons->addButton(termination ? tr("Terminate this process") : powerProfile ? tr("Change power profile") : tr("Allow this read scope"),QDialogButtonBox::AcceptRole);
     cancel->setObjectName("cancel"); allow->setObjectName("allow");
     cancel->setDefault(true); allow->setDefault(false); allow->setAutoDefault(false);
     cancel->setAccessibleDescription(tr("Decline and close this permission request"));
-    allow->setAccessibleDescription(termination ? tr("Confirm one graceful termination attempt on only the displayed process") : tr("Confirm only the displayed application read scope until its expiration"));
+    allow->setAccessibleDescription(termination ? tr("Confirm one graceful termination attempt on only the displayed process") : powerProfile ? tr("Confirm only the displayed power profile change") : tr("Confirm only the displayed application read scope until its expiration"));
     layout->addWidget(buttons); cancel->setFocus();
     connect(cancel,&QPushButton::clicked,this,[this]{finish(false);});
     connect(allow,&QPushButton::clicked,this,[this]{finish(true);});

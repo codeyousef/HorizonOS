@@ -31,6 +31,13 @@ static QJsonObject processFixture() {
         {"signal","SIGTERM"},{"verification_timeout_ms",1000},{"reversible",false},{"automatic_escalation",false}};
     return o;
 }
+static QJsonObject powerProfileFixture() {
+    auto o=fixture();o["kind"]="power_profile_change";o["mode"]="act";o.remove("apps");
+    o["actions"]=QJsonArray{"power.profile_set"};
+    o["preview"]=QJsonObject{{"prior","balanced"},{"requested","power-saver"},
+        {"available_profiles",QJsonArray{"balanced","performance","power-saver"}},{"reversible",true}};
+    return o;
+}
 static QByteArray wire(const QJsonObject &o) {return QJsonDocument(o).toJson(QJsonDocument::Compact);}
 class ConsentTests : public QObject {
     Q_OBJECT
@@ -65,6 +72,22 @@ private slots:
         o["process_id"]="changed";allow->setFocus();QTest::keyClick(allow,Qt::Key_Space);
         QCOMPARE(result.count(),1);QCOMPARE(result[0][0].toString(),p->digest);QCOMPARE(result[0][1].toBool(),true);
         QVERIFY(!process->text().contains("changed"));dialog.withdraw();QCOMPARE(result.count(),1);
+    }
+    void powerProfileRequiresExactBoundedReversiblePreview() {
+        auto o=powerProfileFixture();auto preview=ScopePreview::parse(wire(o));QVERIFY(preview);
+        ScopeDialog dialog(*preview);dialog.show();
+        auto scope=dialog.findChild<QLabel *>("scope");QVERIFY(scope);
+        QVERIFY(scope->text().contains("balanced"));QVERIFY(scope->text().contains("power-saver"));
+        QCOMPARE(dialog.findChild<QPushButton *>("allow")->text(),QString("Change power profile"));
+        for(int field=0;field<8;field++){
+            auto changed=powerProfileFixture();auto p=changed["preview"].toObject();
+            switch(field){case 0:p["prior"]="invalid";break;case 1:p["requested"]="invalid";break;
+                case 2:p["reversible"]=false;break;case 3:p["available_profiles"]=QJsonArray{};break;
+                case 4:p["available_profiles"]=QJsonArray{"balanced","balanced"};break;
+                case 5:changed["actions"]=QJsonArray{"power.profile_set","settings.set"};break;
+                case 6:changed["mode"]="ask";break;case 7:changed["approved"]=true;break;}
+            changed["preview"]=p;QVERIFY(!ScopePreview::parse(wire(changed)));
+        }
     }
     void invalidAuthorityAndExpiry() {
         QVERIFY(ScopePreview::parse(wire(fixture())));

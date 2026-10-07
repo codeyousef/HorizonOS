@@ -16,6 +16,7 @@ pub mod bus;
 pub mod inference;
 mod processes;
 mod native_settings;
+mod power_profile_change;
 mod process_selection;
 use aios_protocol::{MAX_TASK_BYTES, read_frame_with_limit, write_frame, contracts::{Action, ErrorCode, ProviderError, parse_tool_call, canonical_json}};
 use aios_system::services::{service_result, validate_service_name};
@@ -46,6 +47,7 @@ pub struct Submit {
 pub enum Operation {
     StartProcessTermination { task_id:String,process_id:String,session_handle:String,goal:String,mode:Mode },
     GetProcessTermination { task_id:String },CancelProcessTermination { task_id:String },ForgetProcessTermination { task_id:String },
+    ConfirmPowerProfile { task_id:String,session_handle:String,goal:String,mode:Mode,tool_call:Box<RawValue> },
     ExecuteTaskAction { task_id:String,goal:String,mode:Mode,tool_call:Box<RawValue> },
     GetCapabilities,
     GetSystemInfo,
@@ -94,6 +96,7 @@ fn parse_operation(raw: &str) -> Result<Operation, ErrorCode> {
         "get_process_termination"=>fields!(GetProcessTermination{task_id:String}),
         "cancel_process_termination"=>fields!(CancelProcessTermination{task_id:String}),
         "forget_process_termination"=>fields!(ForgetProcessTermination{task_id:String}),
+        "confirm_power_profile"=>fields!(ConfirmPowerProfile{task_id:String,session_handle:String,goal:String,mode:Mode,tool_call:Box<RawValue>}),
         "execute_task_action"=>fields!(ExecuteTaskAction{task_id:String,goal:String,mode:Mode,tool_call:Box<RawValue>}),
         "get_capabilities" | "get_system_info" => {
             #[derive(Deserialize)]
@@ -459,7 +462,7 @@ impl State {
     pub fn dispatch(&mut self, peer: &Peer, operation: Operation) -> Result<Value, ErrorCode> {
         self.prune();
         match operation {
-            Operation::StartProcessTermination{..}|Operation::GetProcessTermination{..}|Operation::CancelProcessTermination{..}|Operation::ForgetProcessTermination{..}=>Err(ErrorCode::AuthRequired),
+            Operation::StartProcessTermination{..}|Operation::GetProcessTermination{..}|Operation::CancelProcessTermination{..}|Operation::ForgetProcessTermination{..}|Operation::ConfirmPowerProfile{..}=>Err(ErrorCode::AuthRequired),
             Operation::ExecuteTaskAction{task_id,goal,mode,tool_call}=>self.execute_task_action(peer,task_id,goal,mode,tool_call),
             Operation::GetCapabilities => Ok(json!({"schema_version":1,"request_id":Uuid::new_v4().to_string(),"operation":"capabilities","actions":["system.info","system.service_status"],
                 "read_only":true,"inference_available":self.inference_available,"inference_configured":self.inference_configured,"ui_enabled":false,"ui_session_selection_available":true,"transport":"private-unix",
@@ -795,6 +798,17 @@ mod tests {
             r#"{"kind":"submit","request":{"mode":"ask","text":"test","client_nonce":"a","mode":"act"}}"#,
             r#"{"kind":"execute_task_action","task_id":"11111111-1111-4111-8111-111111111111","goal":"Mute output","mode":"act","tool_call":{"kind":"tool_call","action_id":"audio.mute_set","arguments":{"node_id":"audio:output:fixture","muted":true}},"approved":true}"#,
         ] { assert_eq!(parse_operation(raw).unwrap_err(), ErrorCode::InvalidArgument); }
+    }
+    #[test]
+    fn power_profile_confirmation_shape_cannot_carry_claimed_authority(){
+        let id=Uuid::new_v4().to_string();let raw=json!({"kind":"confirm_power_profile","task_id":id,
+            "session_handle":id,"goal":"Use power saver","mode":"act","tool_call":{"kind":"tool_call",
+            "action_id":"power.profile_set","arguments":{"profile":"power-saver"}}}).to_string();
+        let mut state=State::default();assert_eq!(state.dispatch(&peer_fixture(),parse_operation(&raw).unwrap()),Err(ErrorCode::AuthRequired));
+        for field in ["approved","decision","token","prior","available_profiles","bus_name","object_path"]{
+            let mut value:Value=serde_json::from_str(&raw).unwrap();value[field]=json!(true);
+            assert_eq!(parse_operation(&value.to_string()).unwrap_err(),ErrorCode::InvalidArgument);
+        }
     }
     #[test]
     fn paging_requires_original_graphical_transport_and_rejects_forged_authority(){

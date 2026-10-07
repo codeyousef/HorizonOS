@@ -146,8 +146,9 @@ fn power_profile_state()->Result<(String,Vec<String>),ErrorCode>{
     let session=session_bus()?;
     let profile=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/PowerProfile","org.kde.Solid.PowerManagement.Actions.PowerProfile").map_err(|_|ErrorCode::UnsupportedCapability)?;
     let current:String=profile.call("currentProfile",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
-    let choices:Vec<String>=profile.call("profileChoices",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let mut choices:Vec<String>=profile.call("profileChoices",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
     if choices.is_empty()||choices.len()>3||choices.iter().any(|value|!matches!(value.as_str(),"power-saver"|"balanced"|"performance")){return Err(ErrorCode::UnsupportedCapability);}
+    choices.sort();if choices.windows(2).any(|pair|pair[0]==pair[1]){return Err(ErrorCode::TargetChanged);}
     if !choices.contains(&current){return Err(ErrorCode::TargetChanged);}Ok((current,choices))
 }
 fn await_power_profile(expected:&str)->Result<(),ErrorCode>{
@@ -218,6 +219,12 @@ impl PreparedMutation{
         };
         Ok(Self{action_id:action.action_id().into(),arguments,operation_id,kind})
     }
+    pub fn power_profile_preview(&self)->Result<(String,String,Vec<String>),ErrorCode>{
+        match &self.kind{
+            MutationKind::PowerProfile{value,prior,choices}=>Ok((prior.clone(),value.clone(),choices.clone())),
+            _=>Err(ErrorCode::InvalidArgument),
+        }
+    }
     pub fn scope(&self)->aios_policy::Scope{
         let resource=match &self.kind{
             MutationKind::AudioDefault{target,..}|MutationKind::AudioMute{target,..}=>Some(aios_policy::Resource{
@@ -226,7 +233,7 @@ impl PreparedMutation{
         };
         aios_policy::Scope{actions:[self.action_id.clone()].into(),resources:resource.into_iter().collect(),..Default::default()}
     }
-    pub fn execute(mut self,mut revalidate:impl FnMut(&Self)->Result<(),ErrorCode>)->Result<MutationReceipt,ErrorCode>{
+    pub fn execute(self,mut revalidate:impl FnMut(&Self)->Result<(),ErrorCode>)->Result<MutationReceipt,ErrorCode>{
         revalidate(&self)?;
         let (output,recovery,changed)=match &self.kind{
             MutationKind::AudioDefault{direction,target,prior}=>{
@@ -307,8 +314,15 @@ impl PreparedMutation{
 }
 impl aios_policy::CurrentResources for PreparedMutation{
     fn resolve(&self,field:&str,kind:&str,reference:&str)->Result<String,ErrorCode>{
-        if field!="node_id"||kind!="scope-owner-expiry"{return Err(ErrorCode::PermissionDenied);}
-        let node=selected_node(reference,None)?;Ok(node_identity(&node))
+        match (&self.kind,field,kind,reference){
+            (MutationKind::PowerProfile{prior,choices,..},"power_profile","native-setting-state","current")=>{
+                let (current,current_choices)=power_profile_state()?;
+                if &current!=prior||&current_choices!=choices{return Err(ErrorCode::TargetChanged);}
+                aios_policy::digest(&(current,current_choices))
+            },
+            (_,"node_id","scope-owner-expiry",_)=>{let node=selected_node(reference,None)?;Ok(node_identity(&node))},
+            _=>Err(ErrorCode::PermissionDenied),
+        }
     }
     fn dynamic_arguments(&self,id:&str,args:&Value,scope:&aios_policy::Scope)->Result<(),ErrorCode>{
         if id==self.action_id&&args==&self.arguments&&scope.actions.contains(id){Ok(())}else{Err(ErrorCode::PermissionDenied)}
@@ -322,10 +336,12 @@ pub fn available_actions(actions:&[String])->Vec<String>{
     let audio=actions.iter().any(|id|id.starts_with("audio.")).then(||audio_nodes().is_ok());
     let settings=actions.iter().any(|id|id=="settings.get").then(||["desktop.theme_mode","display.idle_seconds","keyboard.backlight_percent"].iter().any(|key|setting(key).is_ok()));
     let power=actions.iter().any(|id|id=="power.status").then(||power_status().is_ok());
+    let power_profile=actions.iter().any(|id|id=="power.profile_set").then(||power_profile_state().is_ok());
     actions.iter().filter(|id|match id.as_str(){
         "audio.outputs"|"audio.inputs"|"audio.default_get"|"audio.default_set"|"audio.mute_set"=>audio==Some(true),
         "settings.get"|"settings.set"=>settings==Some(true),
         "power.status"=>power==Some(true),
+        "power.profile_set"=>power_profile==Some(true),
         _=>false,
     }).cloned().collect()
 }
