@@ -104,7 +104,7 @@ def main():
         raise RuntimeError("service lifecycle preflight requires the enrolled disposable development guest")
     marker = MARKER.lstat()
     dev_uid = pwd.getpwnam("dev").pw_uid
-    if not stat.S_ISREG(marker.st_mode) or marker.st_uid != dev_uid or stat.S_IMODE(marker.st_mode) != 0o644 or marker.st_size != 33:
+    if not stat.S_ISREG(marker.st_mode) or marker.st_uid != dev_uid or stat.S_IMODE(marker.st_mode) != 0o600 or marker.st_size != 33:
         raise RuntimeError("invalid lifecycle request marker")
     token = MARKER.read_text()
     if len(token) != 33 or not token.endswith("\n") or any(c not in "0123456789abcdef" for c in token[:-1]):

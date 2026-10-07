@@ -117,14 +117,15 @@ explicitly disabled until their owning milestones install them; reserved
 service accounts do not imply a running service.
 
 The disposable `aios-desktop-test` image additionally contains a fixed lifecycle
-qualification path unit. A mode-0644 correlation marker owned by `dev` can
-trigger only the installed no-argument verifier. Ownership and the fixed path,
-not token secrecy, authorize the request; the public mode avoids granting the
-root verifier filesystem-override capabilities. It restarts the fixed AIOS
-system and tester user units, proves SSH/network/display independence,
-terminates the tester login, and publishes a bounded public report under
-`/run`. The path unit and verifier are absent from `aios-dev` and production
-composition; they accept no unit, command, path, or argument from the requester.
+qualification path unit. A mode-0600 correlation marker owned by `dev` can
+trigger only the installed no-argument verifier. The test-only root unit retains
+only DAC-read/search and UID/GID-switch capabilities so it can read that marker,
+enter the `tester` identity, and address the tester user manager. It restarts
+the fixed AIOS system and tester user units, proves SSH/network/display
+independence, terminates the tester login, and publishes a bounded public report
+under `/run`. The path unit and verifier are absent from `aios-dev` and
+production composition; they accept no unit, command, path, or argument from
+the requester.
 
 The host captures the **public** host key and SHA256 fingerprint through a serial
 connection tied to the exact QEMU PID/UID, after checking QMP UUID and root disk.
