@@ -9,6 +9,15 @@ use time::{OffsetDateTime,format_description::well_known::Rfc3339};
 const PROVIDER_VERSION:&str=env!("CARGO_PKG_VERSION");
 const WPCTL:&str=match option_env!("AIOS_WPCTL"){Some(path)=>path,None=>"wpctl"};
 const KREADCONFIG:&str=match option_env!("AIOS_KREADCONFIG"){Some(path)=>path,None=>"kreadconfig6"};
+fn session_bus()->Result<zbus::blocking::Connection,ErrorCode>{
+    let address=format!("unix:path=/run/user/{}/bus",nix::unistd::geteuid().as_raw());
+    zbus::blocking::connection::Builder::address(address.as_str()).map_err(|_|ErrorCode::UnsupportedCapability)?
+        .method_timeout(Duration::from_millis(500)).build().map_err(|_|ErrorCode::UnsupportedCapability)
+}
+fn system_bus()->Result<zbus::blocking::Connection,ErrorCode>{
+    zbus::blocking::connection::Builder::address("unix:path=/run/dbus/system_bus_socket").map_err(|_|ErrorCode::UnsupportedCapability)?
+        .method_timeout(Duration::from_millis(500)).build().map_err(|_|ErrorCode::UnsupportedCapability)
+}
 fn envelope(provider:&str,data:Value,complete:bool)->Result<Value,ErrorCode>{
     let value=json!({"schema_version":1,"status":if complete{"ok"}else{"partial"},"observed_at":OffsetDateTime::now_utc().format(&Rfc3339).map_err(|_|ErrorCode::TargetChanged)?,
         "source":{"provider":provider,"provider_version":PROVIDER_VERSION},"evidence_ids":[],"complete":complete,"next_cursor":null,"data":data,"error":null});
@@ -23,7 +32,7 @@ fn command(program:&str,args:&[&str])->Result<String,ErrorCode>{
         return String::from_utf8(output.stdout).map_err(|_|ErrorCode::TargetChanged);
     },None if Instant::now()<deadline=>thread::sleep(Duration::from_millis(10)),None=>{let _=child.kill();let _=child.wait();return Err(ErrorCode::DeadlineExceeded)}}}
 }
-#[derive(Clone,Debug,PartialEq,Eq)]struct AudioNode{direction:&'static str,name:String,muted:Option<bool>,default:bool}
+#[derive(Clone,Debug,PartialEq,Eq)]struct AudioNode{id:u32,direction:&'static str,name:String,muted:Option<bool>,default:bool}
 fn handle(direction:&str,name:&str)->String{format!("audio:{direction}:{:x}",Sha256::digest(name.as_bytes()))}
 fn parse_audio(value:&str)->Result<Vec<AudioNode>,ErrorCode>{
     if value.len()>256*1024{return Err(ErrorCode::ResourceExhausted);}let mut section=None;let mut result=Vec::new();
@@ -34,10 +43,11 @@ fn parse_audio(value:&str)->Result<Vec<AudioNode>,ErrorCode>{
     }
         let Some(direction)=section else{continue};let item=trimmed.trim_start_matches('│').trim();if item.is_empty(){continue;}
         let (default,item)=if let Some(rest)=item.strip_prefix('*'){(true,rest.trim())}else{(false,item)};
-        let Some((number,rest))=item.split_once('.') else{continue};if number.trim().parse::<u32>().is_err(){continue;}
+        let Some((number,rest))=item.split_once('.') else{continue};let Ok(id)=number.trim().parse::<u32>() else{continue};
         let name=rest.split_once('[').map_or(rest,|v|v.0).trim();if name.is_empty()||name.len()>256{return Err(ErrorCode::TargetChanged);}
         let muted=if rest.contains("[MUTED]"){Some(true)}else if rest.contains("[vol:"){Some(false)}else{None};
-        result.push(AudioNode{direction,name:name.into(),muted,default});if result.len()>100{return Err(ErrorCode::ResourceExhausted);}
+        if result.iter().any(|node: &AudioNode|node.direction==direction&&node.name==name){return Err(ErrorCode::TargetChanged);}
+        result.push(AudioNode{id,direction,name:name.into(),muted,default});if result.len()>100{return Err(ErrorCode::ResourceExhausted);}
     }
     Ok(result)
 }
@@ -58,7 +68,7 @@ fn setting(key:&str)->Result<Value,ErrorCode>{
             (json!(mode),"kconfig-pinned")
         },
         "display.idle_seconds"=>{
-            let session=zbus::blocking::Connection::session().map_err(|_|ErrorCode::UnsupportedCapability)?;
+            let session=session_bus()?;
             let power=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement","org.kde.Solid.PowerManagement").map_err(|_|ErrorCode::UnsupportedCapability)?;
             let profile:String=power.call("currentProfile",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
             if !matches!(profile.as_str(),"AC"|"Battery"|"LowBattery"){return Err(ErrorCode::UnsupportedCapability);}
@@ -68,7 +78,7 @@ fn setting(key:&str)->Result<Value,ErrorCode>{
             (json!(seconds),"powerdevil-kconfig-pinned")
         },
         "keyboard.backlight_percent"=>{
-            let system=zbus::blocking::Connection::system().map_err(|_|ErrorCode::UnsupportedCapability)?;
+            let system=system_bus()?;
             let keyboard=zbus::blocking::Proxy::new(&system,"org.freedesktop.UPower","/org/freedesktop/UPower/KbdBacklight","org.freedesktop.UPower.KbdBacklight").map_err(|_|ErrorCode::UnsupportedCapability)?;
             let current:i32=keyboard.call("GetBrightness",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
             let maximum:i32=keyboard.call("GetMaxBrightness",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
@@ -80,12 +90,12 @@ fn setting(key:&str)->Result<Value,ErrorCode>{
     envelope(provider,json!({"key":key,"value":value,"ownership":"user"}),true)
 }
 fn power_status()->Result<Value,ErrorCode>{
-    let session=zbus::blocking::Connection::session().map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let session=session_bus()?;
     let profile=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/PowerProfile","org.kde.Solid.PowerManagement.Actions.PowerProfile").map_err(|_|ErrorCode::UnsupportedCapability)?;
     let current:String=profile.call("currentProfile",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
     let choices:Vec<String>=profile.call("profileChoices",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
     if choices.len()>3||choices.iter().any(|v|!matches!(v.as_str(),"power-saver"|"balanced"|"performance")){return Err(ErrorCode::TargetChanged);}
-    let current=choices.contains(&current).then_some(current);let system=zbus::blocking::Connection::system().map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let current=choices.contains(&current).then_some(current);let system=system_bus()?;
     let upower=zbus::blocking::Proxy::new(&system,"org.freedesktop.UPower","/org/freedesktop/UPower","org.freedesktop.UPower").map_err(|_|ErrorCode::UnsupportedCapability)?;
     let on_battery:bool=upower.get_property("OnBattery").map_err(|_|ErrorCode::UnsupportedCapability)?;
     let devices:Vec<zbus::zvariant::OwnedObjectPath>=upower.call("EnumerateDevices",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
@@ -110,4 +120,4 @@ pub fn available_actions(actions:&[String])->Vec<String>{
     }).cloned().collect()
 }
 
-#[cfg(test)]mod tests{use super::*;#[test]fn pinned_wpctl_shape_yields_stable_handles_and_missing_input(){let value="Audio\n ├─ Sinks:\n │  *   52. auto_null [vol: 1.00]\n ├─ Sources:\n │  \n ├─ Filters:\n";let nodes=parse_audio(value).unwrap();assert_eq!(nodes.len(),1);assert!(nodes[0].default);assert_eq!(nodes[0].muted,Some(false));assert_eq!(handle("output","auto_null"),handle("output","auto_null"));}#[test]fn malformed_or_unbounded_audio_is_refused(){assert!(parse_audio("Audio\n ├─ Sinks:\n │ * x. invalid [vol: 1.00]").unwrap().is_empty());assert_eq!(parse_audio(&"x".repeat(256*1024+1)),Err(ErrorCode::ResourceExhausted));}}
+#[cfg(test)]mod tests{use super::*;#[test]fn pinned_wpctl_shape_yields_stable_handles_and_missing_input(){let value="Audio\n ├─ Sinks:\n │  *   52. auto_null [vol: 1.00]\n ├─ Sources:\n │  \n ├─ Filters:\n";let nodes=parse_audio(value).unwrap();assert_eq!(nodes.len(),1);assert_eq!(nodes[0].id,52);assert!(nodes[0].default);assert_eq!(nodes[0].muted,Some(false));assert_eq!(handle("output","auto_null"),handle("output","auto_null"));}#[test]fn malformed_unbounded_or_colliding_audio_is_refused(){assert!(parse_audio("Audio\n ├─ Sinks:\n │ * x. invalid [vol: 1.00]").unwrap().is_empty());assert_eq!(parse_audio(&"x".repeat(256*1024+1)),Err(ErrorCode::ResourceExhausted));assert_eq!(parse_audio("Audio\n ├─ Sinks:\n │ 1. duplicate [vol: 1.00]\n │ 2. duplicate [vol: 1.00]"),Err(ErrorCode::TargetChanged));}}
