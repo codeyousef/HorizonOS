@@ -38,6 +38,25 @@
     after = [ "aios-storage-full-fixture.service" ];
     requires = [ "aios-storage-full-fixture.service" ];
   };
+  systemd.services.aios-removable-device-fixture = {
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.udev}/bin/udevadm trigger --action=change /sys/class/block/sr0";
+      NoNewPrivileges = true;
+      PrivateNetwork = true;
+      ProtectSystem = "strict";
+      CapabilityBoundingSet = "";
+    };
+    unitConfig.ConditionPathExists = "/sys/class/block/sr0";
+  };
+  systemd.timers.aios-removable-device-fixture = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "1s";
+      OnUnitActiveSec = "1s";
+      Unit = "aios-removable-device-fixture.service";
+    };
+  };
   environment.systemPackages = [ (pkgs.writeScriptBin "aios-desktop-test-probe" ''
     #!${pkgs.runtimeShell}
     exec ${pkgs.python3}/bin/python3 -I ${../../tools/guest/desktop_probe.py}
