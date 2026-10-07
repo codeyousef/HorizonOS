@@ -7,6 +7,7 @@ use std::{process::{Command,Stdio},thread,time::{Duration,Instant}};
 use time::{OffsetDateTime,format_description::well_known::Rfc3339};
 
 const PROVIDER_VERSION:&str=env!("CARGO_PKG_VERSION");
+const WPCTL:&str=match option_env!("AIOS_WPCTL"){Some(path)=>path,None=>"wpctl"};
 fn envelope(provider:&str,data:Value,complete:bool)->Result<Value,ErrorCode>{
     let value=json!({"schema_version":1,"status":if complete{"ok"}else{"partial"},"observed_at":OffsetDateTime::now_utc().format(&Rfc3339).map_err(|_|ErrorCode::TargetChanged)?,
         "source":{"provider":provider,"provider_version":PROVIDER_VERSION},"evidence_ids":[],"complete":complete,"next_cursor":null,"data":data,"error":null});
@@ -39,7 +40,7 @@ fn parse_audio(value:&str)->Result<Vec<AudioNode>,ErrorCode>{
     }
     Ok(result)
 }
-fn audio_nodes()->Result<Vec<AudioNode>,ErrorCode>{parse_audio(&command("wpctl",&["status","--name"])?)}
+fn audio_nodes()->Result<Vec<AudioNode>,ErrorCode>{parse_audio(&command(WPCTL,&["status","--name"])?)}
 fn audio_list(direction:&str)->Result<Value,ErrorCode>{
     let nodes=audio_nodes()?;let devices=nodes.into_iter().filter(|n|n.direction==direction).map(|n|json!({"node_id":handle(n.direction,&n.name),"name":n.name,"available":true,"muted":n.muted,"default":n.default,"routing":"pipewire-session-default"})).collect::<Vec<_>>();
     envelope("pipewire-wireplumber",json!({"devices":devices}),true)
