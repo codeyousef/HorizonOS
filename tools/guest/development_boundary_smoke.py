@@ -46,6 +46,9 @@ def main():
         "productionConsoleAutologin":"Production excludes graphical and console acceptance autologin.",
         "productionDevAccount":"Production excludes reserved development and tester accounts.",
         "productionTesterAccount":"Production excludes reserved development and tester accounts.",
+        "productionTestProfile":"Production excludes disposable test scenario profiles.",
+        "productionFixtureService":"Production excludes fixed acceptance fixture services.",
+        "productionFixtureActivation":"Production excludes fixed acceptance fixture activation units.",
         "sessionMissingPackage":"Enabled Horizon OS user broker requires the reviewed aiosCore package.",
         "visualWithoutDesktop":"Horizon OS visual control requires desktop.enable.",
         "initrdWithoutRecovery":"Horizon OS initrd diagnostics require recovery.enable.",
@@ -107,7 +110,7 @@ def main():
         "initial_native_preflight_nonroot_denial":{"argv":["python3",str(release / "tools/guest/initial_preflight.py")],"upstream_exit":5,"actual_uid":os.getuid()},
         "initial_finish_syntax":{"argv":["bash","-n"],"upstream_exit":0,"script_sha256":hashlib.sha256(finish).hexdigest(),"executed":False},
         "root_registration_verified":False,"guarded_activation_verified":False,"production_boot_verified":False,
-        "limitations":["Filesystem-copy and target checks are fixtures under the dev UID.","The helper has not been installed in the running system; no VM sudo or activation performed.","Guarded test/commit and production isolation remain unimplemented/unverified."]}, sort_keys=True))
+        "limitations":["Filesystem-copy and target checks are fixtures under the dev UID.","The helper has not been installed in the running system; no VM sudo or activation performed.","Production fixture exclusions are module-evaluation evidence only; production boot remains unverified."]}, sort_keys=True))
 
 
 if __name__ == "__main__":

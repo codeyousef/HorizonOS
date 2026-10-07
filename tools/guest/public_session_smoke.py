@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real packaged user unit; never replace an existing service."""
 import hashlib
-import uuid
+import atexit
 import json
 import fcntl
 import os
@@ -14,7 +14,7 @@ import time
 from service_inspection_smoke import products
 from model_public_fixture import require_system_answer
 
-UNIT = "aios-session-acceptance-" + uuid.uuid4().hex + ".service"
+UNIT = "aios-sessiond.service"
 
 
 def installed_products():
@@ -57,11 +57,36 @@ def main():
         arguments = [part for key in selected for part in ("--property", key)]
         output = ctl("show", UNIT, *arguments).stdout.decode()
         return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
-    if show()["LoadState"] != "not-found":
-        raise RuntimeError("qualification unit must not replace an existing unit")
-    has_owner = subprocess.run(["busctl", "--user", "call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner", "s", "org.aios.Session1"], env=env, check=True, stdout=subprocess.PIPE, timeout=5)
-    if has_owner.stdout.strip() != b"b false":
-        raise RuntimeError("existing public broker owner must not be replaced")
+    installed=show()
+    owner_pid=None
+    def bus_owner_pid():
+        result = subprocess.run(["busctl", "--user", "call", "org.freedesktop.DBus",
+            "/org/freedesktop/DBus", "org.freedesktop.DBus",
+            "GetConnectionUnixProcessID", "s", "org.aios.Session1"],
+            env=env, stdout=subprocess.PIPE, timeout=5)
+        if result.returncode:
+            return None
+        match=re.fullmatch(rb"u ([1-9][0-9]*)\n?",result.stdout)
+        return int(match[1]) if match else None
+    owner_pid=bus_owner_pid()
+    fragment=Path(installed.get("FragmentPath",""))
+    fragment_info=fragment.stat() if fragment.is_file() else None
+    if (installed.get("LoadState")!="loaded" or installed.get("ActiveState")!="active"
+            or installed.get("MainPID")!=str(owner_pid) or owner_pid is None
+            or not re.fullmatch(r"/nix/store/[a-z0-9]{32}-aios-core-[A-Za-z0-9._+-]+/share/systemd/user/aios-sessiond\.service",str(fragment))
+            or fragment_info is None or fragment_info.st_uid!=0 or fragment_info.st_mode&0o222):
+        raise RuntimeError("existing broker is not the protected installed user service")
+    restore_installed=False
+    def restore_installed_service():
+        nonlocal restore_installed
+        if restore_installed:
+            if runtime_link.exists() or runtime_link.is_symlink():
+                if not owns_link():
+                    return
+                runtime_link.unlink()
+                ctl("daemon-reload")
+            ctl("start","aios-sessiond.service")
+            restore_installed=False
     unit_file = binaries["aios-sessiond"].parents[1] / "share/systemd/user/aios-sessiond.service"
     unit_bytes = unit_file.read_bytes()
     if len(unit_bytes)>65536:
@@ -78,6 +103,15 @@ def main():
     def owns_link():
         info=runtime_link.lstat()
         return stat.S_ISREG(info.st_mode) and info.st_uid==os.geteuid() and info.st_nlink==1 and stat.S_IMODE(info.st_mode)==0o600 and runtime_link.read_bytes()==unit_bytes
+    restore_installed=True
+    atexit.register(restore_installed_service)
+    ctl("stop","aios-sessiond.service")
+    for _ in range(100):
+        if bus_owner_pid() is None:
+            break
+        time.sleep(0.02)
+    if bus_owner_pid() is not None:
+        raise RuntimeError("installed public broker did not release its bus name")
     def owns_fragment(properties):
         fragment = properties.get("FragmentPath", "")
         return bool(fragment) and Path(fragment)==runtime_link and owns_link()
@@ -205,6 +239,8 @@ def main():
             ctl("daemon-reload")
         else:
             raise RuntimeError("runtime service ownership changed; cleanup refused")
+        restore_installed_service()
+        atexit.unregister(restore_installed_service)
 
 
 if __name__ == "__main__":

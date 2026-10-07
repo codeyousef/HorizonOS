@@ -24,6 +24,21 @@
       message = "Production excludes graphical and console acceptance autologin."; }
     { assertion = !(config.users.users ? dev) && !(config.users.users ? tester);
       message = "Production excludes reserved development and tester accounts."; }
+    { assertion = builtins.all (name: !(builtins.hasAttr name config.environment.etc)) [
+        "aios/desktop-test-profile" "aios/graph-test-profile"
+        "aios/model-test-profile" "aios/service-fixture-profile"
+      ];
+      message = "Production excludes disposable test scenario profiles."; }
+    { assertion = builtins.all (name: !(builtins.hasAttr name config.systemd.services)) [
+        "aios-storage-full-fixture" "aios-removable-device-fixture"
+        "aios-service-lifecycle-test" "aios-graph-denied-probe"
+        "aios-graph-acceptance" "aios-service-failure-fixture"
+        "aios-service-restart-fixture" "aios-model-acceptance"
+      ];
+      message = "Production excludes fixed acceptance fixture services."; }
+    { assertion = !(builtins.hasAttr "aios-service-lifecycle-test" config.systemd.paths)
+        && !(builtins.hasAttr "aios-removable-device-fixture" config.systemd.timers);
+      message = "Production excludes fixed acceptance fixture activation units."; }
   ];
   nix.settings.trusted-users = lib.mkDefault [ "root" ];
 }

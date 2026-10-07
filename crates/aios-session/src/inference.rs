@@ -112,6 +112,16 @@ impl Endpoint {
         let identity = self.qualification_pid.map(|pid| identity::authenticate_process(credentials.0,pid)).transpose()?;
         Ok(ModelClient { stream, qualification_identity: identity })
     }
+    fn control(&self, kind: &str) -> Result<Value, ErrorCode> {
+        let operation = match kind {
+            "get_status" | "unload" => json!({"kind":kind}),
+            _ => return Err(ErrorCode::InvalidArgument),
+        };
+        let raw = self.connect()?.call(operation)?;
+        serde_json::from_str(raw.get()).map_err(|_| ErrorCode::ModelOutputInvalid)
+    }
+    pub fn status(&self) -> Result<Value, ErrorCode> { self.control("get_status") }
+    pub fn unload(&self) -> Result<Value, ErrorCode> { self.control("unload") }
 }
 struct ModelClient { stream: UnixStream, qualification_identity: Option<Peer> }
 impl ModelClient {
@@ -474,6 +484,35 @@ mod tests {
         assert!(run_one(&state,&Endpoint{path:path.clone(),qualification_pid:Some(std::process::id())}));
         let result=state.lock().unwrap().dispatch(&peer,Operation::GetStatus{task_id:id}).unwrap();
         server.join().unwrap();fs::remove_file(path).unwrap();fs::remove_dir(directory).unwrap();result
+    }
+    #[test]
+    fn explicit_model_controls_use_authenticated_transport_without_generation() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory=PathBuf::from(format!("/run/user/{}",nix::unistd::geteuid()))
+            .join(format!("aios-model-control-{}",Uuid::new_v4().simple()));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory,fs::Permissions::from_mode(0o700)).unwrap();
+        let path=directory.join("model.sock");
+        let listener=UnixListener::bind(&path).unwrap();
+        fs::set_permissions(&path,fs::Permissions::from_mode(0o600)).unwrap();
+        let server=thread::spawn(move || {
+            for (expected,data) in [
+                ("get_status",json!({"loaded":false,"busy":false,"own_queued":0,"queue_limit":8,"threads":4,"context_tokens":8192})),
+                ("unload",json!({"unload_requested":true})),
+            ] {
+                let (mut socket,_)=listener.accept().unwrap();
+                let request:Value=serde_json::from_str(&read_frame_with_limit(&mut socket,MAX_TASK_BYTES).unwrap().unwrap()).unwrap();
+                assert_eq!(request["operation"]["kind"],expected);
+                write_frame(&mut socket,&json!({"schema_version":1,"request_id":request["request_id"],
+                    "operation":"response","data":data,"error":null}).to_string()).unwrap();
+            }
+        });
+        let endpoint=Endpoint{path:path.clone(),qualification_pid:Some(std::process::id())};
+        assert_eq!(endpoint.status().unwrap()["loaded"],false);
+        assert_eq!(endpoint.unload().unwrap()["unload_requested"],true);
+        server.join().unwrap();
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
     #[test]
     fn fixture_native_token_budget_drops_optional_history_without_structural_repair(){

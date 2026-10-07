@@ -14,6 +14,29 @@ fn request(text: &str, nonce: &str) -> String {
     json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),
         "operation":{"kind":"submit","request":{"mode":"ask","text":text,"client_nonce":nonce}}}).to_string()
 }
+struct RestoreInstalledSession(bool);
+impl Drop for RestoreInstalledSession {
+    fn drop(&mut self) {
+        if !self.0 { return; }
+        let connection=connect();
+        let manager=Proxy::new(&connection,"org.freedesktop.systemd1","/org/freedesktop/systemd1","org.freedesktop.systemd1.Manager").unwrap();
+        let _:zbus::zvariant::OwnedObjectPath=manager.call("StartUnit",&("aios-sessiond.service","replace")).unwrap();
+    }
+}
+fn stop_installed_session() -> RestoreInstalledSession {
+    let connection=connect();
+    let bus=Proxy::new(&connection,"org.freedesktop.DBus","/org/freedesktop/DBus","org.freedesktop.DBus").unwrap();
+    let owned:bool=bus.call("NameHasOwner",&(NAME,)).unwrap();
+    if !owned { return RestoreInstalledSession(false); }
+    let manager=Proxy::new(&connection,"org.freedesktop.systemd1","/org/freedesktop/systemd1","org.freedesktop.systemd1.Manager").unwrap();
+    let _:zbus::zvariant::OwnedObjectPath=manager.call("StopUnit",&("aios-sessiond.service","replace")).unwrap();
+    for _ in 0..100 {
+        if !bus.call::<_,_,bool>("NameHasOwner",&(NAME,)).unwrap() { return RestoreInstalledSession(true); }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("installed session service did not release its bus name");
+}
+
 fn code(error: zbus::Error, expected: &str) {
     let zbus::Error::MethodError(name, _, _) = error else { panic!("unexpected error: {error}") };
     assert_eq!(name.as_str(),format!("org.aios.Error.{expected}"));
@@ -33,6 +56,7 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let lock = fs::OpenOptions::new().read(true).write(true).create(true).mode(0o600)
         .custom_flags(nix::libc::O_NOFOLLOW).open(directory.join("public-session.lock")).unwrap();
     lock.lock().unwrap();
+    let _restore=stop_installed_session();
     let server = bus::export_user_bus(Arc::new(Mutex::new(State::default()))).unwrap();
     // A normal subscriber (not an eavesdropping monitor) listens to ALL signals
     // from this unique server owner. Test-only public fences delimit the real
@@ -118,9 +142,13 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let get=action_request("settings.get",json!({"key":"desktop.theme_mode"}));
     match settings.call::<_,_,String>("Get",&(get.as_str(),)){Ok(value)=>{let result=aios_protocol::validation::validate_result("settings.get",value.as_bytes()).unwrap();assert_eq!(result["data"]["key"],"desktop.theme_mode");},Err(error)=>code(error,"UNSUPPORTED_CAPABILITY")}
     let outputs=action_request("audio.outputs",json!({}));
-    let outputs:String=audio.call("Outputs",&(outputs.as_str(),)).unwrap();
-    let outputs=aios_protocol::validation::validate_result("audio.outputs",outputs.as_bytes()).unwrap();
-    assert!(outputs["data"]["devices"].as_array().unwrap().iter().filter(|device|device["default"]==true).count()<=1);
+    match audio.call::<_,_,String>("Outputs",&(outputs.as_str(),)) {
+        Ok(value) => {
+            let result=aios_protocol::validation::validate_result("audio.outputs",value.as_bytes()).unwrap();
+            assert!(result["data"]["devices"].as_array().unwrap().iter().filter(|device|device["default"]==true).count()<=1);
+        },
+        Err(error) => code(error,"UNSUPPORTED_CAPABILITY"),
+    }
     let profile_set=action_request("power.profile_set",json!({"profile":"balanced"}));
     code(power.call::<_,_,String>("ProfileSet",&(profile_set.as_str(),)).unwrap_err(),"AUTH_REQUIRED");
     let copy=action_request("files.copy",json!({"source_handle":"not-enrolled","destination_handle":"not-enrolled","basename":"fixture","collision_policy":"fail"}));

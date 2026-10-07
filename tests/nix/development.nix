@@ -92,4 +92,7 @@ in {
   productionConsoleAutologin = evaluate [ production { services.getty.autologinUser = "alice"; } ];
   productionDevAccount = evaluate [ production { users.users.dev.isNormalUser = true; } ];
   productionTesterAccount = evaluate [ production { users.users.tester.isNormalUser = true; } ];
+  productionTestProfile = evaluate [ production { environment.etc."aios/desktop-test-profile".text = "forged\n"; } ];
+  productionFixtureService = evaluate [ production { systemd.services.aios-model-acceptance.serviceConfig.ExecStart = "/bin/false"; } ];
+  productionFixtureActivation = evaluate [ production { systemd.paths.aios-service-lifecycle-test.pathConfig.PathExists = "/tmp/forged"; } ];
 }
