@@ -123,7 +123,30 @@ def transfer(config, request, contents):
     status, output, errors = exchange(receiver_arguments(config), [f"{len(header):08d}".encode(), header, *contents])
     if status:
         code = ExitCode.TARGET_MISMATCH if b"Host key verification failed" in errors or b"HOST IDENTIFICATION HAS CHANGED" in errors else ExitCode.VERIFICATION_FAILURE
-        raise DevctlError(code, "SOURCE_TRANSFER_FAILED", "Pinned guest source receiver failed verification", details={"upstream_exit": status})
+        details = {"upstream_exit": status}
+        try:
+            refusal = contract.decode(output)
+            allowed = {
+                "SOURCE_STORAGE_EXHAUSTED", "SOURCE_IO_FAILED", "SOURCE_VERIFICATION_FAILED",
+                "SOURCE_UNSAFE_STAGE", "SOURCE_TREE_ENTRIES_MISMATCH",
+                "SOURCE_PUBLISHED_MANIFEST_MISMATCH", "SOURCE_STAGED_MANIFEST_MISMATCH", "SOURCE_CONTENT_MISMATCH",
+                "SOURCE_UNSAFE_RELEASE_ROOT", "SOURCE_TRUNCATED", "SOURCE_TARGET_CHANGED",
+                "SOURCE_TRAILING_DATA", "SOURCE_IDENTITY_FAILED",
+            }
+            fields = set(refusal) if isinstance(refusal, dict) else set()
+            if (fields == {"schema_version", "error"} and refusal["schema_version"] == 1 and refusal["error"] in allowed):
+                details["receiver_error"] = refusal["error"]
+            elif (fields == {"schema_version", "error", "expected_sha256", "actual_sha256"}
+                    and refusal["schema_version"] == 1
+                    and refusal["error"] in {"SOURCE_PUBLISHED_MANIFEST_MISMATCH", "SOURCE_STAGED_MANIFEST_MISMATCH"}
+                    and all(isinstance(refusal[name], str) and len(refusal[name]) == 64
+                            and all(character in "0123456789abcdef" for character in refusal[name])
+                            for name in ("expected_sha256", "actual_sha256"))):
+                details.update({"receiver_error": refusal["error"], "expected_sha256": refusal["expected_sha256"],
+                                "actual_sha256": refusal["actual_sha256"]})
+        except (ValueError, UnicodeError):
+            pass
+        raise DevctlError(code, "SOURCE_TRANSFER_FAILED", "Pinned guest source receiver failed verification", details=details)
     try:
         result = contract.decode(output)
     except (ValueError, UnicodeError) as error:

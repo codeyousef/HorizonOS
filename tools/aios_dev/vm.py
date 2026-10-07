@@ -324,7 +324,24 @@ def qemu_arguments(config, record, display, *, bootstrap=True, qualification=Non
             "-device", "virtio-vga", "-display", display,
             "-qmp", f"unix:{config.paths['qmp_socket']},server=on,wait=off",
             "-chardev", f"socket,id=serial0,path={config.paths['serial_socket']},server=on,wait=off,logfile={config.paths['serial_log']}",
-            "-serial", "chardev:serial0", "-boot", "menu=on", "-daemonize", "-pidfile", str(config.root / ".local/vm/qemu.pid")]
+            "-serial", "chardev:serial0", "-boot", "menu=on", "-pidfile", str(config.root / ".local/vm/qemu.pid")]
+
+
+def qemu_service_arguments(config, qemu, guest_uuid):
+    launcher = shutil.which("systemd-run")
+    if not launcher:
+        raise failure(ExitCode.UNMET_PREREQUISITE, "MISSING_TOOL", "systemd-run is required to isolate VM memory from the controller session")
+    memory = int(config.values["memory_mib"])
+    arguments = [launcher, "--user", "--quiet", "--collect", f"--unit=aios-vm-{guest_uuid}",
+                 "--property=Type=exec", f"--property=MemoryHigh={memory + 1024}M",
+                 f"--property=MemoryMax={memory + 2048}M", "--property=MemorySwapMax=0"]
+    for name in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR"):
+        value = os.environ.get(name)
+        if value:
+            if "\n" in value or "\0" in value:
+                raise invalid(f"Host {name} contains an invalid character")
+            arguments.append(f"--setenv={name}={value}")
+    return [*arguments, "--", *qemu]
 
 
 def process_identity(pid, proc=Path("/proc")):
@@ -533,7 +550,13 @@ def start(config, display, bootstrap, *, qualification=None):
     if tcp_probe(config.values["ssh_host"], config.values["ssh_port"])["reachable"] is not False:
         raise failure(ExitCode.UNMET_PREREQUISITE, "PORT_UNAVAILABLE", "Cannot prove the configured loopback port is free")
     args = qemu_arguments(config, record, display, bootstrap=bootstrap, qualification=qualification)
-    run(args, timeout=15)
+    run(qemu_service_arguments(config, args, record["plan"]["guest_uuid"]), timeout=15)
+    controls = (pidfile, config.paths["qmp_socket"], config.paths["serial_socket"])
+    deadline = time.monotonic() + 10
+    while not all(path.exists() for path in controls) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if not all(path.exists() for path in controls):
+        raise failure(ExitCode.OPERATION_FAILURE, "QEMU_START_FAILED", "The isolated QEMU service did not publish its process identity and private control sockets")
     pid = int(pidfile.read_text().strip())
     process = process_identity(pid)
     if process["arguments"] != args or process["executable"] != str(Path(args[0]).resolve()) or process["uid"] != os.getuid():

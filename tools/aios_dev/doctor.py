@@ -14,7 +14,7 @@ from .config import VMConfig
 TOOL_ARGUMENTS = {
     "python3": ["--version"], "ssh": ["-V"], "sftp": ["-h"],
     "qemu-system-x86_64": ["--version"], "qemu-img": ["--version"],
-    "xorriso": ["-version"],
+    "systemd-run": ["--version"], "xorriso": ["-version"],
 }
 FIRMWARE_DIRECTORIES = (
     Path("/usr/share/edk2/x64"), Path("/usr/share/edk2-ovmf/x64"), Path("/usr/share/OVMF"),
@@ -182,6 +182,7 @@ def host_report(config: VMConfig) -> dict:
     if config.values["provider"] == "qemu":
         require(platform.machine() == "x86_64", "x86-64 host for the KVM target", ["vm create", "vm start", "CPU benchmarks"])
         require(tools["qemu-system-x86_64"]["available"], "QEMU x86-64", ["vm start", "acceptance guests"])
+        require(tools["systemd-run"]["available"], "systemd-run user service launcher", ["vm start", "acceptance guests"])
         require(capabilities["probe_complete"] and capabilities["virtio_vga"], "QEMU virtio-vga display device", ["vm start"])
         require(capabilities["probe_complete"] and capabilities["gtk"], "QEMU local GTK display backend", ["vm start --display gtk"])
         require(tools["qemu-img"]["available"], "qemu-img", ["vm create", "cold snapshots"])

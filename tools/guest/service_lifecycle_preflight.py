@@ -11,7 +11,6 @@ import time
 
 SYSTEMCTL = "/run/current-system/sw/bin/systemctl"
 LOGINCTL = "/run/current-system/sw/bin/loginctl"
-RUNUSER = "/run/current-system/sw/bin/runuser"
 MARKER = Path("/tmp/aios-service-lifecycle-request")
 REPORT_DIR = Path("/run/aios-service-lifecycle")
 REPORT = REPORT_DIR / "report.json"
@@ -50,27 +49,25 @@ def command(expected, argv, check=True):
     return result
 
 
+def systemctl(user=None):
+    if user is None:
+        return [SYSTEMCTL]
+    if user != "tester":
+        raise RuntimeError("unregistered lifecycle test user")
+    return [SYSTEMCTL, "--user", f"--machine={user}@.host"]
+
+
 def properties(expected, unit, user=None):
-    argv = [SYSTEMCTL]
-    if user is not None:
-        uid = pwd.getpwnam(user).pw_uid
-        argv = [RUNUSER, "-u", user, "--", "/run/current-system/sw/bin/env",
-                f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
-                SYSTEMCTL, "--user"]
-    result = command(expected, [*argv, "show", unit, "--property=ActiveState", "--property=SubState",
+    result = command(expected, [*systemctl(user), "show", unit, "--property=ActiveState", "--property=SubState",
                                 "--property=MainPID", "--property=InvocationID"])
     return dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
 
 
 def restart(expected, unit, user=None):
     before = properties(expected, unit, user)
-    argv = [SYSTEMCTL]
-    if user is not None:
-        uid = pwd.getpwnam(user).pw_uid
-        argv = [RUNUSER, "-u", user, "--", "/run/current-system/sw/bin/env",
-                f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
-                SYSTEMCTL, "--user"]
-    command(expected, [*argv, "restart", unit])
+    if before["ActiveState"] != "active" or not before["MainPID"].isdigit() or int(before["MainPID"]) <= 1:
+        raise RuntimeError(f"unit was not active before restart: {unit}: {before}")
+    command(expected, [*systemctl(user), "restart", unit])
     after = properties(expected, unit, user)
     if after["ActiveState"] != "active" or not after["MainPID"].isdigit() or int(after["MainPID"]) <= 1:
         raise RuntimeError(f"unit failed to restart: {unit}: {after}")

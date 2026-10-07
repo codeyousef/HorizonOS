@@ -35,8 +35,15 @@ def main():
             time.sleep(0.2)
         if report is None:
             raise RuntimeError("fixed service lifecycle fixture did not publish a fresh result")
-        if snapshot.identity() != identity or report.get("identity") != identity or report.get("verified") is not True:
-            raise RuntimeError("lifecycle result is not bound to the current enrolled target")
+        if report.get("verified") is not True:
+            raise RuntimeError("fixed service lifecycle fixture failed: "
+                               + json.dumps(report.get("error"), sort_keys=True))
+        current_identity = snapshot.identity()
+        report_identity = report.get("identity")
+        if current_identity != identity or report_identity != identity:
+            raise RuntimeError("lifecycle result is not bound to the current enrolled target: "
+                               + json.dumps({"initial": identity, "current": current_identity,
+                                             "report": report_identity}, sort_keys=True))
         if report.get("model_active") is not False or report.get("tester_runtime_removed") is not True:
             raise RuntimeError("model-independent or logout lifecycle invariant failed")
         if [item.get("unit") for item in report.get("system_restarts", [])] != ["aios-state.service", "aios-execd.service"]:

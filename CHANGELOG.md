@@ -8,10 +8,19 @@
 - Add disposable-image service lifecycle qualification covering fixed system and
   user unit restarts, model-disabled operation, logout cleanup, and independent
   SSH, network, and display availability.
-- Ship a standalone `ask` client whose only optional mode is `read-only`, mapped
-  directly to the authenticated Ask request with no shell-generation path.
+- Ship standalone `ask` and `aiosctl ask --mode read-only` clients with human
+  answer/citation output, optional typed JSON, and no shell-generation path.
+- Add human-readable `aiosctl inspect service` output while retaining complete
+  typed observations behind `--json`.
+- Add deterministic `aiosctl model status` and `model unload` controls over the
+  credential-checked local socket without invoking inference.
 - Recover verified installer downloads after interrupted partial transfers instead
   of leaving a cache entry that blocks every subsequent clean installation.
+- Isolate each QEMU process in a collected per-VM systemd user service with
+  bounded resident memory and no swap, so guest pressure cannot kill the host
+  controller session.
+- Reject every repository-defined disposable acceptance profile and fixture unit
+  when evaluating the production NixOS module.
 - Host discovery and validated development-target configuration.
 - Keep native UI Stop and Forget available after a stale selector refusal while
   revoking the failed read without retry.

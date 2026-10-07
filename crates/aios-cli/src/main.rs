@@ -7,7 +7,7 @@ fn main() {
 pub fn run_as_ask() {
     let supplied = std::env::args().skip(1).collect::<Vec<_>>();
     let Some(args) = standalone_ask_arguments(&supplied) else {
-        eprintln!("Usage: ask TEXT [--mode read-only] --json");
+        eprintln!("Usage: ask TEXT [--mode read-only] [--json]");
         std::process::exit(2);
     };
     run(args);
@@ -15,7 +15,10 @@ pub fn run_as_ask() {
 
 fn standalone_ask_arguments(supplied: &[String]) -> Option<Vec<String>> {
     match supplied {
+        [text] => Some(vec!["ask".into(), text.clone()]),
         [text, flag] if flag == "--json" => Some(vec!["ask".into(), text.clone(), "--json".into()]),
+        [text, mode, value] if mode == "--mode" && value == "read-only" =>
+            Some(vec!["ask".into(), text.clone()]),
         [text, mode, value, flag] if mode == "--mode" && value == "read-only" && flag == "--json" =>
             Some(vec!["ask".into(), text.clone(), "--json".into()]),
         _ => None,
@@ -62,24 +65,23 @@ fn run(args: Vec<String>) {
             }
         }
     }
-    if let [command, text, flag] = args.as_slice() {
-        if command == "ask" && flag == "--json" {
-            let outcome = (|| {
-                let client = aios_session::bus::Client::connect_user_bus()?;
-                let task = client.submit(&aios_session::Submit { mode: aios_session::Mode::Ask, text: text.clone(),
-                    client_nonce: new_nonce(), context_handles: vec![],retain_for_history:false,history_handles:vec![], selected_app_handle: None, selected_session_handle: None })?;
-                let deadline=std::time::Instant::now()+std::time::Duration::from_secs(95);
-                loop {
-                    let status=client.status(&task)?;
-                    if matches!(status["state"].as_str(),Some("completed"|"failed"|"cancelled")) {break Ok(status);}
-                    if std::time::Instant::now()>=deadline {let _=client.cancel(&task);return Err(aios_protocol::contracts::ErrorCode::DeadlineExceeded);}
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+    if let Some((text, json)) = ask_arguments(&args) {
+        match run_ask(text) {
+            Ok(value) => {
+                let failed = value["state"] != "completed";
+                if json {
+                    println!("{value}");
+                } else if failed {
+                    eprintln!("aiosctl: request failed: {}", value["error"].as_str().unwrap_or("UNKNOWN"));
+                } else {
+                    match human_ask_output(&value) {
+                        Ok(output) => println!("{output}"),
+                        Err(code) => api_error(code),
+                    }
                 }
-            })();
-            match outcome {
-                Ok(value) => { let failed = value["state"] != "completed"; println!("{value}"); std::process::exit(if failed { 1 } else { 0 }); },
-                Err(code) => api_error(code),
-            }
+                std::process::exit(if failed { 1 } else { 0 });
+            },
+            Err(code) => api_error(code),
         }
     }
     if args == ["system", "info", "--json"] {
@@ -95,31 +97,175 @@ fn run(args: Vec<String>) {
             Err(_) => std::process::exit(2),
         }
     }
-    let base = match args.as_slice() {
-        [a, b, unit, flag] if a == "inspect" && b == "service" && flag == "--json" => Some((unit.as_str(), None)),
-        [a, b, unit, flag, socket_flag, socket] if a == "inspect" && b == "service" && flag == "--json" && socket_flag == "--socket" => Some((unit.as_str(), Some(socket.as_str()))),
+    let model = match args.as_slice() {
+        [a, b] if a == "model" && matches!(b.as_str(), "status" | "unload") =>
+            Some((b.as_str(), false)),
+        [a, b, flag] if a == "model" && matches!(b.as_str(), "status" | "unload") && flag == "--json" =>
+            Some((b.as_str(), true)),
         _ => None,
     };
-    if let Some((unit, socket)) = base {
+    if let Some((operation, json)) = model {
+        let endpoint = aios_session::inference::Endpoint::installed();
+        let result = if operation == "status" { endpoint.status() } else { endpoint.unload() };
+        match result {
+            Ok(value) => {
+                if json {
+                    println!("{value}");
+                } else if operation == "status" {
+                    match human_model_status(&value) {
+                        Ok(output) => println!("{output}"),
+                        Err(code) => api_error(code),
+                    }
+                } else if value["unload_requested"] == true {
+                    println!("Model unload requested.");
+                } else {
+                    api_error(aios_protocol::contracts::ErrorCode::ModelOutputInvalid);
+                }
+                return;
+            },
+            Err(code) => api_error(code),
+        }
+    }
+    let service = match args.as_slice() {
+        [a, b, unit] if a == "inspect" && b == "service" =>
+            Some((unit.as_str(), None, false)),
+        [a, b, unit, flag] if a == "inspect" && b == "service" && flag == "--json" =>
+            Some((unit.as_str(), None, true)),
+        [a, b, unit, socket_flag, socket] if a == "inspect" && b == "service" && socket_flag == "--socket" =>
+            Some((unit.as_str(), Some(socket.as_str()), false)),
+        [a, b, unit, flag, socket_flag, socket]
+            if a == "inspect" && b == "service" && flag == "--json" && socket_flag == "--socket" =>
+            Some((unit.as_str(), Some(socket.as_str()), true)),
+        _ => None,
+    };
+    if let Some((unit, socket, json)) = service {
         let path = socket.map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(format!("/run/user/{}/aios/session.sock", std::fs::metadata("/proc/self").map(|m| { use std::os::unix::fs::MetadataExt; m.uid() }).unwrap_or(u32::MAX))));
         let result = (|| -> Result<(), Box<dyn std::error::Error>> {
             let mut client = aios_session::Client::connect(&path)?;
             let resolved = client.call(serde_json::json!({"kind":"resolve_service","unit_name":unit}))?;
-            if resolved.error.is_some() { println!("{}", serde_json::to_string(&resolved)?); return Err("service could not be resolved".into()); }
+            if resolved.error.is_some() {
+                if json { println!("{}", serde_json::to_string(&resolved)?); }
+                return Err("service could not be resolved".into());
+            }
             let id = resolved.data.and_then(|v| v["service_id"].as_str().map(str::to_owned)).ok_or("missing service handle")?;
             let response = client.call(serde_json::json!({"kind":"invoke","tool_call":{"kind":"tool_call","action_id":"system.service_status","arguments":{"service_id":id}}}))?;
-            if response.error.is_some() { println!("{}", serde_json::to_string(&response)?); return Err("service scope denied".into()); }
+            if response.error.is_some() {
+                if json { println!("{}", serde_json::to_string(&response)?); }
+                return Err("service scope denied".into());
+            }
             let value = response.data.ok_or("missing provider result")?;
             let failed = value["status"] == "error";
-            println!("{}", serde_json::to_string(&value)?);
+            if json { println!("{}", serde_json::to_string(&value)?); }
+            else if !failed { println!("{}", human_service_output(&value).map_err(|_| "malformed service observation")?); }
             if failed { return Err("service observation failed".into()); }
             Ok(())
         })();
         if let Err(error) = result { eprintln!("aiosctl: {error}"); std::process::exit(1); }
         return;
     }
-    eprintln!("Usage: aiosctl status --json | ask TEXT --json [--service UNIT] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | process list --json | process terminate SESSION BOOT_UUID PID START_TICKS GOAL --json | system info --json | inspect service UNIT --json [--socket PRIVATE_PATH]");
+    eprintln!("Usage: aiosctl status --json | ask [--mode read-only] TEXT [--json] | ask TEXT --json --service UNIT | model status [--json] | model unload [--json] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | process list --json | process terminate SESSION BOOT_UUID PID START_TICKS GOAL --json | system info --json | inspect service UNIT [--json] [--socket PRIVATE_PATH]");
     std::process::exit(2);
+}
+
+fn ask_arguments(args: &[String]) -> Option<(&str, bool)> {
+    match args {
+        [command, text] if command == "ask" => Some((text, false)),
+        [command, text, flag] if command == "ask" && flag == "--json" => Some((text, true)),
+        [command, mode, value, text] if command == "ask" && mode == "--mode" && value == "read-only" =>
+            Some((text, false)),
+        [command, mode, value, text, flag]
+            if command == "ask" && mode == "--mode" && value == "read-only" && flag == "--json" =>
+            Some((text, true)),
+        _ => None,
+    }
+}
+
+fn run_ask(text: &str) -> Result<serde_json::Value, aios_protocol::contracts::ErrorCode> {
+    let client = aios_session::bus::Client::connect_user_bus()?;
+    let task = client.submit(&aios_session::Submit {
+        mode: aios_session::Mode::Ask,
+        text: text.to_owned(),
+        client_nonce: new_nonce(),
+        context_handles: vec![],
+        retain_for_history: false,
+        history_handles: vec![],
+        selected_app_handle: None,
+        selected_session_handle: None,
+    })?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(95);
+    loop {
+        let status = client.status(&task)?;
+        if matches!(status["state"].as_str(), Some("completed" | "failed" | "cancelled")) {
+            return Ok(status);
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = client.cancel(&task);
+            return Err(aios_protocol::contracts::ErrorCode::DeadlineExceeded);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+fn human_ask_output(status: &serde_json::Value) -> Result<String, aios_protocol::contracts::ErrorCode> {
+    use aios_protocol::contracts::ErrorCode;
+    let response = status["output"]["response"].as_object().ok_or(ErrorCode::InvalidArgument)?;
+    let text = match response.get("kind").and_then(serde_json::Value::as_str) {
+        Some("answer") => response.get("text"),
+        Some("clarification") => response.get("question"),
+        Some("abstain") => response.get("reason"),
+        _ => None,
+    }.and_then(serde_json::Value::as_str).ok_or(ErrorCode::InvalidArgument)?;
+    let mut rendered = text.to_owned();
+    if let Some(ids) = response.get("evidence_ids").and_then(serde_json::Value::as_array).filter(|ids| !ids.is_empty()) {
+        rendered.push_str("\n\nEvidence:");
+        for id in ids {
+            let id = id.as_str().ok_or(ErrorCode::InvalidArgument)?;
+            rendered.push_str("\n- ");
+            rendered.push_str(id);
+        }
+    }
+    Ok(rendered)
+}
+
+fn human_service_output(value: &serde_json::Value) -> Result<String, aios_protocol::contracts::ErrorCode> {
+    use aios_protocol::contracts::ErrorCode;
+    use std::fmt::Write;
+    let data = value["data"].as_object().ok_or(ErrorCode::InvalidArgument)?;
+    let text = |field| data.get(field).and_then(serde_json::Value::as_str).ok_or(ErrorCode::InvalidArgument);
+    let number = |field| data.get(field).and_then(serde_json::Value::as_u64).ok_or(ErrorCode::InvalidArgument);
+    let mut output = format!(
+        "Unit: {}\nLoad: {}\nState: {} ({})\nResult: {}\nMain PID: {}\nRestarts: {}",
+        text("unit_name")?,
+        text("load_state")?,
+        text("active_state")?,
+        text("sub_state")?,
+        text("result")?,
+        number("main_pid")?,
+        number("restart_count")?,
+    );
+    if let Some(ids) = value["evidence_ids"].as_array().filter(|ids| !ids.is_empty()) {
+        output.push_str("\nEvidence:");
+        for id in ids {
+            write!(output, "\n- {}", id.as_str().ok_or(ErrorCode::InvalidArgument)?)
+                .map_err(|_| ErrorCode::ResourceExhausted)?;
+        }
+    }
+    Ok(output)
+}
+
+fn human_model_status(value: &serde_json::Value) -> Result<String, aios_protocol::contracts::ErrorCode> {
+    use aios_protocol::contracts::ErrorCode;
+    let loaded = value["loaded"].as_bool().ok_or(ErrorCode::ModelOutputInvalid)?;
+    let busy = value["busy"].as_bool().ok_or(ErrorCode::ModelOutputInvalid)?;
+    let queued = value["own_queued"].as_u64().ok_or(ErrorCode::ModelOutputInvalid)?;
+    let limit = value["queue_limit"].as_u64().ok_or(ErrorCode::ModelOutputInvalid)?;
+    let threads = value["threads"].as_u64().ok_or(ErrorCode::ModelOutputInvalid)?;
+    let context = value["context_tokens"].as_u64().ok_or(ErrorCode::ModelOutputInvalid)?;
+    Ok(format!(
+        "Loaded: {}\nBusy: {}\nOwn queue: {queued}/{limit}\nThreads: {threads}\nContext tokens: {context}",
+        if loaded { "yes" } else { "no" },
+        if busy { "yes" } else { "no" },
+    ))
 }
 
 fn native_boot()->Result<String,aios_protocol::contracts::ErrorCode>{
@@ -209,17 +355,36 @@ fn unverified_termination(id:&str,code:aios_protocol::contracts::ErrorCode,cance
         assert_eq!(selected_process(&duplicated,42,100),Err(ErrorCode::Conflict));
         assert_eq!(selected_process(&value,0,100),Err(ErrorCode::InvalidArgument));
     }
-    #[test]fn standalone_ask_accepts_only_read_only_mode(){
+    #[test]fn ask_surfaces_accept_only_the_fixed_read_only_mode(){
         let values=|args:&[&str]|args.iter().map(|value|(*value).to_owned()).collect::<Vec<_>>();
-        let expected=Some(values(&["ask","what failed?","--json"]));
-        assert_eq!(standalone_ask_arguments(&values(&["what failed?","--json"])),expected);
-        assert_eq!(standalone_ask_arguments(&values(&["what failed?","--mode","read-only","--json"])),expected);
+        assert_eq!(standalone_ask_arguments(&values(&["what failed?"])),Some(values(&["ask","what failed?"])));
+        assert_eq!(standalone_ask_arguments(&values(&["what failed?","--json"])),Some(values(&["ask","what failed?","--json"])));
+        assert_eq!(standalone_ask_arguments(&values(&["what failed?","--mode","read-only"])),Some(values(&["ask","what failed?"])));
+        assert_eq!(standalone_ask_arguments(&values(&["what failed?","--mode","read-only","--json"])),Some(values(&["ask","what failed?","--json"])));
+        assert_eq!(ask_arguments(&values(&["ask","what failed?"])),Some(("what failed?",false)));
+        assert_eq!(ask_arguments(&values(&["ask","--mode","read-only","what failed?","--json"])),Some(("what failed?",true)));
         for denied in [
             values(&["id","--mode","shell","--json"]),
             values(&["id","--shell","--json"]),
-            values(&["id","--mode","read-only"]),
             values(&["id","--mode","read-only","--json","--approved"]),
         ]{assert_eq!(standalone_ask_arguments(&denied),None);}
+        assert_eq!(ask_arguments(&values(&["ask","--mode","shell","id"])),None);
+    }
+    #[test]fn human_ask_output_preserves_answer_and_citations(){
+        let status=json!({"state":"completed","output":{"response":{"kind":"answer","text":"The unit failed.","evidence_ids":["ev-1","ev-2"]}}});
+        assert_eq!(human_ask_output(&status).unwrap(),"The unit failed.\n\nEvidence:\n- ev-1\n- ev-2");
+        let clarification=json!({"state":"completed","output":{"response":{"kind":"clarification","question":"Which unit?","evidence_ids":[]}}});
+        assert_eq!(human_ask_output(&clarification).unwrap(),"Which unit?");
+        assert_eq!(human_ask_output(&json!({"state":"completed","output":{}})),Err(ErrorCode::InvalidArgument));
+    }
+    #[test]fn human_service_output_reports_native_state_and_evidence(){
+        let value=json!({"status":"ok","evidence_ids":["ev-service"],"data":{
+            "unit_name":"sshd.service","load_state":"loaded","active_state":"active",
+            "sub_state":"running","result":"success","main_pid":42,"restart_count":1
+        }});
+        assert_eq!(human_service_output(&value).unwrap(),
+            "Unit: sshd.service\nLoad: loaded\nState: active (running)\nResult: success\nMain PID: 42\nRestarts: 1\nEvidence:\n- ev-service");
+        assert_eq!(human_service_output(&json!({"status":"ok","data":{}})),Err(ErrorCode::InvalidArgument));
     }
 }
 

@@ -192,6 +192,23 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual((self.root / self.digest / "nix/nested/source.nix").stat().st_mode & 0o777, 0o444)
         self.assertEqual(list(self.root.glob(".incoming-*")), [])
 
+    def test_failed_post_rename_verification_removes_only_owned_publication(self):
+        original = contract.verify_tree
+        calls = 0
+
+        def fail_final(root, manifest, *, published=False):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise contract.ManifestMismatch(published=True, expected=b"expected", actual=b"changed")
+            return original(root, manifest, published=published)
+
+        with patch.object(contract, "release_root", return_value=self.root), patch.object(contract, "verify_tree", side_effect=fail_final):
+            with self.assertRaises(contract.ManifestMismatch) as caught:
+                self.receive()
+        self.assertTrue(caught.exception.published)
+        self.assertEqual(list(self.root.iterdir()), [])
+
     def test_wrong_target_stops_before_release_directory_creation(self):
         with patch.object(contract, "release_root") as mkdir:
             with self.assertRaises(ValueError):

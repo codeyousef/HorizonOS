@@ -6,6 +6,7 @@ exact manifest-ordered file bytes and EOF. All validation precedes publication.
 """
 import hashlib
 import json
+import errno
 import os
 from pathlib import Path, PurePosixPath
 import pwd
@@ -26,6 +27,14 @@ PRIVATE_SUFFIXES = {".key", ".pem", ".p12", ".pfx", ".qcow2", ".iso", ".gguf", "
 PRIVATE_NAMES = {"id_rsa", "id_ed25519", "id_ecdsa", "known_hosts", "authorized_keys", ".netrc", ".npmrc", "credentials.json", "token.json", "result"}
 PRIVATE_STEMS = {"secret", "secrets", "credential", "credentials", "token", "tokens", "api_key", "api_keys", "api-key", "api-keys"}
 KEY_HEADER = re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")
+
+
+class ManifestMismatch(ValueError):
+    def __init__(self, *, published, expected, actual):
+        super().__init__("published snapshot metadata differs" if published else "staged snapshot metadata differs")
+        self.published = published
+        self.expected = hashlib.sha256(expected).hexdigest()
+        self.actual = hashlib.sha256(actual).hexdigest()
 
 
 def canonical(value):
@@ -137,8 +146,9 @@ def verify_tree(root, manifest, *, published=False):
     if observed != expected or observed_dirs != expected_dirs:
         raise ValueError("unexpected or missing snapshot files")
     metadata, _ = read_regular(root, MANIFEST, published=published)
-    if metadata != canonical(manifest):
-        raise ValueError("snapshot metadata differs")
+    expected_metadata = canonical(manifest)
+    if metadata != expected_metadata:
+        raise ManifestMismatch(published=published, expected=expected_metadata, actual=metadata)
     for item in manifest["files"]:
         data, mode = read_regular(root, item["path"], published=published)
         if len(data) != item["size"] or mode != item["mode"] or hashlib.sha256(data).hexdigest() != item["sha256"]:
@@ -221,7 +231,10 @@ def receive(stream, identity_reader):
                     "file_count": len(request["manifest"]["files"]), "reused": True, "identity": identity}
         try:
             stage.rename(destination)
-            stage = None
+            # Keep ownership of the exact newly published path until its final
+            # read-only verification succeeds. A failed publication must not
+            # leave a digest path that blocks every future retry.
+            stage = destination
             reused = False
         except OSError:
             # Another transfer may have published the same complete digest.
@@ -230,6 +243,8 @@ def receive(stream, identity_reader):
             verify_tree(destination, request["manifest"], published=True)
             reused = True
         verify_tree(destination, request["manifest"], published=True)
+        if not reused:
+            stage = None
         return {"schema_version": 1, "snapshot_digest": digest, "guest_digest": digest, "guest_source_path": str(destination),
                 "file_count": len(request["manifest"]["files"]), "reused": reused, "identity": identity}
     finally:
@@ -252,9 +267,34 @@ def main():
         result = receive(sys.stdin.buffer, identity)
         print(json.dumps(result, sort_keys=True))
         return 0
-    except (ValueError, OSError, subprocess.SubprocessError):
+    except ManifestMismatch as error:
+        code = "SOURCE_PUBLISHED_MANIFEST_MISMATCH" if error.published else "SOURCE_STAGED_MANIFEST_MISMATCH"
+        print(json.dumps({"schema_version": 1, "error": code,
+                          "expected_sha256": error.expected, "actual_sha256": error.actual}, sort_keys=True))
+        return 8
+    except OSError as error:
+        code = "SOURCE_STORAGE_EXHAUSTED" if error.errno in (errno.ENOSPC, errno.EDQUOT) else "SOURCE_IO_FAILED"
+        print(json.dumps({"schema_version": 1, "error": code}, sort_keys=True))
+        return 8
+    except ValueError as error:
+        code = {
+            "unsafe snapshot root": "SOURCE_UNSAFE_STAGE",
+            "unsafe snapshot directory": "SOURCE_UNSAFE_STAGE",
+            "unexpected or missing snapshot files": "SOURCE_TREE_ENTRIES_MISMATCH",
+            "published snapshot metadata differs": "SOURCE_PUBLISHED_MANIFEST_MISMATCH",
+            "staged snapshot metadata differs": "SOURCE_STAGED_MANIFEST_MISMATCH",
+            "snapshot content differs": "SOURCE_CONTENT_MISMATCH",
+            "release root has unsafe ownership, type or mode": "SOURCE_UNSAFE_RELEASE_ROOT",
+            "truncated snapshot": "SOURCE_TRUNCATED",
+            "guest target changed before source mutation": "SOURCE_TARGET_CHANGED",
+            "transferred content differs or contains private key material": "SOURCE_CONTENT_MISMATCH",
+            "trailing snapshot bytes": "SOURCE_TRAILING_DATA",
+        }.get(str(error), "SOURCE_VERIFICATION_FAILED")
+        print(json.dumps({"schema_version": 1, "error": code}, sort_keys=True))
+        return 8
+    except subprocess.SubprocessError:
         # Do not leak source, credential content, arbitrary paths or stderr.
-        print('{"schema_version":1,"error":"SOURCE_VERIFICATION_FAILED"}')
+        print('{"schema_version":1,"error":"SOURCE_IDENTITY_FAILED"}')
         return 8
 
 

@@ -28,5 +28,9 @@ in {
       wantedBy = [ "default.target" ];
       overrideStrategy = "asDropin";
     };
+    systemd.user.services.aios-ui-agent = {
+      wantedBy = [ "graphical-session.target" ];
+      overrideStrategy = "asDropin";
+    };
   };
 }

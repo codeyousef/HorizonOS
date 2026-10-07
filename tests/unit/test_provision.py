@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from aios_dev.config import VMConfig
 from aios_dev.errors import DevctlError, ExitCode
 from aios_dev.provision import CHECKSUM_URL, create, digest_file, fetch_media, official_url, operation_lock, prepare_plan, private_directory, run, seed_manifest, source_files, validate_plan
-from aios_dev.vm import BOOTSTRAP_CONSOLE, BOOTSTRAP_INSPECT, QMP, console_keys, qemu_arguments, verify_block, verify_process
+from aios_dev.vm import BOOTSTRAP_CONSOLE, BOOTSTRAP_INSPECT, QMP, console_keys, qemu_arguments, qemu_service_arguments, verify_block, verify_process
 
 EXAMPLE = json.loads((ROOT / "dev/vm.example.json").read_text())
 
@@ -220,6 +220,25 @@ class ProvisionTests(unittest.TestCase):
         self.assertTrue(any("readonly=on,file=/usr/share/OVMF" in arg for arg in args))
         for forbidden in ("-virtfs", "-fsdev", "-spice", "-vnc", "vfio", "0.0.0.0", "-enable-kvm-fallback"):
             self.assertFalse(any(forbidden in arg for arg in args))
+
+    def test_qemu_runs_in_a_bounded_user_service_not_the_controller_scope(self):
+        def executable(name):
+            return f"/usr/bin/{name}"
+        with patch("aios_dev.vm.shutil.which", side_effect=executable), patch.dict(os.environ, {"DISPLAY": ":0", "XDG_RUNTIME_DIR": "/run/user/1000"}, clear=True):
+            qemu = qemu_arguments(self.config, self.record(), "gtk")
+            args = qemu_service_arguments(self.config, qemu, self.record()["plan"]["guest_uuid"])
+        memory = self.config.values["memory_mib"]
+        self.assertNotIn("-daemonize", qemu)
+        self.assertEqual(args[0], "/usr/bin/systemd-run")
+        self.assertIn("--user", args)
+        self.assertIn("--collect", args)
+        self.assertIn(f"--property=MemoryHigh={memory + 1024}M", args)
+        self.assertIn(f"--property=MemoryMax={memory + 2048}M", args)
+        self.assertIn("--property=MemorySwapMax=0", args)
+        self.assertIn("--setenv=DISPLAY=:0", args)
+        self.assertIn("--setenv=XDG_RUNTIME_DIR=/run/user/1000", args)
+        separator = args.index("--")
+        self.assertEqual(args[separator + 1:], qemu)
 
     def test_qemu_path_option_injection_rejected(self):
         data = {**EXAMPLE, "disk_image": ".local/vm/root,readonly=on.qcow2"}

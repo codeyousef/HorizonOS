@@ -62,7 +62,10 @@ initial-image verification instrumentation, not the product executor service.
 
 QEMU runs as the current user with KVM, CPU host, virtio devices, local GTK,
 private OVMF VARS, SMBIOS UUID, `AIOS_DEV_ROOT` serial, local Unix control sockets
-and IPv4 loopback port forwarding. QMP control verifies PID/start time, user,
+and IPv4 loopback port forwarding. Each process runs in a collected systemd user
+service with `MemoryHigh` one GiB above configured guest RAM, `MemoryMax` two GiB
+above it and `MemorySwapMax=0`; guest pressure is isolated from the controller
+session instead of consuming host swap. QMP control verifies PID/start time, user,
 executable, exact arguments, peer credentials, UUID and root disk. `vm stop`
 powers off that exact VM through QMP; finish/unmount the installer first.
 No process-name kill, host mount, agent forwarding or remote display is used.
@@ -267,8 +270,9 @@ guest RAM and a 48 GiB disk. These are provisioning limits, not measured inferen
 minimums. Discovery and the choice are recorded in `.local/provisioning-resources.json`.
 Explicit local configuration and existing VM plans are preserved. Missing or
 insufficient measured resources fail before creating a disk or key. Production
-module assertions exclude graphical/console acceptance autologin and the reserved
-`dev`/`tester` accounts.
+module assertions exclude graphical/console acceptance autologin, reserved
+`dev`/`tester` accounts, every repository-defined disposable acceptance profile,
+and every fixed acceptance fixture service.
 
 When using the packaged `devctl`, specify `--workspace /path/to/checkout` before
 the command; the package's own Nix store path is not a writable VM workspace.

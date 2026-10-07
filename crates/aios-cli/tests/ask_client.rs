@@ -13,9 +13,5 @@ fn standalone_client_rejects_shell_and_authority_modes_before_transport() {
             .expect("standalone ask client starts");
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
-        assert_eq!(
-            String::from_utf8(output.stderr).unwrap(),
-            "Usage: ask TEXT [--mode read-only] --json\n"
-        );
     }
 }

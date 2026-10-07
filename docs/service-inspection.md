@@ -1,9 +1,11 @@
 # Read-only service inspection
 
-`aiosctl inspect service sshd.service --json` resolves an existing loaded system
-service through the user's private `aios-sessiond` endpoint. The CLI receives an
-opaque, short-lived service handle before invoking `system.service_status`.
-The model action accepts only this issued handle, never a unit name, command,
+`aiosctl inspect service sshd.service` resolves an existing loaded system service
+through the user's private `aios-sessiond` endpoint and prints its native state
+with evidence identifiers. `--json` returns the complete typed observation. The
+CLI receives an opaque, short-lived service handle before invoking
+`system.service_status`. The model action accepts only this issued handle, never
+a unit name, command,
 D-Bus destination, method or privileged option.
 
 The provider uses native systemd D-Bus reads on the fixed system bus. It checks
@@ -154,14 +156,20 @@ private devices, and bounded memory and process counts. Loss of the
 public bus owner terminates the daemon so the service manager can restart it.
 
 `aiosctl status --json` reports the authenticated session's capabilities and
-availability. `aiosctl ask TEXT --json` and the standalone
-`ask TEXT --mode read-only --json` client submit the same read-only request and
-read its terminal status through the same authenticated bus connection. The
-standalone client accepts no shell or alternate mode. Closing the connection
-revokes ongoing inference rather than leaving detached work. The client pins and
+availability. `aiosctl ask --mode read-only TEXT` and standalone `ask TEXT`
+submit the same read-only request and print its answer plus evidence identifiers.
+Appending `--json` emits the complete terminal task status for automation. Both
+surfaces accept no shell or alternate mode. Closing the connection revokes
+ongoing inference rather than leaving detached work. The client pins and
 rechecks
 the daemon's live owner identity; default endpoints ignore environment
 variables that redirect the bus or select another user's runtime directory.
+
+`aiosctl model status` inspects lifecycle, queue and profile state over the
+credential-checked local model socket without loading model weights. `aiosctl
+model unload` requests an unload only when no generation or queue entry is
+active; otherwise it returns `CONFLICT`. Both commands accept `--json`, never
+submit model text and never expose a tool or shell capability.
 
 Public `Submit` takes the same versioned control request used by the private
 transport, with `operation.kind=submit` and a typed `operation.request`. Other
