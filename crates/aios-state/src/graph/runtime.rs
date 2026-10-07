@@ -282,7 +282,9 @@ pub fn entry()->Result<()>{
         for text in [r#"{"kind":"devices","path":"/dev/vda"}"#,r#"{"kind":"devices","kind":"status"}"#,r#"{"kind":"generations","path":"/tmp/profile"}"#,r#"{"kind":"generations","kind":"status"}"#]{assert!(serde_json::from_str::<Request>(text).is_err());}
     }
     #[test]fn unchanged_generation_samples_coalesce_but_divergence_or_failure_refreshes(){
-        let prior=SystemPointers{running_closure:"fixture-running".into(),selected_profile_closure:Some("fixture-running".into()),selected_profile_generation:Some(1),running_profile_divergence:Some(false),bootloader_entry:None,managed_transaction:None};
+        let prior=SystemPointers{running_closure:"fixture-running".into(),selected_profile_closure:Some("fixture-running".into()),
+            selected_profile_generation:Some(1),running_profile_divergence:Some(false),bootloader_entry:None,managed_transaction:None,
+            profile_generations:vec![],profile_history_complete:true};
         assert!(!generation_refresh_needed(Some(&prior),&prior,false));
         assert!(generation_refresh_needed(None,&prior,false));assert!(generation_refresh_needed(Some(&prior),&prior,true));
         let mut changed=prior.clone();changed.selected_profile_generation=Some(2);assert!(generation_refresh_needed(Some(&prior),&changed,false));

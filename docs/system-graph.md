@@ -147,13 +147,22 @@ The service has no model, home, activation or transaction-ledger access. It is
 wanted by normal boot and does not become a requirement of desktop or SSH.
 Running NixOS activation and the selected system profile are observed separately
 through fixed root-owned paths and retained as separate source-truth providers.
-The native pointer pair is rechecked before/after persistence. Generation
-diagnostics compare the cached pair with a new native read; missing, invalidated
-or failed reads cannot claim current state. The profile does not prove a
-bootloader entry or approved managed transaction; those fields remain unknown.
-Once per second, the owner samples the two fixed pointers. An observed change
-invalidates generation and service snapshots, records bounded native generation
-events and reconciles without inference. Unchanged samples coalesce.
+The provider also performs a bounded, stable enumeration of root-owned
+`system-N-link` history. Each entry records its generation, realized closure,
+running/selected status, `declarative_system_profile` ownership and null
+management attribution. Null attribution is unknown—not evidence that a user or
+transaction created it. User profiles are explicitly not observed by this
+system-scoped owner; they require a user-scoped owner rather than cross-user
+enumeration.
+
+The native pointers and history are rechecked before/after persistence.
+Generation diagnostics compare the cache with a new native read; missing,
+invalidated or failed reads cannot claim current state. The profile does not
+prove a bootloader entry or approved managed transaction; those fields remain
+unknown. Once per second, the owner samples the fixed pointers and bounded
+history. An observed change invalidates generation and service snapshots,
+records bounded native generation events and reconciles without inference.
+Unchanged samples coalesce.
 
 A separate native sd-bus connection subscribes to the UID-0 system manager at
 its fixed system-bus endpoint. Manager and unit-property notifications from
