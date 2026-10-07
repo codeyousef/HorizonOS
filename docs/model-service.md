@@ -17,8 +17,9 @@ Composition supplies the reviewed `aiosModel` and `aiosModelArtifact` packages
 through module arguments. `services.aios.users` lists existing normal users
 allowed into `aios-inference`; unknown, duplicate or system users are rejected.
 The unit is discovered through the package's `lib/systemd/system` directory,
-and only its socket is wanted during boot. Full control-plane enablement is
-still guarded until its services are implemented.
+and only its socket is wanted during boot. `services.aios.enable` composes the
+implemented deterministic control plane; inference remains independently
+disableable through `services.aios.model.enable`.
 
 The module creates `/etc/aios/model-runtime.json` as a root-owned immutable
 store link. The daemon accepts only this fixed configuration path, validates
@@ -29,6 +30,14 @@ other context sizes fail closed until their artifacts/runtime are qualified.
 at most four; explicit values must fit both the four-thread limit and the
 available CPUs. `model.idleUnloadSeconds` defaults to 600. Zero disables only
 automatic unload; explicit unload, deadlines, authentication and quotas remain.
+
+The reusable module also declares the complete typed product option surface for
+desktop and visual control, indexing, proactive diagnosis, automation, recovery
+and initrd diagnostics, optional kernel probes, and transaction guard/retention
+bounds. Cross-option assertions reject visual control without the desktop and
+initrd diagnostics without recovery. The development image enables the
+deterministic control plane and desktop while explicitly disabling inference
+and later-milestone services that are not installed in that image.
 
 Generate the implemented options' documentation with
 `nix build --no-update-lock-file --no-write-lock-file .#lib.modelOptionsDocumentation`

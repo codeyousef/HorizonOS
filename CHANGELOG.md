@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Define the complete typed `services.aios` module option surface with safe
+  defaults, cross-option assertions, generated documentation coverage, and
+  explicit model-independent desktop-image composition.
 - Host discovery and validated development-target configuration.
 - Keep native UI Stop and Forget available after a stale selector refusal while
   revoking the failed read without retry.

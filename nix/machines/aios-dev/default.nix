@@ -66,8 +66,16 @@ in {
   services.displayManager.autoLogin.enable = false;
   services.pipewire = { enable = true; alsa.enable = true; pulse.enable = true; };
   security.rtkit.enable = true;
-  # Executor1 serves authenticated preparation; model and indexer stay unloaded.
-  services.aios.enable = false;
+  # Deterministic system/session APIs are enabled independently of inference.
+  # Unimplemented later-milestone index/automation/recovery services stay
+  # explicitly disabled rather than advertising an unavailable daemon.
+  services.aios.enable = true;
+  services.aios.users = [ "dev" "tester" ];
+  services.aios.model.enable = false;
+  services.aios.desktop.enable = true;
+  services.aios.index.enable = false;
+  services.aios.automation.enable = false;
+  services.aios.recovery.enable = false;
   services.aios.session.enable = true;
   services.aios.graph.enable = true;
   services.aios.development = {

@@ -125,7 +125,12 @@ def main():
     docs_path=Path(docs[0]['outputs']['out'])
     docs_text=docs_path.read_text()
     doc_headings={line.removeprefix("## ").replace(r"\.",".") for line in docs_text.splitlines() if line.startswith("## ")}
-    for option in ('users','model.profile','model.manifest','model.contextTokens','model.threads','model.idleUnloadSeconds','model.allowNetwork'):
+    for option in ('enable','users','model.profile','model.manifest','model.contextTokens','model.threads',
+                   'model.idleUnloadSeconds','model.allowNetwork','desktop.enable','desktop.visualControl.enable',
+                   'index.enable','proactive.enable','automation.enable','recovery.enable',
+                   'recovery.initrdDiagnostics.enable','observability.kernelProbes.enable',
+                   'transactions.guardTimeoutSeconds','transactions.keepKnownGoodGenerations',
+                   'development.enable','development.expectedVmUuid'):
         if 'services.aios.'+option not in doc_headings:
             raise RuntimeError('generated option documentation missing: '+option)
     results = {'module_evaluation':cases,'generated_options_documentation':str(docs_path)}

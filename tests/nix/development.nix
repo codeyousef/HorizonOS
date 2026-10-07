@@ -37,17 +37,46 @@ let
         inherit name;
         value = if builtins.hasAttr name config.systemd.services then config.systemd.services.${name}.requires else [];
       }) [ "sshd" "display-manager" "NetworkManager" ]);
+      aiosEnabled = config.services.aios.enable;
+      productOptions = {
+        users = config.services.aios.users;
+        desktop = config.services.aios.desktop.enable;
+        visualControl = config.services.aios.desktop.visualControl.enable;
+        index = config.services.aios.index.enable;
+        proactive = config.services.aios.proactive.enable;
+        automation = config.services.aios.automation.enable;
+        recovery = config.services.aios.recovery.enable;
+        initrdDiagnostics = config.services.aios.recovery.initrdDiagnostics.enable;
+        kernelProbes = config.services.aios.observability.kernelProbes.enable;
+        guardTimeoutSeconds = config.services.aios.transactions.guardTimeoutSeconds;
+        keepKnownGoodGenerations = config.services.aios.transactions.keepKnownGoodGenerations;
+      };
     };
   evaluate = evaluateWith { inherit aiosCore; };
   session = { services.aios.session.enable = true; nix.settings.trusted-users = [ "root" ]; users.users.alice.isNormalUser = true; };
   development = ../../nix/modules/aios/default.nix;
   production = ../../nix/modules/aios/production.nix;
+  product = {
+    services.aios = {
+      enable = true;
+      users = [ "alice" ];
+      model.enable = false;
+      index.enable = false;
+      automation.enable = false;
+    };
+    nix.settings.trusted-users = [ "root" ];
+    users.users.alice.isNormalUser = true;
+  };
 in {
   development = evaluate [ development enabled ];
   disabled = evaluate [ development ];
   sessionHeadless = evaluate [ development session ];
   sessionDesktop = evaluate [ development session { services.desktopManager.plasma6.enable = true; services.displayManager.sddm.enable = true; } ];
   sessionMissingPackage = evaluateWith {} [ development session ];
+  productHeadless = evaluate [ development product ];
+  productDesktop = evaluate [ development product { services.aios.desktop.enable = true; } ];
+  visualWithoutDesktop = evaluate [ development { services.aios.desktop.visualControl.enable = true; } ];
+  initrdWithoutRecovery = evaluate [ development { services.aios.recovery.initrdDiagnostics.enable = true; } ];
   wrongRole = evaluate [ development (enabled // { environment.etc."aios/guest-role".text = "production\n"; }) ];
   missingUuid = evaluate [ development enabled { services.aios.development.expectedVmUuid = lib.mkForce null; } ];
   extraNixTrust = evaluate [ development enabled { nix.settings.trusted-users = [ "root" "dev" ]; } ];

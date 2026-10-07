@@ -28,7 +28,8 @@ def main():
     reference = "path:" + str(release)
     locked = ["--no-update-lock-file", "--no-write-lock-file"]
     cases = json.loads(subprocess.check_output(["nix", "eval", "--json", *locked, reference + "#lib.developmentBoundary"], timeout=120))
-    for name in ("development", "disabled", "production", "sessionHeadless", "sessionDesktop"):
+    for name in ("development", "disabled", "production", "sessionHeadless", "sessionDesktop",
+                 "productHeadless", "productDesktop"):
         if cases[name]["failedAssertions"]:
             raise RuntimeError("valid module case rejected: " + name + " " + json.dumps(cases[name]["failedAssertions"]))
     required_denials = {
@@ -46,6 +47,8 @@ def main():
         "productionDevAccount":"Production excludes reserved development and tester accounts.",
         "productionTesterAccount":"Production excludes reserved development and tester accounts.",
         "sessionMissingPackage":"Enabled Horizon OS user broker requires the reviewed aiosCore package.",
+        "visualWithoutDesktop":"Horizon OS visual control requires desktop.enable.",
+        "initrdWithoutRecovery":"Horizon OS initrd diagnostics require recovery.enable.",
     }
     for name, reason in required_denials.items():
         if reason not in cases[name]["failedAssertions"]:
@@ -68,6 +71,19 @@ def main():
             raise RuntimeError("broker module made boot/login/connectivity require inference")
     if cases["sessionHeadless"]["desktopEnabled"] or not cases["sessionDesktop"]["desktopEnabled"]:
         raise RuntimeError("user broker requires an unintended desktop configuration")
+    disabled = cases["disabled"]
+    if disabled["aiosEnabled"] or disabled["productOptions"] != {
+            "users":[], "desktop":False, "visualControl":False, "index":True,
+            "proactive":False, "automation":True, "recovery":False,
+            "initrdDiagnostics":False, "kernelProbes":False,
+            "guardTimeoutSeconds":180, "keepKnownGoodGenerations":3}:
+        raise RuntimeError("reusable product option defaults changed: " + json.dumps(disabled, sort_keys=True))
+    headless = cases["productHeadless"]
+    desktop = cases["productDesktop"]
+    if (not headless["aiosEnabled"] or not headless["sessionEnabled"] or headless["modelEnabled"]
+            or headless["productOptions"]["users"] != ["alice"] or headless["productOptions"]["desktop"]
+            or not desktop["productOptions"]["desktop"]):
+        raise RuntimeError("product headless/desktop composition changed")
     dev = cases["development"]
     expected = [{"users":["dev"],"groups":[],"host":"ALL","runAs":"root:root","commands":[{"command":"/run/current-system/sw/bin/aios-dev-deploy --request-stdin","options":["NOPASSWD","NOSETENV"]}]}]
     if not dev["helperPresent"] or dev["trustedUsers"] != ["root"] or dev["developerRules"] != expected:

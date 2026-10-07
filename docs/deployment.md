@@ -97,9 +97,24 @@ It does not repartition or overwrite a filesystem. Public seed updates use
 It creates GPT EFI/Btrfs with `@root`, `@home`, `@nix`, `@var`.
 `dev` is not wheel or Nix-trusted; `tester` is wheel and gets a password only via
 the root-only console finish operation, generated inside the guest and retained
-in a mode-0600 guest root file outside the Nix store. Service accounts have no
-enabled AIOS services yet. SSH is
-key-only for `dev`, root login is disabled, and only root is Nix-trusted.
+in a mode-0600 guest root file outside the Nix store. SSH is key-only for `dev`,
+root login is disabled, and only root is Nix-trusted.
+
+The installed M1 service access plan is:
+
+| Unit | Identity and activation | Permitted persistent writes |
+| --- | --- | --- |
+| `aios-state.service` / `aios-reconcile.service` | `aios-state`; boot plus timer | `/var/lib/aios/state` only |
+| `aios-execd.service` | root; system bus and multi-user target | `/var/lib/aios/candidates` and `/var/lib/aios/transactions` |
+| `aios-model.socket` / `.service` | root-owned group socket; isolated `aios-model` on demand | none; model artifact is read-only |
+| `aios-sessiond.service` | authenticated non-root user; default user target | private `%t/aios` runtime state |
+| `aios-processd.service` | authenticated non-root user; default user target | private runtime state only |
+| `aios-ui-agent.service` | authenticated non-root user; graphical session only | private runtime state only |
+
+The development image keeps model activation disabled while deterministic
+system and user APIs remain enabled. Index, automation, and recovery daemons are
+explicitly disabled until their owning milestones install them; reserved
+service accounts do not imply a running service.
 
 The host captures the **public** host key and SHA256 fingerprint through a serial
 connection tied to the exact QEMU PID/UID, after checking QMP UUID and root disk.
