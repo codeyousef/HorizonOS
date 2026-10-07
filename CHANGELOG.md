@@ -26,6 +26,9 @@
   writes remain denied.
 - Add bounded PowerDevil display-idle and UPower keyboard-backlight task
   actions with stale-state refusal, exact native readback and typed recovery.
+- Admit the fixed argument shapes for every registered R0 native audio and
+  power read through the direct-read grant instead of rejecting them at policy
+  revalidation.
 - Project only the two registered KDE settings files into the sandboxed
   session broker after late Plasma initialization or atomic configuration
   replacement.

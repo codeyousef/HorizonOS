@@ -204,8 +204,13 @@ impl aios_policy::CurrentResources for ReadResources {
             .map(|r| r.identity_sha256.clone()).ok_or(ErrorCode::PermissionDenied)
     }
     fn dynamic_arguments(&self,id:&str,args:&Value,scope:&aios_policy::Scope)->Result<(),ErrorCode>{
-        if id=="settings.get" && scope.actions.contains(id) && matches!(args.get("key").and_then(Value::as_str),Some("desktop.theme_mode"|"display.idle_seconds"|"keyboard.backlight_percent")){Ok(())}
-        else{Err(ErrorCode::UnsupportedCapability)}
+        let bounded=match id{
+            "audio.outputs"|"audio.inputs"|"power.status"=>args.as_object().is_some_and(serde_json::Map::is_empty),
+            "audio.default_get"=>matches!(args.get("direction").and_then(Value::as_str),Some("input"|"output")),
+            "settings.get"=>matches!(args.get("key").and_then(Value::as_str),Some("desktop.theme_mode"|"display.idle_seconds"|"keyboard.backlight_percent")),
+            _=>false,
+        };
+        if bounded&&scope.actions.contains(id){Ok(())}else{Err(ErrorCode::UnsupportedCapability)}
     }
 }
 #[derive(Default)]
@@ -892,5 +897,19 @@ mod tests {
             if operation=="forget"{assert_eq!(state.task(&id,&peer).err(),Some(ErrorCode::TargetNotFound));}
             else{assert_ne!(state.tasks[&id].control.load(Ordering::Acquire),0);}
         }
+    }
+    #[test]
+    fn direct_native_reads_admit_only_registered_argument_shapes() {
+        let resources=ReadResources::default();
+        for (id,args) in [
+            ("audio.outputs",json!({})),("audio.inputs",json!({})),("power.status",json!({})),
+            ("audio.default_get",json!({"direction":"output"})),
+            ("settings.get",json!({"key":"desktop.theme_mode"})),
+        ]{
+            let scope=aios_policy::Scope{actions:[id.to_owned()].into(),..Default::default()};
+            assert_eq!(aios_policy::CurrentResources::dynamic_arguments(&resources,id,&args,&scope),Ok(()));
+        }
+        let scope=aios_policy::Scope{actions:["power.status".into()].into(),..Default::default()};
+        assert_eq!(aios_policy::CurrentResources::dynamic_arguments(&resources,"power.status",&json!({"claimed":true}),&scope),Err(ErrorCode::UnsupportedCapability));
     }
 }
