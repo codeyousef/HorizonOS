@@ -193,6 +193,12 @@ boot-scoped kernel locator is explicitly labeled without durable identity or
 retained live identity. Duplicate stable properties are ambiguous and refuse
 publication. Native inventories are compared before/after applying an opaque
 two-second snapshot. Only the system-scoped database accepts them.
+The graph owner remains unprivileged and has no IP address families. Its service
+sandbox shares the guest network namespace only because kernel uevents are
+network-namespace scoped; `RestrictAddressFamilies=AF_UNIX AF_NETLINK` admits the
+fixed system-bus/control sockets and libudev subscription while refusing IPv4,
+IPv6 and packet sockets. The periodic reconciler does not receive this exception.
+
 
 A separate system-mount provider reads fixed mountinfo and filesystem-stat
 sources. It stores mount path, redacted block-major/minor/filesystem source,

@@ -30,6 +30,11 @@ in {
         Type = "exec"; ExecStart = "${aiosState}/bin/aios-stated";
         StateDirectory = "aios/state"; StateDirectoryMode = "0700";
         RuntimeDirectory = "aios-state"; RuntimeDirectoryMode = "0700";
+        # Kernel uevents are delivered only in the host network namespace.
+        # Keep IP sockets impossible while admitting the fixed libudev netlink
+        # subscription used for read-only block-device invalidation.
+        PrivateNetwork = false;
+        RestrictAddressFamilies = [ "AF_UNIX" "AF_NETLINK" ];
         Restart = "on-failure"; RestartSec = 2;
       };
     };

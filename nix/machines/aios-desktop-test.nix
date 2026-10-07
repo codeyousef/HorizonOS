@@ -25,7 +25,7 @@
       RemainAfterExit = true;
       ExecStart = pkgs.writeShellScript "fill-aios-storage-fixture" ''
         ${pkgs.coreutils}/bin/dd if=/dev/zero of=/mnt/aios-storage-fixture/full.bin bs=4096 count=1024 status=none || true
-        ${pkgs.coreutils}/bin/sync -f /mnt/aios-storage-fixture/full.bin
+        ${pkgs.coreutils}/bin/sync -f /mnt/aios-storage-fixture/full.bin || true
       '';
       NoNewPrivileges = true;
       PrivateNetwork = true;
@@ -41,7 +41,7 @@
   systemd.services.aios-removable-device-fixture = {
     serviceConfig = {
       Type = "oneshot";
-      ExecStart = "${pkgs.udev}/bin/udevadm trigger --action=change /sys/class/block/sr0";
+      ExecStart = "${pkgs.systemd}/bin/udevadm trigger --action=change /sys/class/block/sr0";
       NoNewPrivileges = true;
       PrivateNetwork = true;
       ProtectSystem = "strict";
