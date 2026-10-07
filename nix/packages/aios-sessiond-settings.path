@@ -5,7 +5,6 @@ ConditionUser=!root
 [Path]
 PathChanged=%h/.config/kdeglobals
 PathChanged=%h/.config/powerdevilrc
-MakeDirectory=yes
 Unit=aios-sessiond-settings-refresh.service
 
 [Install]
