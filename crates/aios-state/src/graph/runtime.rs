@@ -106,8 +106,9 @@ impl Owner{
             Ok(value)=>value,
             Err(error)=>{if self.mount_error.is_none(){self.graph.report_event_loss();}self.mount_error=Some(format!("{error:?}"));return Err(Error::Native(error.into()));}
         };
-        let topology=|values:&[aios_system::storage::MountStatus]|values.iter().map(|value|(&value.mount_id,&value.mount_path,&value.source_identity,value.capacity_bytes,value.read_only)).collect::<Vec<_>>();
-        let changed=self.mounts.as_ref().is_none_or(|prior|topology(prior)!=topology(&observed));
+        let changed=self.mounts.as_ref().is_none_or(|prior|prior.len()!=observed.len()||prior.iter().zip(&observed).any(|(left,right)|
+            left.mount_id!=right.mount_id||left.mount_path!=right.mount_path||left.source_identity!=right.source_identity||
+            left.capacity_bytes!=right.capacity_bytes||left.read_only!=right.read_only));
         if changed{
             self.graph.ingest_provider_events(super::mounts::PROVIDER.into(),vec![ProviderEvent{id:format!("mount:{}:{}",now.boot.0,now.monotonic_ns),
                 entity_id:None,kind:EventKind::Changed,time:now,origin_transaction_id:None,payload:json!({"source":"fixed-native-mountinfo-poll"})}])?;
