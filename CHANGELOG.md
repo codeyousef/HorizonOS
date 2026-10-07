@@ -5,6 +5,9 @@
 - Define the complete typed `services.aios` module option surface with safe
   defaults, cross-option assertions, generated documentation coverage, and
   explicit model-independent desktop-image composition.
+- Add disposable-image service lifecycle qualification covering fixed system and
+  user unit restarts, model-disabled operation, logout cleanup, and independent
+  SSH, network, and display availability.
 - Host discovery and validated development-target configuration.
 - Keep native UI Stop and Forget available after a stale selector refusal while
   revoking the failed read without retry.

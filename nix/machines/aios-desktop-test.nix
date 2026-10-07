@@ -1,5 +1,10 @@
 # Synthetic disposable desktop only. Never import into a production image.
-{ config, pkgs, lib, ... }: {
+{ config, pkgs, lib, ... }:
+let
+  lifecycle = pkgs.writeShellScriptBin "aios-service-lifecycle-preflight" ''
+    exec ${pkgs.python3}/bin/python3 -I ${../../tools/guest/service_lifecycle_preflight.py}
+  '';
+in {
   imports = [ ./aios-graph-test.nix ];
   services.displayManager.autoLogin = { enable = lib.mkForce true; user = "tester"; };
   services.displayManager.defaultSession = "plasma";
@@ -59,8 +64,50 @@
       Unit = "aios-removable-device-fixture.service";
     };
   };
-  environment.systemPackages = [ (pkgs.writeScriptBin "aios-desktop-test-probe" ''
-    #!${pkgs.runtimeShell}
-    exec ${pkgs.python3}/bin/python3 -I ${../../tools/guest/desktop_probe.py}
-  '') ];
+  systemd.paths.aios-service-lifecycle-test = {
+    wantedBy = [ "multi-user.target" ];
+    pathConfig = {
+      PathExists = "/tmp/aios-service-lifecycle-request";
+      Unit = "aios-service-lifecycle-test.service";
+    };
+  };
+  systemd.services.aios-service-lifecycle-test = {
+    description = "Disposable Horizon OS service lifecycle qualification";
+    after = [ "graphical.target" "aios-state.service" "aios-execd.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${lifecycle}/bin/aios-service-lifecycle-preflight";
+      RuntimeDirectory = "aios-service-lifecycle";
+      RuntimeDirectoryMode = "0755";
+      UMask = "0077";
+      NoNewPrivileges = true;
+      CapabilityBoundingSet = "";
+      PrivateNetwork = true;
+      PrivateTmp = false;
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      ProtectKernelTunables = true;
+      ProtectKernelModules = true;
+      ProtectKernelLogs = true;
+      ProtectControlGroups = true;
+      RestrictAddressFamilies = [ "AF_UNIX" ];
+      RestrictNamespaces = true;
+      RestrictSUIDSGID = true;
+      LockPersonality = true;
+      MemoryDenyWriteExecute = true;
+      SystemCallArchitectures = "native";
+      SystemCallFilter = [ "@system-service" ];
+      ReadWritePaths = [ "/tmp" "/run/aios-service-lifecycle" ];
+      TimeoutStartSec = 120;
+      TasksMax = 32;
+      MemoryMax = "128M";
+    };
+  };
+  environment.systemPackages = [
+    lifecycle
+    (pkgs.writeScriptBin "aios-desktop-test-probe" ''
+      #!${pkgs.runtimeShell}
+      exec ${pkgs.python3}/bin/python3 -I ${../../tools/guest/desktop_probe.py}
+    '')
+  ];
 }
