@@ -938,7 +938,12 @@
         "complete": true,
         "next_cursor": null,
         "data": {
-          "interfaces": []
+          "interfaces": [],
+          "endpoint_reachability": "unknown",
+          "wifi_supported": false,
+          "wifi_enabled": null,
+          "management_transport_protected": true,
+          "unsupported_fields": []
         },
         "error": null
       }

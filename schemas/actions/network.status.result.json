@@ -129,10 +129,48 @@
               },
               "minItems": 0,
               "maxItems": 100
+            },
+            "endpoint_reachability": {
+              "type": "string",
+              "enum": [
+                "reachable",
+                "unreachable",
+                "unknown"
+              ]
+            },
+            "wifi_supported": {
+              "type": "boolean"
+            },
+            "wifi_enabled": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "management_transport_protected": {
+              "type": "boolean"
+            },
+            "unsupported_fields": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "maxItems": 32
             }
           },
           "required": [
-            "interfaces"
+            "interfaces",
+            "endpoint_reachability",
+            "wifi_supported",
+            "wifi_enabled",
+            "management_transport_protected",
+            "unsupported_fields"
           ]
         },
         {
@@ -322,10 +360,48 @@
                 },
                 "minItems": 0,
                 "maxItems": 100
+              },
+              "endpoint_reachability": {
+                "type": "string",
+                "enum": [
+                  "reachable",
+                  "unreachable",
+                  "unknown"
+                ]
+              },
+              "wifi_supported": {
+                "type": "boolean"
+              },
+              "wifi_enabled": {
+                "oneOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "management_transport_protected": {
+                "type": "boolean"
+              },
+              "unsupported_fields": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "maxItems": 32
               }
             },
             "required": [
-              "interfaces"
+              "interfaces",
+              "endpoint_reachability",
+              "wifi_supported",
+              "wifi_enabled",
+              "management_transport_protected",
+              "unsupported_fields"
             ]
           },
           "error": {

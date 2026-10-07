@@ -8,6 +8,38 @@ use sha2::{Digest,Sha256};
 struct Fixture(PathBuf);
 impl Drop for Fixture{fn drop(&mut self){fs::remove_dir_all(&self.0).unwrap();}}
 
+
+#[test]
+#[ignore = "requires enrolled NixOS guest with installed NetworkManager and BlueZ"]
+fn native_network_and_absent_bluetooth_are_explicit_and_caller_scoped() {
+    let network = aios_system::network::observe(b"native-caller-a", None);
+    let network_value = serde_json::to_value(&network).unwrap();
+    aios_protocol::validation::validate_result("network.status", &serde_json::to_vec(&network_value).unwrap()).unwrap();
+    let interfaces = network_value["data"]["interfaces"].as_array().unwrap();
+    assert!(!interfaces.is_empty());
+    assert!(interfaces.iter().any(|interface| interface["link_state"].is_string()
+        && interface["connectivity"].is_string() && interface["dns_state"].is_string()));
+    assert!(network_value["data"]["endpoint_reachability"].is_string());
+    assert_eq!(network_value["data"]["management_transport_protected"], true);
+    let other = serde_json::to_value(aios_system::network::observe(b"native-caller-b", None)).unwrap();
+    let forged = serde_json::to_value(aios_system::network::observe(b"native-caller-a", Some("forged"))).unwrap();
+    assert_eq!(forged["status"], "error");
+    assert_eq!(forged["error"]["code"], "TARGET_NOT_FOUND");
+    assert_ne!(interfaces[0]["interface_id"], other["data"]["interfaces"][0]["interface_id"]);
+
+    let bluetooth = serde_json::to_value(aios_system::bluetooth::observe(b"native-caller-a", None)).unwrap();
+    aios_protocol::validation::validate_result("bluetooth.status", &serde_json::to_vec(&bluetooth).unwrap()).unwrap();
+    assert_eq!(bluetooth["status"], "error");
+    assert_eq!(bluetooth["complete"], false);
+    assert_eq!(bluetooth["data"]["adapters"], json!([]));
+    assert_eq!(bluetooth["error"]["code"], "UNSUPPORTED_CAPABILITY");
+    println!("AIOS_NATIVE_NETWORK_BLUETOOTH={}", json!({
+        "evidence_kind": "installed-networkmanager-bluez-native-observation",
+        "network": network_value, "bluetooth": bluetooth,
+        "caller_scoped_handles_verified": true,
+        "network_mutation_attempted": false, "bluetooth_mutation_attempted": false
+    }));
+}
 #[test]
 #[ignore="requires enrolled NixOS guest and pinned native systemd; no installed viewer claim"]
 fn native_service_evidence_viewer_rechecks_properties_scope_seal_and_deadline() {

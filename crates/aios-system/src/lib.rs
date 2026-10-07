@@ -138,3 +138,5 @@ pub mod processes;
 pub mod devices;
 pub mod hardware;
 pub mod storage;
+pub mod network;
+pub mod bluetooth;

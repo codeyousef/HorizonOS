@@ -24,6 +24,19 @@ mounts, 1 MiB CPU data, 4,096 udev entries and 256 block disks; each observation
 has a two-second native device deadline. The executor's only persistent writable
 sets remain `/var/lib/aios/candidates` and `/var/lib/aios/transactions`.
 
+`NetworkStatus` reads the fixed NetworkManager service and exposes link state,
+connectivity, DNS state, and endpoint reachability as separate fields. Native
+object paths stay internal; interface handles bind the authenticated caller.
+Wi-Fi radio absence remains explicit rather than becoming a healthy disabled
+radio. `BluetoothStatus` reads the fixed BlueZ object manager and kernel rfkill
+state, redacts hardware addresses into caller-scoped handles, and reports an
+absent adapter as `UNSUPPORTED_CAPABILITY`. Both reads pin the upstream D-Bus
+owner and bound object counts. `NetworkSetWifiEnabled` is R3 and requires the
+`transport-guard`; `BluetoothSetEnabled` is R2. Both mutation members remain
+unavailable and return `AUTH_REQUIRED` until exact-plan native approval,
+live-baseline verification, postconditions, and recovery are installed. This
+also prevents either action from disabling the development SSH transport.
+
 Packages1 `Info` and `Search` read the installed administrator-reviewed catalog.
 Action members accept the strict versioned invoke envelope and fix the reviewed
 action in server code. Duplicate/unknown fields, action substitution and forged

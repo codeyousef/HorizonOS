@@ -22,14 +22,21 @@ impl Scope {
     fn actions(self) -> &'static [&'static str] {
         match self {
             Self::System => &["system.info", "system.services", "system.service_status", "system.service_restart",
-                "system.hardware", "storage.status", "system.boots", "system.boot_diagnostics", "system.logs"],
+                "system.hardware", "storage.status", "network.status", "network.set_wifi_enabled",
+                "bluetooth.status", "bluetooth.set_enabled", "system.boots", "system.boot_diagnostics", "system.logs"],
             Self::Packages => &["packages.search", "packages.info", "packages.installed", "packages.install",
                 "packages.remove", "packages.upgrade_plan"],
         }
     }
 }
 fn available(id: &str) -> bool {
-    matches!(id, "system.info" | "system.hardware" | "storage.status" | "packages.info" | "packages.search")
+    matches!(id, "system.info" | "system.hardware" | "storage.status" | "network.status" |
+        "bluetooth.status" | "packages.info" | "packages.search")
+}
+fn caller_scope(caller: &VerifiedCaller) -> String {
+    let identity = caller.identity();
+    format!("{}:{}:{}:{}:{}:{}", identity.uid, identity.pid, identity.start_ticks,
+        identity.boot_id, identity.bus_id, identity.sender)
 }
 pub(super) fn capabilities(scope: Scope) -> Result<Value> {
     let contracts = scope.actions().iter().map(|id| {
@@ -110,17 +117,25 @@ impl ReadState {
             Action::SystemHardware(args) => {
                 let arguments = serde_json::to_value(args).map_err(|_| ErrorCode::InvalidArgument)?;
                 let class = arguments["device_class"].as_str().unwrap_or("all");
-                let identity = caller.identity();
-                let scope = format!("{}:{}:{}:{}:{}:{}", identity.uid, identity.pid, identity.start_ticks,
-                    identity.boot_id, identity.bus_id, identity.sender);
+                let scope = caller_scope(caller);
                 serde_json::to_value(aios_system::hardware::observe(class, scope.as_bytes()))
                     .map_err(|_| ErrorCode::InvalidArgument)?
             },
             Action::StorageStatus(_) => {
-                let identity = caller.identity();
-                let scope = format!("{}:{}:{}:{}:{}:{}", identity.uid, identity.pid, identity.start_ticks,
-                    identity.boot_id, identity.bus_id, identity.sender);
-                serde_json::to_value(aios_system::storage::observe(identity.uid, scope.as_bytes()))
+                let scope = caller_scope(caller);
+                serde_json::to_value(aios_system::storage::observe(caller.identity().uid, scope.as_bytes()))
+                    .map_err(|_| ErrorCode::InvalidArgument)?
+            },
+            Action::NetworkStatus(args) => {
+                let arguments = serde_json::to_value(args).map_err(|_| ErrorCode::InvalidArgument)?;
+                let scope = caller_scope(caller);
+                serde_json::to_value(aios_system::network::observe(scope.as_bytes(), arguments["interface_id"].as_str()))
+                    .map_err(|_| ErrorCode::InvalidArgument)?
+            },
+            Action::BluetoothStatus(args) => {
+                let arguments = serde_json::to_value(args).map_err(|_| ErrorCode::InvalidArgument)?;
+                let scope = caller_scope(caller);
+                serde_json::to_value(aios_system::bluetooth::observe(scope.as_bytes(), arguments["adapter_id"].as_str()))
                     .map_err(|_| ErrorCode::InvalidArgument)?
             },
             Action::PackagesInfo(args) => {
@@ -194,7 +209,9 @@ macro_rules! surface {
 }
 surface!(System,Scope::System,"org.aios.System1",[(info,"system.info"),(services,"system.services"),
     (service_status,"system.service_status"),(service_restart,"system.service_restart"),(hardware,"system.hardware"),
-    (storage_status,"storage.status"),(boots,"system.boots"),(boot_diagnostics,"system.boot_diagnostics"),(logs,"system.logs")],
+    (storage_status,"storage.status"),(network_status,"network.status"),(network_set_wifi_enabled,"network.set_wifi_enabled"),
+    (bluetooth_status,"bluetooth.status"),(bluetooth_set_enabled,"bluetooth.set_enabled"),
+    (boots,"system.boots"),(boot_diagnostics,"system.boot_diagnostics"),(logs,"system.logs")],
     async fn resolve_log_service(&self,unit_name:&str,#[zbus(header)]header:Header<'_>)->Result<String> {
         if unit_name.len()>255 {return Err(ErrorCode::InvalidArgument.into());}
         self.executor.call(header,Operation::JournalResolveService(unit_name.into())).await
@@ -261,6 +278,12 @@ mod tests {
             }
         }
         assert!(!available("packages.install"));assert!(!available("system.service_restart"));
+        assert!(available("network.status"));assert!(available("bluetooth.status"));
+        assert!(!available("network.set_wifi_enabled"));assert!(!available("bluetooth.set_enabled"));
+        let network=aios_protocol::registry::capability("network.set_wifi_enabled").unwrap();
+        assert_eq!(network.risk_class,"R3");assert!(network.preconditions.iter().any(|p|p=="transport-guard"));
+        let bluetooth=aios_protocol::registry::capability("bluetooth.set_enabled").unwrap();
+        assert_eq!(bluetooth.risk_class,"R2");assert!(!bluetooth.read_only);
     }
     #[test]
     fn cursor_budget_counts_uid_across_connections_and_reclaims_expired_resources() {

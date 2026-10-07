@@ -31,7 +31,9 @@ in {
   nixpkgs.hostPlatform = "x86_64-linux";
   system.stateVersion = "26.05";
   networking.hostName = "aios-dev";
-  networking.useDHCP = true;
+  networking.useDHCP = false;
+  networking.networkmanager.enable = true;
+  hardware.bluetooth.enable = true;
   boot.initrd.availableKernelModules = [ "virtio_pci" "virtio_blk" "virtio_scsi" "ahci" "sd_mod" ];
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;

@@ -23,7 +23,7 @@ fn system_and_packages(connection: &Connection, executor_owner: &str) {
     let owner:String=bus.call("GetNameOwner",&("org.aios.System1",)).unwrap();
     assert_eq!(owner,executor_owner);
     for (path,interface,methods) in [
-        ("/org/aios/System1","org.aios.System1",vec!["GetCapabilities","Info","Services","ServiceStatus","ServiceRestart","Hardware","StorageStatus","Boots","BootDiagnostics","Logs"]),
+        ("/org/aios/System1","org.aios.System1",vec!["GetCapabilities","Info","Services","ServiceStatus","ServiceRestart","Hardware","StorageStatus","NetworkStatus","NetworkSetWifiEnabled","BluetoothStatus","BluetoothSetEnabled","Boots","BootDiagnostics","Logs"]),
         ("/org/aios/Packages1","org.aios.Packages1",vec!["GetCapabilities","Search","Info","Installed","Install","Remove","UpgradePlan"]),
     ] {
         let introspection=Proxy::new(connection,"org.aios.System1",path,"org.freedesktop.DBus.Introspectable").unwrap();
@@ -48,6 +48,15 @@ fn system_and_packages(connection: &Connection, executor_owner: &str) {
         denied(proxy.call::<_,_,String>("Info",&(" ".repeat(aios_protocol::MAX_TASK_BYTES+1),)),"RESOURCE_EXHAUSTED");
     }
     let system=Proxy::new(connection,"org.aios.System1","/org/aios/System1","org.aios.System1").unwrap();
+    let capabilities=value(&system,"GetCapabilities",());
+    for id in ["network.status","bluetooth.status"] {
+        let contract=capabilities["data"]["contracts"].as_array().unwrap().iter().find(|entry|entry["action_id"]==id).unwrap();
+        assert_eq!(contract["availability"],"available");
+    }
+    for id in ["network.set_wifi_enabled","bluetooth.set_enabled"] {
+        let contract=capabilities["data"]["contracts"].as_array().unwrap().iter().find(|entry|entry["action_id"]==id).unwrap();
+        assert_eq!(contract["availability"],"unavailable");
+    }
     let info=value(&system,"Info",(action("system.info",json!({})),));
     aios_protocol::validation::validate_result("system.info",&serde_json::to_vec(&info).unwrap()).unwrap();
     assert_eq!(info["data"]["os_id"],"nixos");assert_eq!(info["data"]["virtualization"],"kvm");
@@ -67,6 +76,19 @@ fn system_and_packages(connection: &Connection, executor_owner: &str) {
     let full=storage["data"]["mounts"].as_array().unwrap().iter().find(|mount|mount["mount_path"]=="/mnt/aios-storage-fixture").unwrap();
     assert_eq!(full["source_identity"],"filesystem:tmpfs");
     assert!(full["free_bytes"].as_u64().unwrap()<=full["capacity_bytes"].as_u64().unwrap()/4);
+    let network=value(&system,"NetworkStatus",(action("network.status",json!({})),));
+    aios_protocol::validation::validate_result("network.status",&serde_json::to_vec(&network).unwrap()).unwrap();
+    assert!(!network["data"]["interfaces"].as_array().unwrap().is_empty());
+    assert!(network["data"]["endpoint_reachability"].is_string());
+    assert_eq!(network["data"]["management_transport_protected"],true);
+    let interface=&network["data"]["interfaces"][0];
+    assert!(interface["link_state"].is_string()&&interface["connectivity"].is_string()&&interface["dns_state"].is_string());
+    let bluetooth=value(&system,"BluetoothStatus",(action("bluetooth.status",json!({})),));
+    aios_protocol::validation::validate_result("bluetooth.status",&serde_json::to_vec(&bluetooth).unwrap()).unwrap();
+    assert_eq!(bluetooth["status"],"error");assert_eq!(bluetooth["complete"],false);
+    assert_eq!(bluetooth["data"]["adapters"],json!([]));assert_eq!(bluetooth["error"]["code"],"UNSUPPORTED_CAPABILITY");
+    denied(system.call::<_,_,String>("NetworkSetWifiEnabled",&(action("network.set_wifi_enabled",json!({"enabled":false})),)),"AUTH_REQUIRED");
+    denied(system.call::<_,_,String>("BluetoothSetEnabled",&(action("bluetooth.set_enabled",json!({"adapter_id":"untrusted-reference","enabled":false})),)),"AUTH_REQUIRED");
     denied(system.call::<_,_,String>("ServiceRestart",&(action("system.service_restart",json!({"service_id":"untrusted-reference"})),)),"AUTH_REQUIRED");
     let packages=Proxy::new(connection,"org.aios.System1","/org/aios/Packages1","org.aios.Packages1").unwrap();
     let info=value(&packages,"Info",(action("packages.info",json!({"package_id":"kate"})),));

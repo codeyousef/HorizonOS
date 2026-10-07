@@ -24,6 +24,10 @@
 - Add caller-scoped `system.hardware` and `storage.status` observations using
   bounded CPU, libudev/sysfs, mountinfo and filesystem-stat reads; serial values
   stay redacted, missing hardware stays unsupported, and no storage effect exists.
+- Add authenticated `network.status` and `bluetooth.status` reads over fixed
+  NetworkManager, BlueZ and rfkill sources with caller-scoped handles, distinct
+  network domains and explicit missing-radio results; their typed R3/R2 writes
+  remain unavailable pending native approval, verification and recovery.
 - Admit only Unix and netlink sockets to the unprivileged graph owner so its
   bounded libudev monitor receives kernel events without gaining IP networking;
   qualify removable-media and full-volume behavior in disposable images.
