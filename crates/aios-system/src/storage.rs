@@ -19,7 +19,7 @@ struct NativeMount {
     read_only: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct MountStatus {
     pub mount_id: String,
     pub mount_path: String,
@@ -151,6 +151,35 @@ fn observe_inner(uid: u32, scope: &[u8]) -> Result<StorageData, ErrorCode> {
     mounts.sort_by(|a, b| a.mount_path.cmp(&b.mount_path));
     if !mounts.iter().any(|mount| mount.mount_path == "/") { return Err(ErrorCode::PartialResult); }
     Ok(StorageData { mounts })
+}
+
+pub fn read_system_mounts() -> Result<Vec<MountStatus>, ErrorCode> {
+    let raw = super::bounded(Path::new("/proc/self/mountinfo"), MAX_MOUNTINFO)?;
+    let mut mounts = Vec::new();
+    for mount in parse_mountinfo(&raw)? {
+        let path = Path::new(&mount.path);
+        if ![Path::new("/"), Path::new("/boot"), Path::new("/boot/efi"), Path::new("/home"), Path::new("/nix")].contains(&path) {
+            continue;
+        }
+        if mounts.len() >= MAX_MOUNTS { return Err(ErrorCode::ResourceExhausted); }
+        let (capacity_bytes, free_bytes) = capacity(path)?;
+        let source_identity = if mount.major == 0 {
+            format!("filesystem:{}", mount.filesystem)
+        } else {
+            format!("block:{}:{}:{}", mount.major, mount.minor, mount.filesystem)
+        };
+        mounts.push(MountStatus {
+            mount_id: opaque_id(b"system-graph", &mount),
+            mount_path: mount.path,
+            source_identity,
+            capacity_bytes,
+            free_bytes,
+            read_only: mount.read_only,
+        });
+    }
+    mounts.sort_by(|a, b| a.mount_path.cmp(&b.mount_path));
+    if !mounts.iter().any(|mount| mount.mount_path == "/") { return Err(ErrorCode::PartialResult); }
+    Ok(mounts)
 }
 
 pub fn observe(uid: u32, scope: &[u8]) -> ProviderResult<StorageData> {

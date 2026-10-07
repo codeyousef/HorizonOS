@@ -142,6 +142,7 @@ dependencies = [
  "aios-protocol",
  "libc",
  "serde",
+ "sha2",
  "time",
  "zbus",
 ]
