@@ -245,6 +245,14 @@ impl Agent {
         if task_id.len()>128 || !crate::uuid(task_id){return Err(ErrorCode::InvalidArgument.into());}
         self.json(connection,header,Operation::ForgetProcessTermination{task_id:task_id.into()}).await
     }
+    async fn execute_task_action(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
+        let request:Request=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
+        if request.schema_version!=1||!crate::uuid(&request.request_id){return Err(ErrorCode::InvalidArgument.into());}
+        let operation=parse_operation(request.operation.get())?;
+        if !matches!(&operation,Operation::ExecuteTaskAction{task_id,..} if task_id==&request.request_id){return Err(ErrorCode::InvalidArgument.into());}
+        self.json(connection,header,operation).await
+    }
     async fn list_processes(&self, request_json: &str, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
         self.action(connection, header, request_json, "process.list").await
     }

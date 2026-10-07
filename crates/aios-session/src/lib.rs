@@ -46,6 +46,7 @@ pub struct Submit {
 pub enum Operation {
     StartProcessTermination { task_id:String,process_id:String,session_handle:String,goal:String,mode:Mode },
     GetProcessTermination { task_id:String },CancelProcessTermination { task_id:String },ForgetProcessTermination { task_id:String },
+    ExecuteTaskAction { task_id:String,goal:String,mode:Mode,tool_call:Box<RawValue> },
     GetCapabilities,
     GetSystemInfo,
     SelectUiSession { session_id: String },
@@ -93,6 +94,7 @@ fn parse_operation(raw: &str) -> Result<Operation, ErrorCode> {
         "get_process_termination"=>fields!(GetProcessTermination{task_id:String}),
         "cancel_process_termination"=>fields!(CancelProcessTermination{task_id:String}),
         "forget_process_termination"=>fields!(ForgetProcessTermination{task_id:String}),
+        "execute_task_action"=>fields!(ExecuteTaskAction{task_id:String,goal:String,mode:Mode,tool_call:Box<RawValue>}),
         "get_capabilities" | "get_system_info" => {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -318,6 +320,24 @@ impl State {
         let grant = self.read_grant(peer, id.clone(), &serde_json::to_string(&action.arguments_value()).map_err(|_| ErrorCode::InvalidArgument)?, Mode::Ask, scope, 10_000)?;
         self.policy.as_ref().ok_or(ErrorCode::PolicyChanged)?.check_read(&grant, &peer.policy_subject()?, &id, action, &resources, aios_policy::boottime_ms()?)
     }
+    fn execute_task_action(&mut self,peer:&Peer,task_id:String,goal:String,mode:Mode,tool_call:Box<RawValue>)->Result<Value,ErrorCode>{
+        if !uuid(&task_id)||mode!=Mode::Act||goal.trim().is_empty()||goal.len()>4096||goal.contains('\0'){return Err(ErrorCode::InvalidArgument);}
+        identity::verify_peer(peer)?;
+        let action=parse_tool_call(tool_call.get().as_bytes())?;
+        let prepared=native_settings::PreparedMutation::prepare(&action)?;
+        let scope=prepared.scope();let subject=peer.policy_subject()?;
+        let policy=self.policy(peer)?;
+        let intent=policy.authenticated_user_intent(subject.clone(),task_id.clone(),&goal,aios_policy::Mode::Act)?;
+        let grant=policy.grant_task(intent,scope,aios_policy::boottime_ms()?,30_000)?;
+        policy.check_task(&grant,&subject,&task_id,&action,aios_policy::Risk::R0,&prepared,aios_policy::boottime_ms()?)?;
+        let receipt=prepared.execute(|current|{
+            identity::verify_peer(peer)?;
+            policy.check_task(&grant,&peer.policy_subject()?,&task_id,&action,aios_policy::Risk::R0,current,aios_policy::boottime_ms()?)
+        })?;
+        identity::verify_peer(peer)?;
+        Ok(json!({"schema_version":1,"request_id":task_id,"operation":"task_action","state":"completed",
+            "mutation_performed":receipt.changed,"output":receipt.output,"recovery":receipt.recovery}))
+    }
     fn prune(&mut self) {
         let time = Instant::now();
         let boottime=aios_policy::boottime_ms().ok();
@@ -435,6 +455,7 @@ impl State {
         self.prune();
         match operation {
             Operation::StartProcessTermination{..}|Operation::GetProcessTermination{..}|Operation::CancelProcessTermination{..}|Operation::ForgetProcessTermination{..}=>Err(ErrorCode::AuthRequired),
+            Operation::ExecuteTaskAction{task_id,goal,mode,tool_call}=>self.execute_task_action(peer,task_id,goal,mode,tool_call),
             Operation::GetCapabilities => Ok(json!({"schema_version":1,"request_id":Uuid::new_v4().to_string(),"operation":"capabilities","actions":["system.info","system.service_status"],
                 "read_only":true,"inference_available":self.inference_available,"inference_configured":self.inference_configured,"ui_enabled":false,"ui_session_selection_available":true,"transport":"private-unix",
                 "session_history":{"opt_in_required":true,"max_selected":4,"retention_ms":300000,"owner":"authenticated_client","persistent":false},"task_request_max_bytes":MAX_TASK_BYTES,"session_associated":peer.logind_session.is_some()})),
@@ -767,6 +788,7 @@ mod tests {
             r#"{"kind":"cancel","task_id":"a","uid":0}"#,
             r#"{"kind":"get_events","task_id":"a","after_sequence":0,"limit":1,"trust":"admin"}"#,
             r#"{"kind":"submit","request":{"mode":"ask","text":"test","client_nonce":"a","mode":"act"}}"#,
+            r#"{"kind":"execute_task_action","task_id":"11111111-1111-4111-8111-111111111111","goal":"Mute output","mode":"act","tool_call":{"kind":"tool_call","action_id":"audio.mute_set","arguments":{"node_id":"audio:output:fixture","muted":true}},"approved":true}"#,
         ] { assert_eq!(parse_operation(raw).unwrap_err(), ErrorCode::InvalidArgument); }
     }
     #[test]

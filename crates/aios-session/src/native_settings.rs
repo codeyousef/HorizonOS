@@ -52,6 +52,13 @@ fn parse_audio(value:&str)->Result<Vec<AudioNode>,ErrorCode>{
     }
     Ok(result)
 }
+fn node_identity(node:&AudioNode)->String{
+    format!("{:x}",Sha256::digest(format!("{}\0{}",node.direction,node.name).as_bytes()))
+}
+fn selected_node(reference:&str,direction:Option<&str>)->Result<AudioNode,ErrorCode>{
+    let nodes=audio_nodes()?;let mut matches=nodes.into_iter().filter(|node|handle(node.direction,&node.name)==reference&&direction.is_none_or(|value|value==node.direction));
+    let node=matches.next().ok_or(ErrorCode::TargetNotFound)?;if matches.next().is_some(){return Err(ErrorCode::TargetChanged);}Ok(node)
+}
 fn audio_nodes()->Result<Vec<AudioNode>,ErrorCode>{parse_audio(&command(WPCTL,&["status","--name"])?)}
 fn audio_list(direction:&str)->Result<Value,ErrorCode>{
     let nodes=audio_nodes()?;let devices=nodes.into_iter().filter(|n|n.direction==direction).map(|n|json!({"node_id":handle(n.direction,&n.name),"name":n.name,"available":true,"muted":n.muted,"default":n.default,"routing":"pipewire-session-default"})).collect::<Vec<_>>();
@@ -107,6 +114,74 @@ fn power_status()->Result<Value,ErrorCode>{
     let mut unsupported=Vec::new();if battery.is_none(){unsupported.push("battery_percent");}if current.is_none(){unsupported.push("profile");}
     envelope("upower-powerdevil",json!({"on_ac":!on_battery,"battery_percent":battery,"profile":current,"available_profiles":choices,"unsupported_fields":unsupported}),unsupported.is_empty())
 }
+enum MutationKind{
+    AudioDefault{direction:String,target:AudioNode,prior:AudioNode},
+    AudioMute{target:AudioNode,muted:bool,prior:bool},
+}
+pub struct PreparedMutation{action_id:String,arguments:Value,operation_id:String,kind:MutationKind}
+pub struct MutationReceipt{pub output:Value,pub recovery:Value,pub changed:bool}
+impl PreparedMutation{
+    pub fn prepare(action:&aios_protocol::contracts::Action)->Result<Self,ErrorCode>{
+        let arguments=action.arguments_value();let operation_id=uuid::Uuid::new_v4().to_string();
+        let kind=match action.action_id(){
+            "audio.default_set"=>{
+                let direction=arguments.get("direction").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?;
+                let reference=arguments.get("node_id").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?;
+                let target=selected_node(reference,Some(direction))?;let nodes=audio_nodes()?;
+                let prior=nodes.into_iter().find(|node|node.direction==direction&&node.default).ok_or(ErrorCode::UnsupportedCapability)?;
+                MutationKind::AudioDefault{direction:direction.into(),target,prior}
+            },
+            "audio.mute_set"=>{
+                let reference=arguments.get("node_id").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?;
+                let muted=arguments.get("muted").and_then(Value::as_bool).ok_or(ErrorCode::InvalidArgument)?;
+                let target=selected_node(reference,None)?;let prior=target.muted.ok_or(ErrorCode::UnsupportedCapability)?;
+                MutationKind::AudioMute{target,muted,prior}
+            },
+            _=>return Err(ErrorCode::UnsupportedCapability),
+        };
+        Ok(Self{action_id:action.action_id().into(),arguments,operation_id,kind})
+    }
+    pub fn scope(&self)->aios_policy::Scope{
+        let target=match &self.kind{MutationKind::AudioDefault{target,..}|MutationKind::AudioMute{target,..}=>target};
+        aios_policy::Scope{actions:[self.action_id.clone()].into(),resources:[aios_policy::Resource{
+            field:"node_id".into(),kind:"scope-owner-expiry".into(),handle:handle(target.direction,&target.name),identity_sha256:node_identity(target)}].into(),..Default::default()}
+    }
+    pub fn execute(mut self,mut revalidate:impl FnMut(&Self)->Result<(),ErrorCode>)->Result<MutationReceipt,ErrorCode>{
+        revalidate(&self)?;
+        let (output,recovery,changed)=match &self.kind{
+            MutationKind::AudioDefault{direction,target,prior}=>{
+                let changed=!target.default;if changed{let id=target.id.to_string();command(WPCTL,&["set-default",&id])?;}
+                revalidate(&self)?;let current=selected_node(&handle(target.direction,&target.name),Some(direction))?;
+                if !current.default{return Err(ErrorCode::PartialResult);}
+                (json!({"direction":direction,"node_id":handle(target.direction,&target.name),"available":true}),
+                    json!({"kind":"tool_call","action_id":"audio.default_set","arguments":{"direction":direction,"node_id":handle(prior.direction,&prior.name)}}),changed)
+            },
+            MutationKind::AudioMute{target,muted,prior}=>{
+                let changed=*prior!=*muted;if changed{let id=target.id.to_string();let value=if *muted{"1"}else{"0"};command(WPCTL,&["set-mute",&id,value])?;}
+                revalidate(&self)?;let current=selected_node(&handle(target.direction,&target.name),None)?;
+                if current.muted!=Some(*muted){return Err(ErrorCode::PartialResult);}
+                (json!({"node_id":handle(target.direction,&target.name),"muted":muted}),
+                    json!({"kind":"tool_call","action_id":"audio.mute_set","arguments":{"node_id":handle(target.direction,&target.name),"muted":prior}}),changed)
+            },
+        };
+        let result=envelope("pipewire-wireplumber",{
+            let mut data=output;let map=data.as_object_mut().ok_or(ErrorCode::TargetChanged)?;
+            map.insert("operation_id".into(),json!(self.operation_id));map.insert("transaction_id".into(),Value::Null);
+            map.insert("verification".into(),json!({"outcome":"verified","check_id":"native_readback","evidence_ids":[],"explanation":"Provider readback matched the requested value"}));data
+        },true)?;
+        aios_protocol::validation::validate_result(&self.action_id,serde_json::to_string(&result).map_err(|_|ErrorCode::TargetChanged)?.as_bytes())?;
+        Ok(MutationReceipt{output:result,recovery,changed})
+    }
+}
+impl aios_policy::CurrentResources for PreparedMutation{
+    fn resolve(&self,field:&str,kind:&str,reference:&str)->Result<String,ErrorCode>{
+        if field!="node_id"||kind!="scope-owner-expiry"{return Err(ErrorCode::PermissionDenied);}
+        let node=selected_node(reference,None)?;Ok(node_identity(&node))
+    }
+    fn dynamic_arguments(&self,id:&str,args:&Value,scope:&aios_policy::Scope)->Result<(),ErrorCode>{
+        if id==self.action_id&&args==&self.arguments&&scope.actions.contains(id){Ok(())}else{Err(ErrorCode::PermissionDenied)}
+    }
+}
 pub fn invoke(action:&aios_protocol::contracts::Action)->Result<Value,ErrorCode>{
     let value=match action.action_id(){"audio.outputs"=>audio_list("output")?,"audio.inputs"=>audio_list("input")?,"audio.default_get"=>audio_default(action.arguments_value().get("direction").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?)?,"power.status"=>power_status()?,"settings.get"=>setting(action.arguments_value().get("key").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?)?,_=>return Err(ErrorCode::UnsupportedCapability)};
     aios_protocol::validation::validate_result(action.action_id(),serde_json::to_string(&value).map_err(|_|ErrorCode::TargetChanged)?.as_bytes())?;Ok(value)
@@ -116,7 +191,7 @@ pub fn available_actions(actions:&[String])->Vec<String>{
     let settings=actions.iter().any(|id|id=="settings.get").then(||["desktop.theme_mode","display.idle_seconds","keyboard.backlight_percent"].iter().any(|key|setting(key).is_ok()));
     let power=actions.iter().any(|id|id=="power.status").then(||power_status().is_ok());
     actions.iter().filter(|id|match id.as_str(){
-        "audio.outputs"|"audio.inputs"|"audio.default_get"=>audio==Some(true),
+        "audio.outputs"|"audio.inputs"|"audio.default_get"|"audio.default_set"|"audio.mute_set"=>audio==Some(true),
         "settings.get"=>settings==Some(true),
         "power.status"=>power==Some(true),
         _=>false,

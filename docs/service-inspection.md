@@ -100,13 +100,22 @@ adapter can be read within fixed time and output bounds. Power status is
 available only when the authenticated session's PowerDevil profile API and
 system UPower API both answer; absent batteries and unavailable profile choices
 are explicit partial fields, never fabricated values. Audio handles derive from
-direction and the provider node name, not transient numeric node IDs. Direct
-invocation
-carries no approved write plan; every write action returns `AUTH_REQUIRED`,
-including Audio DefaultSet and MuteSet and Power ProfileSet. The shared
-`aios-policy` evaluator binds each available read to the authenticated caller,
-original connection, request, fixed action and concrete broker-issued resources.
-Successful reads still require the provider's current scope and resource checks.
+direction and the provider node name, not transient numeric node IDs; duplicate
+provider identities fail closed.
+
+Direct provider-interface invocation carries no bounded task grant, so every
+write action returns `AUTH_REQUIRED`, including Audio DefaultSet and MuteSet and
+Power ProfileSet. An authenticated caller may instead use Agent1
+`ExecuteTaskAction` with an exact `act` goal and typed action. The initial
+implementation accepts only the R1 audio default and mute actions. It mints an
+opaque caller/boot/policy/action/resource/argument/expiry-bound task grant,
+revalidates the live caller and node immediately before the fixed `wpctl`
+effect, verifies provider readback, and returns the prior typed action as
+recovery data. It never accepts an approval boolean, command, numeric node ID
+or serialized grant. Settings writes and the R2 power profile remain gated.
+The shared `aios-policy` evaluator binds each available read to the authenticated
+caller, original connection, request, fixed action and concrete broker-issued
+resources.
 Question tasks retain a volatile read grant for their original goal and the
 `system.info` action. Explicit caller-supplied `context_handles` can add
 `system.service_status` for owned, unexpired service handles only. The model
@@ -120,8 +129,11 @@ is required before UI access; observing a graphical candidate creates no grant.
 
 The user unit hides home directories with `ProtectHome=tmpfs` and exposes only
 its own user runtime directory, including the standard session bus and private
-socket. It runs without network access or added capabilities, with a read-only
-system, private devices, and bounded memory and process counts. Loss of the
+socket. A separate fixed oneshot projection reads only the registered KDE
+settings files and copies them mode-0600 into that runtime directory when they
+appear or change; the broker cannot read the rest of the home directory. It runs
+without network access or added capabilities, with a read-only system image,
+private devices, and bounded memory and process counts. Loss of the
 public bus owner terminates the daemon so the service manager can restart it.
 
 `aiosctl status --json` reports the authenticated session's capabilities and
