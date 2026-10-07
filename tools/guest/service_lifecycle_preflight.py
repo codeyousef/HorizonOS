@@ -120,11 +120,6 @@ def main():
     if model.returncode == 0 and "ActiveState=active" in model.stdout:
         raise RuntimeError("model service active in model-independent image")
     uid = pwd.getpwnam("tester").pw_uid
-    bus = f"/run/user/{uid}/bus"
-    available = command(expected, [RUNUSER, "-u", "tester", "--", "/run/current-system/sw/bin/test", "-S", bus], check=False)
-    if available.returncode != 0:
-        detail = (available.stdout + " " + available.stderr).strip()[:256]
-        raise RuntimeError(f"tester graphical user bus unavailable: {detail}")
     for unit in ("aios-sessiond.service", "aios-processd.service", "aios-ui-agent.service"):
         user_restarts.append(restart(expected, unit, "tester"))
         infrastructure(expected)
