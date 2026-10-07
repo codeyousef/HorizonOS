@@ -16,7 +16,8 @@
 - Enumerate bounded system and per-user profile generation history using
   separate native owners without cross-user profile leakage, while keeping
   ephemeral inventory and unattributed management provenance explicitly unknown.
-- Add authenticated read-only audio inventory/default and power status D-Bus
-  providers with stable handles, bounded native queries, truthful partial fields
-  and write methods that remain approval-gated.
+- Add authenticated read-only audio inventory/default, power status and the
+  three registered desktop-setting adapters with stable handles, pinned bounded
+  native queries, truthful unsupported/partial fields and write methods that
+  remain approval-gated.
 - Initial Rust protocol framing and NixOS engineering scaffold.

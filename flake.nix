@@ -57,6 +57,7 @@
       core = (productPackage "aios-core" "aios-session" "aios-sessiond").overrideAttrs (old: {
         AIOS_CONSENT_UI = "${consentUi}/bin/aios-scope-dialog";
         AIOS_WPCTL = "${pkgs.wireplumber}/bin/wpctl";
+        AIOS_KREADCONFIG = "${pkgs.kdePackages.kconfig}/bin/kreadconfig6";
         AIOS_CONSENT_NATIVE = "${consentUi}/bin/.aios-scope-dialog-wrapped";
         AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";
         AIOS_KWIN_WRAPPER = "${pkgs.kdePackages.kwin}/bin/.kwin_wayland_wrapper-wrapped";

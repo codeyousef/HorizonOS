@@ -78,7 +78,7 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     for (path, interface, methods, expected_available) in [
         ("/org/aios/Files1","org.aios.Files1",vec!["GetCapabilities","Search","Metadata","Read","Summarize","Copy","MoveFile","Trash","Restore"],vec![]),
         ("/org/aios/Applications1","org.aios.Applications1",vec!["GetCapabilities","List","Launch","Actions","Invoke"],vec![]),
-        ("/org/aios/Settings1","org.aios.Settings1",vec!["GetCapabilities","Get","Set"],vec![]),
+        ("/org/aios/Settings1","org.aios.Settings1",vec!["GetCapabilities","Get","Set"],vec!["settings.get"]),
         ("/org/aios/Audio1","org.aios.Audio1",vec!["GetCapabilities","Outputs","Inputs","DefaultGet","DefaultSet","MuteSet"],vec!["audio.outputs","audio.inputs","audio.default_get"]),
         ("/org/aios/Power1","org.aios.Power1",vec!["GetCapabilities","Status","ProfileSet"],vec!["power.status"]),
     ] {
@@ -116,7 +116,7 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     code(apps.call::<_,_,String>("List",&(listing.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
     code(files.call::<_,_,String>("Search",&(listing.as_str(),)).unwrap_err(),"INVALID_ARGUMENT");
     let get=action_request("settings.get",json!({"key":"desktop.theme_mode"}));
-    code(settings.call::<_,_,String>("Get",&(get.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
+    match settings.call::<_,_,String>("Get",&(get.as_str(),)){Ok(value)=>{let result=aios_protocol::validation::validate_result("settings.get",value.as_bytes()).unwrap();assert_eq!(result["data"]["key"],"desktop.theme_mode");},Err(error)=>code(error,"UNSUPPORTED_CAPABILITY")}
     let outputs=action_request("audio.outputs",json!({}));
     let outputs:String=audio.call("Outputs",&(outputs.as_str(),)).unwrap();
     let outputs=aios_protocol::validation::validate_result("audio.outputs",outputs.as_bytes()).unwrap();

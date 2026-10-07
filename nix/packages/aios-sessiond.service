@@ -20,6 +20,7 @@ PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=tmpfs
 BindPaths=%t
+BindReadOnlyPaths=-%h/.config/kdeglobals -%h/.config/powerdevilrc
 PrivateUsers=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

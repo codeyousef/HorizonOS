@@ -201,7 +201,10 @@ impl aios_policy::CurrentResources for ReadResources {
         self.0.iter().find(|r| r.field == field && r.kind == kind && r.handle == handle)
             .map(|r| r.identity_sha256.clone()).ok_or(ErrorCode::PermissionDenied)
     }
-    fn dynamic_arguments(&self, _: &str, _: &Value, _: &aios_policy::Scope) -> Result<(), ErrorCode> { Err(ErrorCode::UnsupportedCapability) }
+    fn dynamic_arguments(&self,id:&str,args:&Value,scope:&aios_policy::Scope)->Result<(),ErrorCode>{
+        if id=="settings.get" && scope.actions.contains(id) && matches!(args.get("key").and_then(Value::as_str),Some("desktop.theme_mode"|"display.idle_seconds"|"keyboard.backlight_percent")){Ok(())}
+        else{Err(ErrorCode::UnsupportedCapability)}
+    }
 }
 #[derive(Default)]
 pub struct State { tasks: HashMap<String, Task>, handles: HashMap<String, Handle>, ui_candidates: HashMap<String, UiCandidate>, queue: VecDeque<String>, inference_configured: bool, inference_available: bool, policy: Option<aios_policy::Policy>, processes: processes::Handles }
@@ -474,7 +477,7 @@ impl State {
                 if !aios_protocol::registry::capability(action.action_id())?.read_only {
                     return Err(ErrorCode::AuthRequired);
                 }
-                if matches!(action.action_id(),"audio.outputs"|"audio.inputs"|"audio.default_get"|"power.status") {
+                if matches!(action.action_id(),"audio.outputs"|"audio.inputs"|"audio.default_get"|"power.status"|"settings.get") {
                     self.check_direct_read(peer,&action,ReadResources::default())?;
                     return native_settings::invoke(&action);
                 }

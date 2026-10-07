@@ -88,13 +88,20 @@ with `operation.kind=invoke` and a strict registry `tool_call`. The method fixes
 the permitted action ID: Search accepts only `files.search`, for example.
 Callers cannot choose another dispatch namespace through its JSON.
 GetCapabilities reports registered contracts separately from available actions.
-File, application and settings providers currently report unavailable. Audio
-inventory and defaults are available only when the pinned `wpctl status --name`
-shape can be read within fixed time and output bounds. Power status is available
-only when the authenticated session's PowerDevil profile API and system UPower
-API both answer; absent batteries and unavailable profile choices are explicit
-partial fields, never fabricated values. Audio handles derive from direction
-and the provider node name, not transient numeric node IDs. Direct invocation
+File and application providers currently report unavailable. Settings Get is
+available when at least one of the three registered keys has an authoritative
+pinned adapter. `desktop.theme_mode` reads only the Breeze Light/Dark
+`kdeglobals` color-scheme key, `display.idle_seconds` reads only the active
+PowerDevil profile's Plasma 6 display-idle key, and
+`keyboard.backlight_percent` reads the UPower KbdBacklight API. Missing files,
+keys, hardware or unrecognized values are unsupported. Audio inventory and
+defaults are available only when the Nix-pinned absolute `wpctl status --name`
+adapter can be read within fixed time and output bounds. Power status is
+available only when the authenticated session's PowerDevil profile API and
+system UPower API both answer; absent batteries and unavailable profile choices
+are explicit partial fields, never fabricated values. Audio handles derive from
+direction and the provider node name, not transient numeric node IDs. Direct
+invocation
 carries no approved write plan; every write action returns `AUTH_REQUIRED`,
 including Audio DefaultSet and MuteSet and Power ProfileSet. The shared
 `aios-policy` evaluator binds each available read to the authenticated caller,

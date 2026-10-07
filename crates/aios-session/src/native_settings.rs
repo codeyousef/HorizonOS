@@ -8,6 +8,7 @@ use time::{OffsetDateTime,format_description::well_known::Rfc3339};
 
 const PROVIDER_VERSION:&str=env!("CARGO_PKG_VERSION");
 const WPCTL:&str=match option_env!("AIOS_WPCTL"){Some(path)=>path,None=>"wpctl"};
+const KREADCONFIG:&str=match option_env!("AIOS_KREADCONFIG"){Some(path)=>path,None=>"kreadconfig6"};
 fn envelope(provider:&str,data:Value,complete:bool)->Result<Value,ErrorCode>{
     let value=json!({"schema_version":1,"status":if complete{"ok"}else{"partial"},"observed_at":OffsetDateTime::now_utc().format(&Rfc3339).map_err(|_|ErrorCode::TargetChanged)?,
         "source":{"provider":provider,"provider_version":PROVIDER_VERSION},"evidence_ids":[],"complete":complete,"next_cursor":null,"data":data,"error":null});
@@ -49,6 +50,35 @@ fn audio_default(direction:&str)->Result<Value,ErrorCode>{
     if !matches!(direction,"input"|"output"){return Err(ErrorCode::InvalidArgument);}let nodes=audio_nodes()?;let node=nodes.iter().find(|n|n.direction==direction&&n.default);
     envelope("pipewire-wireplumber",json!({"direction":direction,"node_id":node.map(|n|handle(direction,&n.name)),"available":node.is_some()}),true)
 }
+fn setting(key:&str)->Result<Value,ErrorCode>{
+    let (value,provider)=match key{
+        "desktop.theme_mode"=>{
+            let value=command(KREADCONFIG,&["--file","kdeglobals","--group","General","--key","ColorScheme"])?;
+            let mode=match value.trim(){"BreezeLight"=>"light","BreezeDark"=>"dark",_=>return Err(ErrorCode::UnsupportedCapability)};
+            (json!(mode),"kconfig-pinned")
+        },
+        "display.idle_seconds"=>{
+            let session=zbus::blocking::Connection::session().map_err(|_|ErrorCode::UnsupportedCapability)?;
+            let power=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement","org.kde.Solid.PowerManagement").map_err(|_|ErrorCode::UnsupportedCapability)?;
+            let profile:String=power.call("currentProfile",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
+            if !matches!(profile.as_str(),"AC"|"Battery"|"LowBattery"){return Err(ErrorCode::UnsupportedCapability);}
+            let value=command(KREADCONFIG,&["--file","powerdevilrc","--group",&profile,"--group","Display","--key","TurnOffDisplayIdleTimeoutSec"])?;
+            let seconds=value.trim().parse::<u64>().map_err(|_|ErrorCode::UnsupportedCapability)?;
+            if !(60..=3600).contains(&seconds){return Err(ErrorCode::UnsupportedCapability);}
+            (json!(seconds),"powerdevil-kconfig-pinned")
+        },
+        "keyboard.backlight_percent"=>{
+            let system=zbus::blocking::Connection::system().map_err(|_|ErrorCode::UnsupportedCapability)?;
+            let keyboard=zbus::blocking::Proxy::new(&system,"org.freedesktop.UPower","/org/freedesktop/UPower/KbdBacklight","org.freedesktop.UPower.KbdBacklight").map_err(|_|ErrorCode::UnsupportedCapability)?;
+            let current:i32=keyboard.call("GetBrightness",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
+            let maximum:i32=keyboard.call("GetMaxBrightness",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
+            if maximum<=0||current<0||current>maximum{return Err(ErrorCode::TargetChanged);}
+            (json!(((i64::from(current)*100+i64::from(maximum)/2)/i64::from(maximum)) as u64),"upower-kbd-backlight")
+        },
+        _=>return Err(ErrorCode::UnsupportedCapability),
+    };
+    envelope(provider,json!({"key":key,"value":value,"ownership":"user"}),true)
+}
 fn power_status()->Result<Value,ErrorCode>{
     let session=zbus::blocking::Connection::session().map_err(|_|ErrorCode::UnsupportedCapability)?;
     let profile=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/PowerProfile","org.kde.Solid.PowerManagement.Actions.PowerProfile").map_err(|_|ErrorCode::UnsupportedCapability)?;
@@ -65,14 +95,16 @@ fn power_status()->Result<Value,ErrorCode>{
     envelope("upower-powerdevil",json!({"on_ac":!on_battery,"battery_percent":battery,"profile":current,"available_profiles":choices,"unsupported_fields":unsupported}),unsupported.is_empty())
 }
 pub fn invoke(action:&aios_protocol::contracts::Action)->Result<Value,ErrorCode>{
-    let value=match action.action_id(){"audio.outputs"=>audio_list("output")?,"audio.inputs"=>audio_list("input")?,"audio.default_get"=>audio_default(action.arguments_value().get("direction").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?)?,"power.status"=>power_status()?,_=>return Err(ErrorCode::UnsupportedCapability)};
+    let value=match action.action_id(){"audio.outputs"=>audio_list("output")?,"audio.inputs"=>audio_list("input")?,"audio.default_get"=>audio_default(action.arguments_value().get("direction").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?)?,"power.status"=>power_status()?,"settings.get"=>setting(action.arguments_value().get("key").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?)?,_=>return Err(ErrorCode::UnsupportedCapability)};
     aios_protocol::validation::validate_result(action.action_id(),serde_json::to_string(&value).map_err(|_|ErrorCode::TargetChanged)?.as_bytes())?;Ok(value)
 }
 pub fn available_actions(actions:&[String])->Vec<String>{
     let audio=actions.iter().any(|id|id.starts_with("audio.")).then(||audio_nodes().is_ok());
+    let settings=actions.iter().any(|id|id=="settings.get").then(||["desktop.theme_mode","display.idle_seconds","keyboard.backlight_percent"].iter().any(|key|setting(key).is_ok()));
     let power=actions.iter().any(|id|id=="power.status").then(||power_status().is_ok());
     actions.iter().filter(|id|match id.as_str(){
         "audio.outputs"|"audio.inputs"|"audio.default_get"=>audio==Some(true),
+        "settings.get"=>settings==Some(true),
         "power.status"=>power==Some(true),
         _=>false,
     }).cloned().collect()
