@@ -22,6 +22,8 @@
     unitConfig.RequiresMountsFor = [ "/mnt/aios-storage-fixture" ];
     serviceConfig = {
       Type = "oneshot";
+      User = "dev";
+      Group = config.users.users.dev.group;
       RemainAfterExit = true;
       ExecStart = pkgs.writeShellScript "fill-aios-storage-fixture" ''
         ${pkgs.coreutils}/bin/dd if=/dev/zero of=/mnt/aios-storage-fixture/full.bin bs=4096 count=1024 status=none || true
