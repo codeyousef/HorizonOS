@@ -1,3 +1,5 @@
+mod native;
+
 use aios_protocol::contracts::{Action, parse_tool_call};
 
 fn main() {
@@ -97,6 +99,55 @@ fn run(args: Vec<String>) {
             Err(_) => std::process::exit(2),
         }
     }
+    let package = match args.as_slice() {
+        [a, b, value] if a == "package" && matches!(b.as_str(), "search" | "info") =>
+            Some((b.as_str(), value.as_str(), false)),
+        [a, b, value, flag] if a == "package" && matches!(b.as_str(), "search" | "info") && flag == "--json" =>
+            Some((b.as_str(), value.as_str(), true)),
+        _ => None,
+    };
+    if let Some((operation, value, json)) = package {
+        let result = native::Client::connect().and_then(|client|
+            if operation == "search" { client.package_search(value) } else { client.package_info(value) });
+        match result {
+            Ok(result) => {
+                if json { println!("{result}"); }
+                else if operation == "search" {
+                    if let Some(matches) = result["data"]["matches"].as_array() {
+                        for package in matches {
+                            println!("{}\t{}\t{}", package["package_id"].as_str().unwrap_or(""),
+                                package["version"].as_str().unwrap_or(""), package["name"].as_str().unwrap_or(""));
+                        }
+                    }
+                } else {
+                    println!("{} {} — {}", result["data"]["package_id"].as_str().unwrap_or(""),
+                        result["data"]["version"].as_str().unwrap_or(""), result["data"]["name"].as_str().unwrap_or(""));
+                }
+                return;
+            },
+            Err(code) => api_error(code),
+        }
+    }
+    let graph_json = match args.as_slice() {
+        [a, b] if a == "graph" && b == "status" => Some(false),
+        [a, b, flag] if a == "graph" && b == "status" && flag == "--json" => Some(true),
+        _ => None,
+    };
+    if let Some(json) = graph_json {
+        match native::Client::connect().and_then(|client| client.graph_status()) {
+            Ok(value) => {
+                if json { println!("{value}"); }
+                else {
+                    println!("Graph: {} ({} loaded services, {} complete reconciliations)",
+                        value["provider"]["status"].as_str().unwrap_or("unknown"),
+                        value["observed_loaded_services"].as_u64().unwrap_or(0),
+                        value["complete_reconciliations"].as_u64().unwrap_or(0));
+                }
+                return;
+            },
+            Err(code) => api_error(code),
+        }
+    }
     let model = match args.as_slice() {
         [a, b] if a == "model" && matches!(b.as_str(), "status" | "unload") =>
             Some((b.as_str(), false)),
@@ -163,7 +214,7 @@ fn run(args: Vec<String>) {
         if let Err(error) = result { eprintln!("aiosctl: {error}"); std::process::exit(1); }
         return;
     }
-    eprintln!("Usage: aiosctl status --json | ask [--mode read-only] TEXT [--json] | ask TEXT --json --service UNIT | model status [--json] | model unload [--json] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | process list --json | process terminate SESSION BOOT_UUID PID START_TICKS GOAL --json | system info --json | inspect service UNIT [--json] [--socket PRIVATE_PATH]");
+    eprintln!("Usage: aiosctl status --json | ask [--mode read-only] TEXT [--json] | ask TEXT --json --service UNIT | package search QUERY [--json] | package info ID [--json] | graph status [--json] | model status [--json] | model unload [--json] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | process list --json | process terminate SESSION BOOT_UUID PID START_TICKS GOAL --json | system info --json | inspect service UNIT [--json] [--socket PRIVATE_PATH]");
     std::process::exit(2);
 }
 

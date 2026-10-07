@@ -1,6 +1,7 @@
 //! Explicit installed-image qualification. Ordinary unit runs never invoke RPC.
 use serde_json::{Value, json};
 use zbus::blocking::{Connection, Proxy};
+use std::process::Command;
 
 fn value(proxy: &Proxy<'_>, method: &str, arguments: impl serde::Serialize + zbus::zvariant::DynamicType) -> Value {
     let response: String = proxy.call(method, &arguments).unwrap();
@@ -23,7 +24,7 @@ fn system_and_packages(connection: &Connection, executor_owner: &str) {
     let owner:String=bus.call("GetNameOwner",&("org.aios.System1",)).unwrap();
     assert_eq!(owner,executor_owner);
     for (path,interface,methods) in [
-        ("/org/aios/System1","org.aios.System1",vec!["GetCapabilities","Info","Services","ServiceStatus","ServiceRestart","Hardware","StorageStatus","NetworkStatus","NetworkSetWifiEnabled","BluetoothStatus","BluetoothSetEnabled","Boots","BootDiagnostics","Logs"]),
+        ("/org/aios/System1","org.aios.System1",vec!["GetCapabilities","Info","Services","ServiceStatus","ServiceRestart","Hardware","StorageStatus","NetworkStatus","NetworkSetWifiEnabled","BluetoothStatus","BluetoothSetEnabled","Boots","BootDiagnostics","Logs","GraphStatus"]),
         ("/org/aios/Packages1","org.aios.Packages1",vec!["GetCapabilities","Search","Info","Installed","Install","Remove","UpgradePlan"]),
     ] {
         let introspection=Proxy::new(connection,"org.aios.System1",path,"org.freedesktop.DBus.Introspectable").unwrap();
@@ -61,6 +62,10 @@ fn system_and_packages(connection: &Connection, executor_owner: &str) {
     aios_protocol::validation::validate_result("system.info",&serde_json::to_vec(&info).unwrap()).unwrap();
     assert_eq!(info["data"]["os_id"],"nixos");assert_eq!(info["data"]["virtualization"],"kvm");
     assert_eq!(info["data"]["boot_id"],std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim());
+    let graph=value(&system,"GraphStatus",());
+    assert_eq!(graph["schema_version"],1);assert_eq!(graph["scope"],"system");
+    assert_eq!(graph["boot"],info["data"]["boot_id"]);assert_eq!(graph["model_invoked"],false);
+    assert_eq!(graph["execution_authority"],false);assert!(graph["reconciliations_attempted"].as_u64().is_some());
     let mut forged:Value=serde_json::from_str(&action("system.info",json!({}))).unwrap();forged["uid"]=json!(0);
     denied(system.call::<_,_,String>("Info",&(forged.to_string(),)),"INVALID_ARGUMENT");
     denied(system.call::<_,_,String>("Info",&(action("system.hardware",json!({})),)),"INVALID_ARGUMENT");
@@ -107,6 +112,18 @@ fn system_and_packages(connection: &Connection, executor_owner: &str) {
     let reconnect=Proxy::new(&other,"org.aios.System1","/org/aios/Packages1","org.aios.Packages1").unwrap();
     denied(reconnect.call::<_,_,String>("Search",&(action("packages.search",json!({"query":"e","limit":1,"cursor":cursor})),)),"PERMISSION_DENIED");
     denied(packages.call::<_,_,String>("Install",&(action("packages.install",json!({"package_ids":["kate"]})),)),"UNSUPPORTED_CAPABILITY");
+    let cli=std::fs::canonicalize("/run/current-system/sw/bin/aiosctl").unwrap();
+    assert!(cli.starts_with("/nix/store"));
+    for arguments in [
+        vec!["package","info","kate","--json"],
+        vec!["package","search","Kate","--json"],
+        vec!["graph","status","--json"],
+    ] {
+        let output=Command::new(&cli).args(arguments).output().unwrap();
+        assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+        let value:Value=serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["schema_version"],1);
+    }
 }
 
 #[test]

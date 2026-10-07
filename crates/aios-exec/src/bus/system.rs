@@ -5,7 +5,7 @@ use aios_protocol::{MAX_TASK_BYTES, contracts::{Action, ErrorCode}};
 use aios_state::{Catalog, CatalogEntry};
 use serde::Deserialize;
 use serde_json::{Value, json, value::RawValue};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, io::{Read, Write}, os::unix::net::UnixStream, time::Duration};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use zbus::message::Header;
 
@@ -188,6 +188,31 @@ fn package_result(data: Value, cursor: Option<String>) -> Value {
         "source":{"provider":"aios-installed-catalog","provider_version":env!("CARGO_PKG_VERSION")},
         "evidence_ids":[],"complete":true,"next_cursor":cursor,"data":data,"error":null})
 }
+pub(super) fn graph_status() -> Result<Value> {
+    let mut stream = UnixStream::connect("/run/aios-state/owner.sock")
+        .map_err(|_| ErrorCode::UnsupportedCapability)?;
+    stream.set_read_timeout(Some(Duration::from_millis(500))).map_err(|_| ErrorCode::PartialResult)?;
+    stream.set_write_timeout(Some(Duration::from_millis(500))).map_err(|_| ErrorCode::PartialResult)?;
+    let request = br#"{"kind":"status"}"#;
+    stream.write_all(&(request.len() as u32).to_be_bytes()).map_err(|_| ErrorCode::PartialResult)?;
+    stream.write_all(request).map_err(|_| ErrorCode::PartialResult)?;
+    let mut length = [0; 4];
+    stream.read_exact(&mut length).map_err(|_| ErrorCode::PartialResult)?;
+    let length = u32::from_be_bytes(length) as usize;
+    if length == 0 || length > aios_protocol::MAX_FRAME_BYTES {
+        return Err(ErrorCode::ResourceExhausted.into());
+    }
+    let mut bytes = vec![0; length];
+    stream.read_exact(&mut bytes).map_err(|_| ErrorCode::PartialResult)?;
+    let reply:Value = serde_json::from_slice(&bytes).map_err(|_| ErrorCode::InvalidArgument)?;
+    let value = reply.get("data").filter(|_| reply["ok"] == true).cloned().ok_or(ErrorCode::PartialResult)?;
+    if value["schema_version"] != 1 || value["scope"] != "system" || value["model_invoked"] != false
+        || value["execution_authority"] != false || !value["boot"].is_string() {
+        return Err(ErrorCode::TargetChanged.into());
+    }
+    Ok(value)
+}
+
 
 // Each exported member fixes one reviewed action. No generic bus method,
 // path, command, administrator assertion or caller-provided UID is accepted.
@@ -223,6 +248,9 @@ surface!(System,Scope::System,"org.aios.System1",[(info,"system.info"),(services
     async fn resolve_user_log_service(&self,unit_name:&str,#[zbus(header)]header:Header<'_>)->Result<String> {
         if unit_name.len()>255 {return Err(ErrorCode::InvalidArgument.into());}
         self.executor.call(header,Operation::JournalResolveUserService(unit_name.into())).await
+    }
+    async fn graph_status(&self,#[zbus(header)]header:Header<'_>)->Result<String> {
+        self.executor.call(header,Operation::GraphStatus).await
     }
 );
 surface!(Packages,Scope::Packages,"org.aios.Packages1",[(search,"packages.search"),(info,"packages.info"),

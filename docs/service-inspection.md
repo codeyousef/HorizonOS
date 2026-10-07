@@ -172,6 +172,14 @@ caller-pinned D-Bus route and requests an unload only when no generation or
 queue entry is active; otherwise it returns `CONFLICT`. Both commands accept
 `--json`, never submit model text and never expose a tool or shell capability.
 
+`aiosctl package search QUERY` and `aiosctl package info ID` query the
+administrator-reviewed installed catalog through the root-owned
+`org.aios.Packages1` service. `aiosctl graph status` queries aggregate
+reconciliation health through `org.aios.System1`; the privileged broker reads
+the fixed graph-owner socket and returns no graph database path or execution
+authority. These commands support `--json`, authenticate the root bus owner
+before and after each call, and invoke neither inference nor a shell.
+
 Public `Submit` takes the same versioned control request used by the private
 transport, with `operation.kind=submit` and a typed `operation.request`. Other
 public methods use the PRD's small typed arguments. Task status, event,

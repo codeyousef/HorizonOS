@@ -33,7 +33,9 @@ dependencies = [
  "aios-session",
  "aios-system",
  "serde_json",
+ "serde",
  "uuid",
+ "zbus",
 ]
 
 [[package]]
