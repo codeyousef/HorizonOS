@@ -183,19 +183,25 @@ fifteen-minute timer/fallback remains active. Complete closure metadata and user
 overlay reconciliation remain separate providers.
 
 
-The system owner also samples native block-disk properties through libudev at
-startup, native generation/service refresh and the periodic fallback. This
-provider covers block disks; other hardware classes and udev event monitoring
-remain separate work. Serial, WWN, bus, model and vendor are native optional
-properties. A missing serial remains null. WWN/serial-based keys are preferred;
-otherwise a boot-scoped kernel locator is explicitly labeled without durable
-identity or retained live identity. Duplicate stable properties are ambiguous
-and refuse publication. Native inventories are compared before/after applying
-an opaque two-second snapshot. Only the system-scoped database accepts them.
-The root-private `--devices` diagnostic includes capture time and a conservative
-two-second cache eligibility limit. Partial snapshots cannot claim Current.
-These observations do not grant storage execution authority or expose raw
-block-device access; effect providers must acquire critical identity live.
+The system owner samples native block-disk properties through libudev at startup,
+on bounded block-subsystem udev notifications, native generation/service refresh
+and the periodic fallback. A lost/overflowed monitor event is recorded and causes
+a complete native rebuild before the monitor reconnects. Serial, WWN, bus, model,
+vendor, capacity, removable and read-only properties are native optional values;
+a missing serial remains null. WWN/serial-based keys are preferred; otherwise a
+boot-scoped kernel locator is explicitly labeled without durable identity or
+retained live identity. Duplicate stable properties are ambiguous and refuse
+publication. Native inventories are compared before/after applying an opaque
+two-second snapshot. Only the system-scoped database accepts them.
+
+A separate system-mount provider reads fixed mountinfo and filesystem-stat
+sources. It stores mount path, redacted block-major/minor/filesystem source,
+capacity, available bytes and read-only state under stable system-scoped
+identities. A one-second topology poll catches mount/source/capacity/read-only
+changes; free-space-only changes refresh on normal reconciliation. The independent
+fifteen-minute fallback remains. Neither provider registers formatting, repair,
+mount or raw-block effects; mutation would require a separate live identity and
+policy path.
 
 The built-configuration provider reads only `etc/aios/managed.json` and
 `etc/aios/catalog.json` inside the observed running closure. It requires

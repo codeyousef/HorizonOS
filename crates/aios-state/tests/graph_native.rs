@@ -273,3 +273,35 @@ fn real_block_device_properties_match_native_udev_and_scoped_graph(){
     println!("AIOS_NATIVE_BLOCK_GRAPH={}",json!({"evidence_kind":"native-udev-block-disk-graph-library","device_count":rows.len(),"complete_block_enumeration":inventory.complete,
         "independent_udevadm_argv":argv,"independent_udevadm_exit":0,"selected_device":device,"missing_serials_stay_null":rows.iter().all(|row|!row.properties["device"]["serial"].is_null() || row.properties["identity_kind"]=="boot_scoped_kernel_locator" || row.properties["identity_kind"]=="udev_wwn"),"wrong_scope_refused":true,"expired_snapshot_refused":true,"storage_effect_performed":false,"installed_owner_verified":false}));
 }
+
+#[test]
+#[ignore="requires enrolled NixOS guest native mountinfo/statvfs/libudev; read-only system fixtures"]
+fn real_hardware_storage_and_mount_graph_are_scoped_and_effect_free(){
+    use aios_state::graph::mounts::{NativeMountSnapshot,PROVIDER};
+    let uid=unsafe{libc::geteuid()};assert!(uid>=1000);
+    let first=serde_json::to_value(aios_system::hardware::observe("all",b"caller-a")).unwrap();
+    let second=serde_json::to_value(aios_system::hardware::observe("all",b"caller-b")).unwrap();
+    aios_protocol::validation::validate_result("system.hardware",&serde_json::to_vec(&first).unwrap()).unwrap();
+    assert!(first["data"]["items"].as_array().unwrap().iter().any(|item|item["device_class"]=="cpu"));
+    assert!(first["data"]["unsupported_fields"].as_array().unwrap().iter().any(|field|field=="battery"));
+    let first_ids=first["data"]["items"].as_array().unwrap().iter().map(|item|item["device_id"].clone()).collect::<Vec<_>>();
+    let second_ids=second["data"]["items"].as_array().unwrap().iter().map(|item|item["device_id"].clone()).collect::<Vec<_>>();
+    assert_ne!(first_ids,second_ids);
+    let storage=serde_json::to_value(aios_system::storage::observe(uid,b"caller-a")).unwrap();
+    aios_protocol::validation::validate_result("storage.status",&serde_json::to_vec(&storage).unwrap()).unwrap();
+    let root_mount=storage["data"]["mounts"].as_array().unwrap().iter().find(|mount|mount["mount_path"]=="/").unwrap();
+    assert!(root_mount["capacity_bytes"].as_u64().unwrap()>0);
+    assert!(root_mount["free_bytes"].as_u64().unwrap()<=root_mount["capacity_bytes"].as_u64().unwrap());
+    assert!(root_mount["source_identity"].as_str().unwrap().starts_with("block:")||root_mount["source_identity"].as_str().unwrap().starts_with("filesystem:"));
+    let fixture=Fixture(std::env::temp_dir().join(format!("aios-graph-mount-{}-{}",std::process::id(),time().monotonic_ns)));
+    fs::create_dir(&fixture.0).unwrap();fs::set_permissions(&fixture.0,fs::Permissions::from_mode(0o700)).unwrap();let root=fixture.0.join("graph");fs::create_dir(&root).unwrap();fs::set_permissions(&root,fs::Permissions::from_mode(0o700)).unwrap();
+    let graph=GraphStore::open(&root,Scope::System).unwrap();let snapshot=NativeMountSnapshot::collect(&graph).unwrap();let ids=snapshot.ids();assert!(!ids.is_empty());
+    let state=snapshot.apply(&graph).unwrap();assert_eq!(state.status,ProviderStatus::Ready);
+    let rows=graph.nodes(ids).unwrap();assert!(rows.iter().all(|row|row.provider==PROVIDER&&row.source_truth==SourceTruth::Running&&row.properties["execution_authority"]==false&&row.properties["format_or_repair_available"]==false));
+    let user_root=fixture.0.join("user");fs::create_dir(&user_root).unwrap();fs::set_permissions(&user_root,fs::Permissions::from_mode(0o700)).unwrap();
+    let user=GraphStore::open(&user_root,Scope::User(uid)).unwrap();assert!(matches!(NativeMountSnapshot::collect(&user),Err(aios_state::graph::native::Error::WrongScope)));
+    let mut events=aios_system::devices::DeviceEvents::connect().unwrap();let idle=events.poll().unwrap();
+    println!("AIOS_NATIVE_HARDWARE_STORAGE={}",json!({"evidence_kind":"real-native-hardware-storage-graph-library","hardware":first,"storage":storage,
+        "mount_graph_rows":rows.len(),"mount_provider_status":state.status,"wrong_scope_refused":true,"udev_monitor_connected":true,
+        "initial_udev_notifications":idle.notifications,"initial_udev_loss":idle.loss,"storage_effect_performed":false,"format_or_repair_registered":false}));
+}

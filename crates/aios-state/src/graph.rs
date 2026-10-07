@@ -8,6 +8,7 @@ pub mod native;
 pub mod runtime;
 pub mod generations;
 pub mod devices;
+pub mod mounts;
 pub mod built;
 pub mod service_evidence;
 pub mod user_profiles;

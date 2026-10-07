@@ -38,7 +38,10 @@ fn frame_write(stream:&mut UnixStream,value:&Value)->Result<()>{
 struct GenerationCache{captured:ObservationTime,pointers:SystemPointers}
 fn generation_refresh_needed(previous:Option<&SystemPointers>,observed:&SystemPointers,failed:bool)->bool{failed || previous!=Some(observed)}
 struct Owner{graph:GraphStore,ids:Vec<String>,attempts:u64,successful:u64,last_attempt:ObservationTime,last_error:Option<String>,
-    generations:Option<GenerationCache>,generation_error:Option<String>,last_generation_probe:ObservationTime,generation_changes:u64,event_watcher:bool,event_error:Option<String>,systemd_notifications:u64,event_refreshes:u64,device_ids:Vec<String>,device_error:Option<String>,metadata:Option<super::built::NativeBuiltSnapshot>,metadata_error:Option<String>}
+    generations:Option<GenerationCache>,generation_error:Option<String>,last_generation_probe:ObservationTime,generation_changes:u64,event_watcher:bool,event_error:Option<String>,systemd_notifications:u64,event_refreshes:u64,
+    device_ids:Vec<String>,device_error:Option<String>,device_watcher:bool,device_event_error:Option<String>,device_notifications:u64,device_event_refreshes:u64,
+    mount_ids:Vec<String>,mounts:Option<Vec<aios_system::storage::MountStatus>>,mount_error:Option<String>,last_mount_probe:ObservationTime,mount_changes:u64,
+    metadata:Option<super::built::NativeBuiltSnapshot>,metadata_error:Option<String>}
 impl Owner{
     fn reconcile_metadata(&mut self)->Result<()>{
         let result=(||{let snapshot=super::built::NativeBuiltSnapshot::collect(&self.graph)?;
@@ -80,6 +83,39 @@ impl Owner{
             snapshot.apply(&self.graph)?;self.device_ids=snapshot.ids()?;Ok(())})();
         self.device_error=result.as_ref().err().map(|e:&Error|format!("{e:?}"));result
     }
+    fn device_event(&mut self,notifications:u64,loss:bool)->Result<()>{
+        let captured=NativeTime::observe()?.observation().clone();
+        self.device_notifications=self.device_notifications.saturating_add(notifications);
+        self.device_event_refreshes=self.device_event_refreshes.checked_add(1).ok_or(Error::Protocol)?;
+        self.graph.ingest_provider_events(super::devices::PROVIDER.into(),vec![ProviderEvent{
+            id:format!("udev:{}:{}:{}",captured.boot.0,captured.monotonic_ns,self.device_event_refreshes),entity_id:None,
+            kind:if loss{EventKind::Lost}else{EventKind::Changed},time:captured,origin_transaction_id:None,
+            payload:json!({"source":"native-libudev-block-monitor","coalesced_notifications":notifications,"possible_loss":loss})}])?;
+        self.reconcile_devices()
+    }
+    fn reconcile_mounts(&mut self)->Result<()>{
+        let result=(||{let snapshot=super::mounts::NativeMountSnapshot::collect(&self.graph)?;
+            snapshot.apply(&self.graph)?;self.mount_ids=snapshot.ids();self.mounts=Some(snapshot.mounts().to_vec());Ok(())})();
+        self.mount_error=result.as_ref().err().map(|e:&Error|format!("{e:?}"));result
+    }
+    fn poll_mounts(&mut self)->Result<()>{
+        let now=NativeTime::observe()?.observation().clone();
+        if now.boot==self.last_mount_probe.boot && now.monotonic_ns.checked_sub(self.last_mount_probe.monotonic_ns).is_some_and(|age|age<1_000_000_000){return Ok(());}
+        self.last_mount_probe=now.clone();
+        let observed=match aios_system::storage::read_system_mounts(){
+            Ok(value)=>value,
+            Err(error)=>{if self.mount_error.is_none(){self.graph.report_event_loss();}self.mount_error=Some(format!("{error:?}"));return Err(Error::Native(error.into()));}
+        };
+        let topology=|values:&[aios_system::storage::MountStatus]|values.iter().map(|value|(&value.mount_id,&value.mount_path,&value.source_identity,value.capacity_bytes,value.read_only)).collect::<Vec<_>>();
+        let changed=self.mounts.as_ref().is_none_or(|prior|topology(prior)!=topology(&observed));
+        if changed{
+            self.graph.ingest_provider_events(super::mounts::PROVIDER.into(),vec![ProviderEvent{id:format!("mount:{}:{}",now.boot.0,now.monotonic_ns),
+                entity_id:None,kind:EventKind::Changed,time:now,origin_transaction_id:None,payload:json!({"source":"fixed-native-mountinfo-poll"})}])?;
+            self.mount_changes=self.mount_changes.checked_add(1).ok_or(Error::Protocol)?;
+            self.reconcile_mounts()?;
+        }
+        Ok(())
+    }
     fn device_view(&self)->Result<Value>{
         let now=NativeTime::observe()?.observation().clone();
         let state=self.graph.reconciliation_plan(super::devices::PROVIDER.into(),now.clone(),SourceRevision::default())?.state;
@@ -103,12 +139,12 @@ impl Owner{
         self.last_attempt=NativeTime::observe()?.observation().clone();self.attempts=self.attempts.checked_add(1).ok_or(Error::Protocol)?;
         // Each provider owns its source truth/checkpoint. A failed generation
         // read does not turn service facts into generation or managed facts.
-        let generations=self.reconcile_generations();let devices=self.reconcile_devices();let metadata=self.reconcile_metadata();
+        let generations=self.reconcile_generations();let devices=self.reconcile_devices();let mounts=self.reconcile_mounts();let metadata=self.reconcile_metadata();
         let result=(||{
             let snapshot=NativeSystemdSnapshot::collect(&self.graph)?;let state=snapshot.apply(&self.graph)?;
             self.ids=snapshot.ids()?;self.last_error=if state.status==ProviderStatus::Ready{None}else{Some("INCOMPLETE_SNAPSHOT".into())};
             if state.status==ProviderStatus::Ready{self.successful=self.successful.checked_add(1).ok_or(Error::Protocol)?;}Ok(())
-        })();if let Err(error)=&result{self.graph.report_event_loss();self.last_error=Some(format!("{error:?}"));}result.and(generations).and(devices).and(metadata)
+        })();if let Err(error)=&result{self.graph.report_event_loss();self.last_error=Some(format!("{error:?}"));}result.and(generations).and(devices).and(mounts).and(metadata)
     }
     fn poll_generations(&mut self)->Result<()>{
         let now=NativeTime::observe()?.observation().clone();
@@ -162,7 +198,9 @@ impl Owner{
             "complete_reconciliations":self.successful,"last_attempt":self.last_attempt,"last_error":self.last_error,"observed_loaded_services":self.ids.len(),
             "period_seconds":900,"model_invoked":false,"execution_authority":false,"event_watcher_installed":self.event_watcher,"event_watcher_error":self.event_error,
             "systemd_notifications":self.systemd_notifications,"event_reconciliations":self.event_refreshes,
-            "observed_block_disks":self.device_ids.len(),"block_device_error":self.device_error,"udev_event_watcher_installed":false,
+            "observed_block_disks":self.device_ids.len(),"block_device_error":self.device_error,"udev_event_watcher_installed":self.device_watcher,
+            "udev_event_watcher_error":self.device_event_error,"udev_notifications":self.device_notifications,"udev_event_reconciliations":self.device_event_refreshes,
+            "observed_system_mounts":self.mount_ids.len(),"mount_error":self.mount_error,"mount_poll_seconds":1,"observed_mount_changes":self.mount_changes,
             "built_configuration_observed":self.metadata.is_some(),"built_configuration_error":self.metadata_error,
             "generation_poll_seconds":1,"observed_generation_changes":self.generation_changes,"generation_error":self.generation_error,
             "quarantine":self.graph.recovery_receipt().map(|r|r.quarantine_directory.file_name().unwrap_or_default().to_string_lossy())}))
@@ -214,10 +252,15 @@ fn run(uid:u32)->Result<()>{
     let listener=UnixListener::bind(SOCKET)?;fs::set_permissions(SOCKET,fs::Permissions::from_mode(0o600))?;listener.set_nonblocking(true)?;
     let now=NativeTime::observe()?.observation().clone();
     let mut owner=Owner{graph,ids:Vec::new(),attempts:0,successful:0,last_attempt:now.clone(),last_error:None,
-        generations:None,generation_error:None,last_generation_probe:now,generation_changes:0,event_watcher:false,event_error:None,systemd_notifications:0,event_refreshes:0,device_ids:vec![],device_error:None,metadata:None,metadata_error:None};
+        generations:None,generation_error:None,last_generation_probe:now.clone(),generation_changes:0,event_watcher:false,event_error:None,systemd_notifications:0,event_refreshes:0,
+        device_ids:vec![],device_error:None,device_watcher:false,device_event_error:None,device_notifications:0,device_event_refreshes:0,mount_ids:vec![],mounts:None,mount_error:None,last_mount_probe:now,mount_changes:0,
+        metadata:None,metadata_error:None};
     let mut watcher=aios_system::services::events::SystemdEvents::connect().ok();
     owner.event_watcher=watcher.is_some();
     if watcher.is_none(){owner.event_error=Some("SUBSCRIPTION_UNAVAILABLE".into());owner.graph.report_event_loss();}
+    let mut device_watcher=aios_system::devices::DeviceEvents::connect().ok();owner.device_watcher=device_watcher.is_some();
+    if device_watcher.is_none(){owner.device_event_error=Some("UDEV_SUBSCRIPTION_UNAVAILABLE".into());owner.graph.report_event_loss();}
+    let mut last_device_connection=std::time::Instant::now();
     let mut last_connection=std::time::Instant::now();
     if let Err(error)=owner.reconcile(){eprintln!("aios-stated: startup snapshot unavailable: {error:?}");}
     loop{
@@ -242,6 +285,25 @@ fn run(uid:u32)->Result<()>{
                 Err(error)=>owner.event_error=Some(format!("{error:?}"))
             }
         }
+        if let Some(events)=device_watcher.as_mut(){
+            match events.poll(){
+                Ok(batch) if batch.notifications>0||batch.loss=>{
+                    if let Err(error)=owner.device_event(batch.notifications,batch.loss){eprintln!("aios-stated: device event reconciliation unavailable: {error:?}");}
+                    if batch.loss{device_watcher=None;owner.device_watcher=false;owner.device_event_error=Some("BOUNDED_DRAIN_LOSS".into());last_device_connection=std::time::Instant::now();}
+                },
+                Ok(_)=>{},
+                Err(error)=>{device_watcher=None;owner.device_watcher=false;owner.device_event_error=Some(format!("{error:?}"));last_device_connection=std::time::Instant::now();
+                    if let Err(refresh)=owner.device_event(0,true){eprintln!("aios-stated: device event loss reconciliation unavailable: {refresh:?}");}
+                    eprintln!("aios-stated: device watcher unavailable: {error:?}");}
+            }
+        }else if last_device_connection.elapsed()>=Duration::from_secs(5){
+            last_device_connection=std::time::Instant::now();
+            match aios_system::devices::DeviceEvents::connect(){
+                Ok(events)=>{device_watcher=Some(events);owner.device_watcher=true;owner.device_event_error=None;if let Err(error)=owner.device_event(0,true){eprintln!("aios-stated: reconnected device snapshot unavailable: {error:?}");}},
+                Err(error)=>owner.device_event_error=Some(format!("{error:?}")),
+            }
+        }
+        if let Err(error)=owner.poll_mounts(){eprintln!("aios-stated: native mount sampling unavailable: {error:?}");}
         // Fixed periodic fallback also covers a timer signal that was lost.
         if let Err(error)=owner.poll_generations(){eprintln!("aios-stated: native generation sampling unavailable: {error:?}");}
         let now=NativeTime::observe()?;

@@ -66,6 +66,35 @@ pub fn read_block_devices()->Result<BlockDevices>{
  }
  devices.sort_by(|a,b|a.syspath.cmp(&b.syspath));Ok(BlockDevices{devices,complete})
 }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub struct EventBatch{pub notifications:u64,pub loss:bool}
+pub struct DeviceEvents{context:Context,monitor:*mut c_void,fd:c_int}
+impl Drop for DeviceEvents{fn drop(&mut self){unsafe{udev_monitor_unref(self.monitor);}}}
+impl DeviceEvents{
+ pub fn connect()->Result<Self>{
+  let context=Context(unsafe{udev_new()});if context.0.is_null(){return Err(ErrorCode::UnsupportedCapability);}
+  let monitor=unsafe{udev_monitor_new_from_netlink(context.0,c"udev".as_ptr())};if monitor.is_null(){return Err(ErrorCode::UnsupportedCapability);}
+  let setup=(||{check(unsafe{udev_monitor_filter_add_match_subsystem_devtype(monitor,c"block".as_ptr(),std::ptr::null())})?;
+   check(unsafe{udev_monitor_enable_receiving(monitor)})?;let fd=unsafe{udev_monitor_get_fd(monitor)};if fd<0{return Err(ErrorCode::UnsupportedCapability);}
+   let flags=unsafe{libc::fcntl(fd,libc::F_GETFL)};if flags<0||unsafe{libc::fcntl(fd,libc::F_SETFL,flags|libc::O_NONBLOCK)}<0{return Err(ErrorCode::PermissionDenied);}
+   Ok(fd)})();
+  match setup{Ok(fd)=>Ok(Self{context,monitor,fd}),Err(error)=>{unsafe{udev_monitor_unref(monitor);};Err(error)}}
+ }
+ pub fn poll(&mut self)->Result<EventBatch>{
+  let _=&self.context;let mut descriptor=libc::pollfd{fd:self.fd,events:libc::POLLIN,revents:0};
+  let ready=unsafe{libc::poll(&mut descriptor,1,0)};if ready<0{return Err(ErrorCode::PartialResult);}
+  if ready==0{return Ok(EventBatch{notifications:0,loss:false});}
+  if descriptor.revents&(libc::POLLERR|libc::POLLHUP|libc::POLLNVAL)!=0{return Ok(EventBatch{notifications:0,loss:true});}
+  let mut notifications=0_u64;
+  while notifications<64{
+   let device=unsafe{udev_monitor_receive_device(self.monitor)};if device.is_null(){break;}
+   unsafe{udev_device_unref(device);};notifications+=1;
+  }
+  let overflow=notifications==64&&{let device=unsafe{udev_monitor_receive_device(self.monitor)};if device.is_null(){false}else{unsafe{udev_device_unref(device);};true}};
+  Ok(EventBatch{notifications,loss:overflow})
+ }
+}
+
 #[link(name="udev")]
 unsafe extern "C"{
  fn udev_new()->*mut c_void;fn udev_unref(context:*mut c_void)->*mut c_void;
@@ -79,4 +108,10 @@ unsafe extern "C"{
  fn udev_device_get_devnum(device:*mut c_void)->dev_t;fn udev_device_get_is_initialized(device:*mut c_void)->c_int;
  fn udev_device_get_property_value(device:*mut c_void,name:*const c_char)->*const c_char;
  fn udev_device_get_sysattr_value(device:*mut c_void,name:*const c_char)->*const c_char;
+ fn udev_monitor_new_from_netlink(context:*mut c_void,name:*const c_char)->*mut c_void;
+ fn udev_monitor_unref(monitor:*mut c_void)->*mut c_void;
+ fn udev_monitor_filter_add_match_subsystem_devtype(monitor:*mut c_void,subsystem:*const c_char,devtype:*const c_char)->c_int;
+ fn udev_monitor_enable_receiving(monitor:*mut c_void)->c_int;
+ fn udev_monitor_get_fd(monitor:*mut c_void)->c_int;
+ fn udev_monitor_receive_device(monitor:*mut c_void)->*mut c_void;
 }
