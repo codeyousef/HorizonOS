@@ -8,6 +8,10 @@ publish.workspace = true
 name = "aiosctl"
 path = "src/main.rs"
 
+[[bin]]
+name = "ask"
+path = "src/ask.rs"
+
 [dependencies]
 aios-protocol = { path = "../aios-protocol" }
 aios-system = { path = "../aios-system" }

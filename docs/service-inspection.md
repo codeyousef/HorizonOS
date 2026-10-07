@@ -154,10 +154,12 @@ private devices, and bounded memory and process counts. Loss of the
 public bus owner terminates the daemon so the service manager can restart it.
 
 `aiosctl status --json` reports the authenticated session's capabilities and
-availability. `aiosctl ask TEXT --json` submits a read-only question and reads
-its terminal status through the same authenticated bus connection. Closing that
-connection revokes ongoing inference rather than leaving detached work. The
-client pins and rechecks
+availability. `aiosctl ask TEXT --json` and the standalone
+`ask TEXT --mode read-only --json` client submit the same read-only request and
+read its terminal status through the same authenticated bus connection. The
+standalone client accepts no shell or alternate mode. Closing the connection
+revokes ongoing inference rather than leaving detached work. The client pins and
+rechecks
 the daemon's live owner identity; default endpoints ignore environment
 variables that redirect the bus or select another user's runtime directory.
 

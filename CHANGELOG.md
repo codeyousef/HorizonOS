@@ -8,6 +8,8 @@
 - Add disposable-image service lifecycle qualification covering fixed system and
   user unit restarts, model-disabled operation, logout cleanup, and independent
   SSH, network, and display availability.
+- Ship a standalone `ask` client whose only optional mode is `read-only`, mapped
+  directly to the authenticated Ask request with no shell-generation path.
 - Host discovery and validated development-target configuration.
 - Keep native UI Stop and Forget available after a stale selector refusal while
   revoking the failed read without retry.

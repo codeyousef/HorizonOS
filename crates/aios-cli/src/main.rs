@@ -1,7 +1,28 @@
 use aios_protocol::contracts::{Action, parse_tool_call};
 
 fn main() {
-    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    run(std::env::args().skip(1).collect());
+}
+
+pub fn run_as_ask() {
+    let supplied = std::env::args().skip(1).collect::<Vec<_>>();
+    let Some(args) = standalone_ask_arguments(&supplied) else {
+        eprintln!("Usage: ask TEXT [--mode read-only] --json");
+        std::process::exit(2);
+    };
+    run(args);
+}
+
+fn standalone_ask_arguments(supplied: &[String]) -> Option<Vec<String>> {
+    match supplied {
+        [text, flag] if flag == "--json" => Some(vec!["ask".into(), text.clone(), "--json".into()]),
+        [text, mode, value, flag] if mode == "--mode" && value == "read-only" && flag == "--json" =>
+            Some(vec!["ask".into(), text.clone(), "--json".into()]),
+        _ => None,
+    }
+}
+
+fn run(args: Vec<String>) {
     if args==["process","list","--json"]{
         match process_inventory(){Ok(value)=>{println!("{value}");return;},Err(code)=>api_error(code)}
     }
@@ -187,6 +208,18 @@ fn unverified_termination(id:&str,code:aios_protocol::contracts::ErrorCode,cance
         let duplicated=json!({"data":{"processes":[row,row]}});
         assert_eq!(selected_process(&duplicated,42,100),Err(ErrorCode::Conflict));
         assert_eq!(selected_process(&value,0,100),Err(ErrorCode::InvalidArgument));
+    }
+    #[test]fn standalone_ask_accepts_only_read_only_mode(){
+        let values=|args:&[&str]|args.iter().map(|value|(*value).to_owned()).collect::<Vec<_>>();
+        let expected=Some(values(&["ask","what failed?","--json"]));
+        assert_eq!(standalone_ask_arguments(&values(&["what failed?","--json"])),expected);
+        assert_eq!(standalone_ask_arguments(&values(&["what failed?","--mode","read-only","--json"])),expected);
+        for denied in [
+            values(&["id","--mode","shell","--json"]),
+            values(&["id","--shell","--json"]),
+            values(&["id","--mode","read-only"]),
+            values(&["id","--mode","read-only","--json","--approved"]),
+        ]{assert_eq!(standalone_ask_arguments(&denied),None);}
     }
 }
 
