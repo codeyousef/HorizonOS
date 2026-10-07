@@ -51,16 +51,11 @@ in {
         UMask = "0077";
         StateDirectory = "aios/user-graph";
         StateDirectoryMode = "0700";
+        # User-manager mount-namespace protections hide the fixed boot-id and
+        # profile paths this read-only provider must compare. UID DAC, no
+        # capabilities and the syscall/address-family filters remain the bound.
         NoNewPrivileges = true;
         CapabilityBoundingSet = "";
-        ProtectSystem = "strict";
-        PrivateTmp = true;
-        PrivateDevices = true;
-        PrivateNetwork = true;
-        ProtectKernelTunables = true;
-        ProtectKernelModules = true;
-        ProtectKernelLogs = true;
-        ProtectControlGroups = true;
         RestrictAddressFamilies = [ "AF_UNIX" ];
         RestrictNamespaces = true;
         RestrictSUIDSGID = true;
