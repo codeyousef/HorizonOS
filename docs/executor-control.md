@@ -9,6 +9,19 @@ native callers through the same admission and identity checks. The running broke
 including inherited worker threads and the x32 syscall route.
 
 System1 `Info` observes NixOS and systemd directly without executing a detector.
+`Hardware` reads a fixed, bounded CPU source plus native libudev/sysfs block-disk
+properties. It issues caller-scoped opaque device handles, redacts serial and WWN
+values to availability flags, and reports missing classes/properties as
+unsupported. `StorageStatus` reads only `/proc/self/mountinfo`, `statvfs` for
+visible mounts and the authenticated UID's native account home. It exposes fixed
+system mount paths plus caller-owned home/removable mount paths; block
+major/minor/filesystem identity is distinct from capacity and mount path. Neither
+provider opens raw block devices, writes storage, accepts a path, or offers
+format/repair actions. Reads are bounded to 1 MiB/4,096 mount rows, 100 returned
+mounts, 1 MiB CPU data, 4,096 udev entries and 256 block disks; each observation
+has a two-second native device deadline. The executor's only persistent writable
+sets remain `/var/lib/aios/candidates` and `/var/lib/aios/transactions`.
+
 Packages1 `Info` and `Search` read the installed administrator-reviewed catalog.
 Action members accept the strict versioned invoke envelope and fix the reviewed
 action in server code. Duplicate/unknown fields, action substitution and forged

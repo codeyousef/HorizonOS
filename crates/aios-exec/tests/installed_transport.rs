@@ -23,7 +23,7 @@ fn system_and_packages(connection: &Connection, executor_owner: &str) {
     let owner:String=bus.call("GetNameOwner",&("org.aios.System1",)).unwrap();
     assert_eq!(owner,executor_owner);
     for (path,interface,methods) in [
-        ("/org/aios/System1","org.aios.System1",vec!["GetCapabilities","Info","Services","ServiceStatus","ServiceRestart","Hardware","Boots","BootDiagnostics","Logs"]),
+        ("/org/aios/System1","org.aios.System1",vec!["GetCapabilities","Info","Services","ServiceStatus","ServiceRestart","Hardware","StorageStatus","Boots","BootDiagnostics","Logs"]),
         ("/org/aios/Packages1","org.aios.Packages1",vec!["GetCapabilities","Search","Info","Installed","Install","Remove","UpgradePlan"]),
     ] {
         let introspection=Proxy::new(connection,"org.aios.System1",path,"org.freedesktop.DBus.Introspectable").unwrap();
@@ -55,6 +55,15 @@ fn system_and_packages(connection: &Connection, executor_owner: &str) {
     let mut forged:Value=serde_json::from_str(&action("system.info",json!({}))).unwrap();forged["uid"]=json!(0);
     denied(system.call::<_,_,String>("Info",&(forged.to_string(),)),"INVALID_ARGUMENT");
     denied(system.call::<_,_,String>("Info",&(action("system.hardware",json!({})),)),"INVALID_ARGUMENT");
+    let hardware=value(&system,"Hardware",(action("system.hardware",json!({})),));
+    aios_protocol::validation::validate_result("system.hardware",&serde_json::to_vec(&hardware).unwrap()).unwrap();
+    assert!(hardware["data"]["items"].as_array().unwrap().iter().any(|item|item["device_class"]=="cpu"));
+    assert!(hardware["data"]["unsupported_fields"].as_array().unwrap().iter().any(|field|field=="battery"));
+    let storage=value(&system,"StorageStatus",(action("storage.status",json!({})),));
+    aios_protocol::validation::validate_result("storage.status",&serde_json::to_vec(&storage).unwrap()).unwrap();
+    let root=storage["data"]["mounts"].as_array().unwrap().iter().find(|mount|mount["mount_path"]=="/").unwrap();
+    assert!(root["capacity_bytes"].as_u64().unwrap()>0);
+    assert!(root["free_bytes"].as_u64().unwrap()<=root["capacity_bytes"].as_u64().unwrap());
     denied(system.call::<_,_,String>("ServiceRestart",&(action("system.service_restart",json!({"service_id":"untrusted-reference"})),)),"AUTH_REQUIRED");
     let packages=Proxy::new(connection,"org.aios.System1","/org/aios/Packages1","org.aios.Packages1").unwrap();
     let info=value(&packages,"Info",(action("packages.info",json!({"package_id":"kate"})),));

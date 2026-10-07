@@ -136,3 +136,5 @@ pub mod journal;
 pub mod processes;
 
 pub mod devices;
+pub mod hardware;
+pub mod storage;

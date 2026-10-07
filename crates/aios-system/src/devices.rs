@@ -9,7 +9,8 @@ type Result<T>=std::result::Result<T,ErrorCode>;
 pub struct BlockDevice{
  pub syspath:String,pub devpath:String,pub sysname:String,pub major:u32,pub minor:u32,
  pub initialized:bool,pub serial:Option<String>,pub serial_short:Option<String>,pub wwn:Option<String>,
- pub bus:Option<String>,pub model:Option<String>,pub vendor:Option<String>,
+ pub bus:Option<String>,pub model:Option<String>,pub vendor:Option<String>,pub capacity_bytes:Option<u64>,
+ pub removable:Option<bool>,pub read_only:Option<bool>,
 }
 #[derive(Clone,Debug,PartialEq,Eq,Serialize)]
 pub struct BlockDevices{pub devices:Vec<BlockDevice>,pub complete:bool}
@@ -23,6 +24,9 @@ unsafe fn text(value:*const c_char,limit:usize)->Result<Option<String>>{
  if value.chars().any(char::is_control){return Err(ErrorCode::PartialResult);}Ok(if value.is_empty(){None}else{Some(value.into())})
 }
 fn property(device:&Device,name:&std::ffi::CStr)->Result<Option<String>>{unsafe{text(udev_device_get_property_value(device.0,name.as_ptr()),256)}}
+fn sysattr(device:&Device,name:&std::ffi::CStr)->Result<Option<String>>{unsafe{text(udev_device_get_sysattr_value(device.0,name.as_ptr()),64)}}
+fn decimal(value:Option<String>)->Result<Option<u64>>{value.map(|value|value.parse().map_err(|_|ErrorCode::PartialResult)).transpose()}
+fn boolean(value:Option<String>)->Result<Option<bool>>{match value.as_deref(){None=>Ok(None),Some("0")=>Ok(Some(false)),Some("1")=>Ok(Some(true)),_=>Err(ErrorCode::PartialResult)}}
 fn required(value:Option<String>)->Result<String>{value.ok_or(ErrorCode::PartialResult)}
 /// Fixed enumeration includes only native block disks, not partitions or other
 /// hardware classes. An uninitialized/disappearing device makes it Partial.
@@ -53,9 +57,12 @@ pub fn read_block_devices()->Result<BlockDevices>{
    return Err(ErrorCode::TargetChanged);
   }
   let initialized=unsafe{udev_device_get_is_initialized(device.0)}>0;if !initialized{complete=false;}
+  let sectors=decimal(sysattr(&device,c"size")?)?;
+  let capacity_bytes=sectors.map(|value|value.checked_mul(512).ok_or(ErrorCode::ResourceExhausted)).transpose()?;
   devices.push(BlockDevice{syspath,devpath,sysname,major,minor,initialized,
    serial:property(&device,c"ID_SERIAL")?,serial_short:property(&device,c"ID_SERIAL_SHORT")?,wwn:property(&device,c"ID_WWN")?,
-   bus:property(&device,c"ID_BUS")?,model:property(&device,c"ID_MODEL")?,vendor:property(&device,c"ID_VENDOR")?});
+   bus:property(&device,c"ID_BUS")?,model:property(&device,c"ID_MODEL")?,vendor:property(&device,c"ID_VENDOR")?,capacity_bytes,
+   removable:boolean(sysattr(&device,c"removable")?)?,read_only:boolean(sysattr(&device,c"ro")?)?});
  }
  devices.sort_by(|a,b|a.syspath.cmp(&b.syspath));Ok(BlockDevices{devices,complete})
 }
@@ -71,4 +78,5 @@ unsafe extern "C"{
  fn udev_device_get_devpath(device:*mut c_void)->*const c_char;fn udev_device_get_sysname(device:*mut c_void)->*const c_char;
  fn udev_device_get_devnum(device:*mut c_void)->dev_t;fn udev_device_get_is_initialized(device:*mut c_void)->c_int;
  fn udev_device_get_property_value(device:*mut c_void,name:*const c_char)->*const c_char;
+ fn udev_device_get_sysattr_value(device:*mut c_void,name:*const c_char)->*const c_char;
 }

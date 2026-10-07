@@ -21,6 +21,9 @@
   separate native owners without cross-user profile leakage, and report
   ephemeral runtime and unmanaged non-profile inventory as distinct, explicitly
   incomplete domains rather than conflating or inferring either.
+- Add caller-scoped `system.hardware` and `storage.status` observations using
+  bounded CPU, libudev/sysfs, mountinfo and filesystem-stat reads; serial values
+  stay redacted, missing hardware stays unsupported, and no storage effect exists.
 - Add authenticated read-only audio inventory/default, power status and the
   three registered desktop-setting adapters with stable handles, pinned bounded
   native queries, truthful unsupported/partial fields and write methods that

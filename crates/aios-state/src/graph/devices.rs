@@ -45,7 +45,7 @@ impl NativeBlockSnapshot{
 }
 #[cfg(test)]mod tests{
  use super::*;
- fn device()->BlockDevice{BlockDevice{syspath:"/sys/devices/fixture".into(),devpath:"/devices/fixture".into(),sysname:"fixture".into(),major:1,minor:2,initialized:true,serial:None,serial_short:None,wwn:None,bus:None,model:None,vendor:None}}
+ fn device()->BlockDevice{BlockDevice{syspath:"/sys/devices/fixture".into(),devpath:"/devices/fixture".into(),sysname:"fixture".into(),major:1,minor:2,initialized:true,serial:None,serial_short:None,wwn:None,bus:None,model:None,vendor:None,capacity_bytes:None,removable:None,read_only:None}}
  #[test]fn missing_serial_stays_unknown_and_kernel_locator_is_boot_scoped(){
   let a=super::super::BootId::parse("11111111-1111-4111-8111-111111111111").unwrap();let b=super::super::BootId::parse("22222222-1111-4111-8111-111111111111").unwrap();
   let mut d=device();let first=key(&d,&a).unwrap();assert_eq!(first.1,"boot_scoped_kernel_locator");assert_ne!(first,key(&d,&b).unwrap());assert_eq!(d.serial,None);

@@ -22,14 +22,14 @@ impl Scope {
     fn actions(self) -> &'static [&'static str] {
         match self {
             Self::System => &["system.info", "system.services", "system.service_status", "system.service_restart",
-                "system.hardware", "system.boots", "system.boot_diagnostics", "system.logs"],
+                "system.hardware", "storage.status", "system.boots", "system.boot_diagnostics", "system.logs"],
             Self::Packages => &["packages.search", "packages.info", "packages.installed", "packages.install",
                 "packages.remove", "packages.upgrade_plan"],
         }
     }
 }
 fn available(id: &str) -> bool {
-    matches!(id, "system.info" | "packages.info" | "packages.search")
+    matches!(id, "system.info" | "system.hardware" | "storage.status" | "packages.info" | "packages.search")
 }
 pub(super) fn capabilities(scope: Scope) -> Result<Value> {
     let contracts = scope.actions().iter().map(|id| {
@@ -107,6 +107,22 @@ impl ReadState {
         let value = match action {
             Action::SystemLogs(_) => self.journal.logs(caller,&action)?,
             Action::SystemInfo => serde_json::to_value(aios_system::observe_system_info_native()).map_err(|_|ErrorCode::InvalidArgument)?,
+            Action::SystemHardware(args) => {
+                let arguments = serde_json::to_value(args).map_err(|_| ErrorCode::InvalidArgument)?;
+                let class = arguments["device_class"].as_str().unwrap_or("all");
+                let identity = caller.identity();
+                let scope = format!("{}:{}:{}:{}:{}:{}", identity.uid, identity.pid, identity.start_ticks,
+                    identity.boot_id, identity.bus_id, identity.sender);
+                serde_json::to_value(aios_system::hardware::observe(class, scope.as_bytes()))
+                    .map_err(|_| ErrorCode::InvalidArgument)?
+            },
+            Action::StorageStatus(_) => {
+                let identity = caller.identity();
+                let scope = format!("{}:{}:{}:{}:{}:{}", identity.uid, identity.pid, identity.start_ticks,
+                    identity.boot_id, identity.bus_id, identity.sender);
+                serde_json::to_value(aios_system::storage::observe(identity.uid, scope.as_bytes()))
+                    .map_err(|_| ErrorCode::InvalidArgument)?
+            },
             Action::PackagesInfo(args) => {
                 let template = InstalledTemplate::from_installed()?;
                 let catalog = template.catalog();
@@ -178,7 +194,7 @@ macro_rules! surface {
 }
 surface!(System,Scope::System,"org.aios.System1",[(info,"system.info"),(services,"system.services"),
     (service_status,"system.service_status"),(service_restart,"system.service_restart"),(hardware,"system.hardware"),
-    (boots,"system.boots"),(boot_diagnostics,"system.boot_diagnostics"),(logs,"system.logs")],
+    (storage_status,"storage.status"),(boots,"system.boots"),(boot_diagnostics,"system.boot_diagnostics"),(logs,"system.logs")],
     async fn resolve_log_service(&self,unit_name:&str,#[zbus(header)]header:Header<'_>)->Result<String> {
         if unit_name.len()>255 {return Err(ErrorCode::InvalidArgument.into());}
         self.executor.call(header,Operation::JournalResolveService(unit_name.into())).await
