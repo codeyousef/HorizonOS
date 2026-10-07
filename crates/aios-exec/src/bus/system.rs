@@ -268,9 +268,22 @@ mod tests {
             entry["metadata_revision"]=json!(crate::sha256(&crate::canonical(&entry).unwrap()));
             entries.push(entry);
         }
+        let options=[
+            ("power_policy.profile_on_ac","power_profile"),
+            ("power_policy.profile_on_battery","power_profile"),
+            ("services.openssh.enabled","boolean"),
+            ("services.openssh.open_firewall","boolean"),
+            ("services.postgresql.enabled","boolean"),
+            ("services.postgresql.listen_mode","postgresql_listen_mode"),
+            ("services.postgresql.package_id","package_id"),
+        ].into_iter().map(|(id,value_kind)| {
+            let mut option=json!({"id":id,"value_kind":value_kind});
+            option["metadata_revision"]=json!(crate::sha256(&crate::canonical(&option).unwrap()));
+            option
+        }).collect::<Vec<_>>();
         let content=json!({"schema_version":1,"base_template_revision":"1".repeat(64),"lock_sha256":"2".repeat(64),
             "nixpkgs_revision":"774debe7a0d1b496e35677ad955a1011c6ff74f3","installation_state_version":"26.05",
-            "platform":"x86_64-linux","packages":entries});
+            "platform":"x86_64-linux","packages":entries,"options":options});
         Catalog::from_installed(&serde_json::to_vec(&json!({"catalog_revision":crate::sha256(&crate::canonical(&content).unwrap()),"content":content})).unwrap()).unwrap()
     }
     #[test]

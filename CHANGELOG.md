@@ -13,6 +13,8 @@
   selection, and verify declared runtime artifacts against the running Nix closure.
 - Export a revision-bound typed catalog for the seven managed configuration
   options with explicit access and completeness semantics.
+- Keep executor catalog/transaction fixture catalogs aligned with the complete
+  reviewed managed-option schema so policy qualification exercises real plans.
 - Enumerate bounded system and per-user profile generation history using
   separate native owners without cross-user profile leakage, while keeping
   ephemeral inventory and unattributed management provenance explicitly unknown.
