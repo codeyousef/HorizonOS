@@ -99,6 +99,33 @@ fn run(args: Vec<String>) {
             Err(_) => std::process::exit(2),
         }
     }
+    let session_observation = match args.as_slice() {
+        [a, b] if a == "privacy" && b == "scopes" => Some(("privacy", false)),
+        [a, b, flag] if a == "privacy" && b == "scopes" && flag == "--json" => Some(("privacy", true)),
+        [a, b] if a == "history" && b == "list" => Some(("history", false)),
+        [a, b, flag] if a == "history" && b == "list" && flag == "--json" => Some(("history", true)),
+        _ => None,
+    };
+    if let Some((operation, json)) = session_observation {
+        let result=aios_session::bus::Client::connect_user_bus().and_then(|client|
+            if operation=="privacy" {client.privacy_scopes()} else {client.list_history()});
+        match result {
+            Ok(value)=>{
+                if json {println!("{value}");}
+                else if operation=="privacy" {
+                    println!("Privacy scopes: {} file roots, {} retained history entries, {} active tasks",
+                        value["data"]["file_roots"].as_array().map_or(0,Vec::len),
+                        value["data"]["retained_history"].as_u64().unwrap_or(0),
+                        value["data"]["active_tasks"].as_u64().unwrap_or(0));
+                } else if let Some(entries)=value["data"]["entries"].as_array() {
+                    if entries.is_empty(){println!("No retained session history.");}
+                    else {for entry in entries {println!("{}\t{}",entry["submitted_at"].as_str().unwrap_or(""),entry["task_id"].as_str().unwrap_or(""));}}
+                }
+                return;
+            },
+            Err(code)=>api_error(code),
+        }
+    }
     let package = match args.as_slice() {
         [a, b, value] if a == "package" && matches!(b.as_str(), "search" | "info") =>
             Some((b.as_str(), value.as_str(), false)),
@@ -214,7 +241,7 @@ fn run(args: Vec<String>) {
         if let Err(error) = result { eprintln!("aiosctl: {error}"); std::process::exit(1); }
         return;
     }
-    eprintln!("Usage: aiosctl status --json | ask [--mode read-only] TEXT [--json] | ask TEXT --json --service UNIT | package search QUERY [--json] | package info ID [--json] | graph status [--json] | model status [--json] | model unload [--json] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | process list --json | process terminate SESSION BOOT_UUID PID START_TICKS GOAL --json | system info --json | inspect service UNIT [--json] [--socket PRIVATE_PATH]");
+    eprintln!("Usage: aiosctl status --json | ask [--mode read-only] TEXT [--json] | ask TEXT --json --service UNIT | package search QUERY [--json] | package info ID [--json] | graph status [--json] | privacy scopes [--json] | history list [--json] | model status [--json] | model unload [--json] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | process list --json | process terminate SESSION BOOT_UUID PID START_TICKS GOAL --json | system info --json | inspect service UNIT [--json] [--socket PRIVATE_PATH]");
     std::process::exit(2);
 }
 

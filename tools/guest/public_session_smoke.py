@@ -145,6 +145,17 @@ def main():
         capabilities = json.loads(status.stdout)
         if capabilities["transport"] != "session-dbus" or capabilities["ui_enabled"] or capabilities["inference_available"]:
             raise RuntimeError("session availability scope mismatch")
+        session_data={}
+        for command,operation in ((("privacy","scopes","--json"),"privacy_scopes"),(("history","list","--json"),"history_list")):
+            response=cli(*command)
+            value=json.loads(response.stdout)
+            if response.returncode!=0 or value["operation"]!=operation or value["mutation_performed"]:
+                raise RuntimeError("model-independent private session command failed")
+            session_data[operation]=value
+        if session_data["privacy_scopes"]["data"]["file_roots"]!=[] or session_data["privacy_scopes"]["data"]["retained_history"]!=0:
+            raise RuntimeError("fresh caller received foreign privacy scope")
+        if session_data["history_list"]["data"]["entries"]!=[] or session_data["history_list"]["data"]["owner"]!="authenticated_client":
+            raise RuntimeError("fresh caller received foreign session history")
         model_controls=None
         if not installed_model:
             model_controls={}
@@ -231,7 +242,7 @@ def main():
             "unit_name":UNIT,"package_unit_sha256":hashlib.sha256(unit_bytes).hexdigest(),"exact_unit_bytes":True,
             "binary_source":"installed-system-closure" if installed_model else "nix-built-packages",
             "executables":{k:{"path":str(v),"sha256":hashlib.sha256(v.read_bytes()).hexdigest()} for k,v in binaries.items()},
-            "capabilities":capabilities,"ui_selection_denial":ui_denial,"installed_model":installed_model,"model_controls":model_controls,"model_answer":answer,"model_service_answer":service_answer,"history_test_client":str(history_client) if history_client else None,"public_history":history_proof,"service_observation":observed}), flush=True)
+            "capabilities":capabilities,"session_data":session_data,"ui_selection_denial":ui_denial,"installed_model":installed_model,"model_controls":model_controls,"model_answer":answer,"model_service_answer":service_answer,"history_test_client":str(history_client) if history_client else None,"public_history":history_proof,"service_observation":observed}), flush=True)
     except Exception:
         print("AIOS_USER_SERVICE_FAILURE=" + json.dumps(show()), flush=True)
         journal = subprocess.run(["journalctl", "--user", "--user-unit=" + UNIT, "--boot", "--lines=20", "--no-pager", "--output=json", "--output-fields=MESSAGE,PRIORITY,_BOOT_ID,_UID"],

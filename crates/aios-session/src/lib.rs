@@ -50,6 +50,8 @@ pub enum Operation {
     ConfirmPowerProfile { task_id:String,session_handle:String,goal:String,mode:Mode,tool_call:Box<RawValue> },
     ExecuteTaskAction { task_id:String,goal:String,mode:Mode,tool_call:Box<RawValue> },
     GetCapabilities,
+    PrivacyScopes,
+    ListHistory,
     GetSystemInfo,
     SelectUiSession { session_id: String },
     ListUiWindows { session_handle: String },
@@ -464,6 +466,29 @@ impl State {
         match operation {
             Operation::StartProcessTermination{..}|Operation::GetProcessTermination{..}|Operation::CancelProcessTermination{..}|Operation::ForgetProcessTermination{..}|Operation::ConfirmPowerProfile{..}=>Err(ErrorCode::AuthRequired),
             Operation::ExecuteTaskAction{task_id,goal,mode,tool_call}=>self.execute_task_action(peer,task_id,goal,mode,tool_call),
+            Operation::PrivacyScopes => {
+                let retained_history=self.tasks.values().filter(|task|task.owner==*peer && task.retained_question.is_some()
+                    && task.status.state=="completed" && task.graphical.is_none() && !task.status.mutation_performed).count();
+                Ok(json!({"schema_version":1,"operation":"privacy_scopes","data":{
+                    "owner":"authenticated_client","persistent_history":false,"indexing_enabled":false,"file_roots":[],
+                    "service_handles":self.handles.values().filter(|handle|handle.owner==*peer).count(),
+                    "retained_history":retained_history,
+                    "active_tasks":self.tasks.values().filter(|task|task.owner==*peer && !task.terminal()).count()
+                },"mutation_performed":false}))
+            },
+            Operation::ListHistory => {
+                let entries=self.tasks.iter().filter_map(|(id,task)| {
+                    let response=task.status.output.as_ref()?.get("response")?;
+                    (task.owner==*peer && task.retained_question.is_some() && task.status.state=="completed"
+                        && task.graphical.is_none() && !task.status.mutation_performed).then(||json!({
+                            "task_id":id,"submitted_at":task.status.submitted_at,
+                            "response_kind":response.get("kind"),"persistent":false
+                        }))
+                }).collect::<Vec<_>>();
+                Ok(json!({"schema_version":1,"operation":"history_list","data":{"entries":entries,
+                    "owner":"authenticated_client","persistent":false,"retention_ms":300000},
+                    "mutation_performed":false}))
+            },
             Operation::GetCapabilities => Ok(json!({"schema_version":1,"request_id":Uuid::new_v4().to_string(),"operation":"capabilities","actions":["system.info","system.service_status"],
                 "read_only":true,"inference_available":self.inference_available,"inference_configured":self.inference_configured,"ui_enabled":false,"ui_session_selection_available":true,"transport":"private-unix",
                 "session_history":{"opt_in_required":true,"max_selected":4,"retention_ms":300000,"owner":"authenticated_client","persistent":false},"task_request_max_bytes":MAX_TASK_BYTES,"session_associated":peer.logind_session.is_some()})),

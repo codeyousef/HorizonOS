@@ -265,6 +265,12 @@ impl Agent {
         value["transport"] = Value::String("session-dbus".into());
         serde_json::to_string(&value).map_err(|_| ErrorCode::InvalidArgument.into())
     }
+    async fn privacy_scopes(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        self.json(connection,header,Operation::PrivacyScopes).await
+    }
+    async fn list_history(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        self.json(connection,header,Operation::ListHistory).await
+    }
     async fn model_status(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
         self.dispatch(connection, header, Operation::GetCapabilities).await?;
         let value = blocking::unblock(|| crate::inference::Endpoint::installed().status()).await?;
@@ -485,6 +491,24 @@ impl Client {
     }
     pub fn capabilities(&self) -> std::result::Result<Value, ErrorCode> {
         serde_json::from_str(&self.call("GetCapabilities", &())?).map_err(|_| ErrorCode::InvalidArgument)
+    }
+    pub fn privacy_scopes(&self) -> std::result::Result<Value, ErrorCode> {
+        let value:Value=serde_json::from_str(&self.call("PrivacyScopes",&())?).map_err(|_|ErrorCode::InvalidArgument)?;
+        if value["schema_version"]!=1 || value["operation"]!="privacy_scopes" || value["mutation_performed"]!=false
+            || value["data"]["owner"]!="authenticated_client" || !value["data"]["file_roots"].is_array()
+            || !value["data"]["retained_history"].is_u64() || !value["data"]["active_tasks"].is_u64() {
+            return Err(ErrorCode::TargetChanged);
+        }
+        Ok(value)
+    }
+    pub fn list_history(&self) -> std::result::Result<Value, ErrorCode> {
+        let value:Value=serde_json::from_str(&self.call("ListHistory",&())?).map_err(|_|ErrorCode::InvalidArgument)?;
+        if value["schema_version"]!=1 || value["operation"]!="history_list" || value["mutation_performed"]!=false
+            || value["data"]["owner"]!="authenticated_client" || value["data"]["persistent"]!=false
+            || !value["data"]["entries"].is_array() {
+            return Err(ErrorCode::TargetChanged);
+        }
+        Ok(value)
     }
     pub fn model_status(&self) -> std::result::Result<Value, ErrorCode> {
         let value:Value=serde_json::from_str(&self.call("ModelStatus",&())?).map_err(|_|ErrorCode::InvalidArgument)?;

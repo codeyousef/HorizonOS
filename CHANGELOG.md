@@ -16,6 +16,8 @@
   the caller-authenticated session API without invoking inference.
 - Add model-independent package catalog queries and aggregate graph health to
   `aiosctl` through authenticated fixed D-Bus methods.
+- Expose model-independent authenticated privacy-scope and volatile-history
+  metadata commands without disclosing prompt or answer text.
 - Recover verified installer downloads after interrupted partial transfers instead
   of leaving a cache entry that blocks every subsequent clean installation.
 - Isolate each QEMU process in a collected per-VM systemd user service with

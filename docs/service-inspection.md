@@ -180,6 +180,14 @@ the fixed graph-owner socket and returns no graph database path or execution
 authority. These commands support `--json`, authenticate the root bus owner
 before and after each call, and invoke neither inference nor a shell.
 
+`aiosctl privacy scopes` reports only the authenticated client's live
+non-persistent broker scope: enrolled file roots, temporary service handles,
+retained-history count and active-task count. `aiosctl history list` returns
+metadata for that same originating client's eligible volatile history and never
+the prompt or answer text. A fresh CLI connection therefore receives an empty
+history rather than another local process's tasks. Both support `--json`, invoke
+no model and perform no mutation.
+
 Public `Submit` takes the same versioned control request used by the private
 transport, with `operation.kind=submit` and a typed `operation.request`. Other
 public methods use the PRD's small typed arguments. Task status, event,
