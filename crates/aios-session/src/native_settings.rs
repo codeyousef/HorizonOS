@@ -48,7 +48,7 @@ fn parse_audio(value:&str)->Result<Vec<AudioNode>,ErrorCode>{
         let (default,item)=if let Some(rest)=item.strip_prefix('*'){(true,rest.trim())}else{(false,item)};
         let Some((number,rest))=item.split_once('.') else{continue};let Ok(id)=number.trim().parse::<u32>() else{continue};
         let name=rest.split_once('[').map_or(rest,|v|v.0).trim();if name.is_empty()||name.len()>256{return Err(ErrorCode::TargetChanged);}
-        let muted=if rest.contains("[MUTED]"){Some(true)}else if rest.contains("[vol:"){Some(false)}else{None};
+        let muted=if rest.contains(" MUTED]")||rest.contains("[MUTED]"){Some(true)}else if rest.contains("[vol:"){Some(false)}else{None};
         if result.iter().any(|node: &AudioNode|node.direction==direction&&node.name==name){return Err(ErrorCode::TargetChanged);}
         result.push(AudioNode{id,direction,name:name.into(),muted,default});if result.len()>100{return Err(ErrorCode::ResourceExhausted);}
     }
@@ -62,6 +62,15 @@ fn selected_node(reference:&str,direction:Option<&str>)->Result<AudioNode,ErrorC
     let node=matches.next().ok_or(ErrorCode::TargetNotFound)?;if matches.next().is_some(){return Err(ErrorCode::TargetChanged);}Ok(node)
 }
 fn audio_nodes()->Result<Vec<AudioNode>,ErrorCode>{parse_audio(&command(WPCTL,&["status","--name"])?)}
+fn await_node(reference:&str,direction:Option<&str>,matches:impl Fn(&AudioNode)->bool)->Result<AudioNode,ErrorCode>{
+    let deadline=Instant::now()+Duration::from_secs(1);
+    loop{
+        let node=selected_node(reference,direction)?;
+        if matches(&node){return Ok(node);}
+        if Instant::now()>=deadline{return Err(ErrorCode::PartialResult);}
+        thread::sleep(Duration::from_millis(20));
+    }
+}
 fn audio_list(direction:&str)->Result<Value,ErrorCode>{
     let nodes=audio_nodes()?;let devices=nodes.into_iter().filter(|n|n.direction==direction).map(|n|json!({"node_id":handle(n.direction,&n.name),"name":n.name,"available":true,"muted":n.muted,"default":n.default,"routing":"pipewire-session-default"})).collect::<Vec<_>>();
     envelope("pipewire-wireplumber",json!({"devices":devices}),true)
@@ -133,12 +142,29 @@ fn power_status()->Result<Value,ErrorCode>{
     let mut unsupported=Vec::new();if battery.is_none(){unsupported.push("battery_percent");}if current.is_none(){unsupported.push("profile");}
     envelope("upower-powerdevil",json!({"on_ac":!on_battery,"battery_percent":battery,"profile":current,"available_profiles":choices,"unsupported_fields":unsupported}),unsupported.is_empty())
 }
+fn power_profile_state()->Result<(String,Vec<String>),ErrorCode>{
+    let session=session_bus()?;
+    let profile=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/PowerProfile","org.kde.Solid.PowerManagement.Actions.PowerProfile").map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let current:String=profile.call("currentProfile",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let choices:Vec<String>=profile.call("profileChoices",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
+    if choices.is_empty()||choices.len()>3||choices.iter().any(|value|!matches!(value.as_str(),"power-saver"|"balanced"|"performance")){return Err(ErrorCode::UnsupportedCapability);}
+    if !choices.contains(&current){return Err(ErrorCode::TargetChanged);}Ok((current,choices))
+}
+fn await_power_profile(expected:&str)->Result<(),ErrorCode>{
+    let deadline=Instant::now()+Duration::from_secs(2);
+    loop{
+        if power_profile_state()?.0==expected{return Ok(());}
+        if Instant::now()>=deadline{return Err(ErrorCode::PartialResult);}
+        thread::sleep(Duration::from_millis(20));
+    }
+}
 enum MutationKind{
     AudioDefault{direction:String,target:AudioNode,prior:AudioNode},
     AudioMute{target:AudioNode,muted:bool,prior:bool},
     Theme{value:String,prior:String},
     Backlight{value:u64,prior:u64,prior_brightness:i32,maximum:i32},
     Idle{value:u64,prior:u64,profile:String},
+    PowerProfile{value:String,prior:String,choices:Vec<String>},
 }
 pub struct PreparedMutation{action_id:String,arguments:Value,operation_id:String,kind:MutationKind}
 pub struct MutationReceipt{pub output:Value,pub recovery:Value,pub changed:bool}
@@ -182,6 +208,12 @@ impl PreparedMutation{
                     _=>return Err(ErrorCode::UnsupportedCapability),
                 }
             },
+            "power.profile_set"=>{
+                let value=arguments.get("profile").and_then(Value::as_str).filter(|value|matches!(*value,"power-saver"|"balanced"|"performance")).ok_or(ErrorCode::InvalidArgument)?;
+                let (prior,choices)=power_profile_state()?;
+                if !choices.iter().any(|choice|choice==value){return Err(ErrorCode::UnsupportedCapability);}
+                MutationKind::PowerProfile{value:value.into(),prior,choices}
+            },
             _=>return Err(ErrorCode::UnsupportedCapability),
         };
         Ok(Self{action_id:action.action_id().into(),arguments,operation_id,kind})
@@ -190,7 +222,7 @@ impl PreparedMutation{
         let resource=match &self.kind{
             MutationKind::AudioDefault{target,..}|MutationKind::AudioMute{target,..}=>Some(aios_policy::Resource{
                 field:"node_id".into(),kind:"scope-owner-expiry".into(),handle:handle(target.direction,&target.name),identity_sha256:node_identity(target)}),
-            MutationKind::Theme{..}|MutationKind::Backlight{..}|MutationKind::Idle{..}=>None,
+            MutationKind::Theme{..}|MutationKind::Backlight{..}|MutationKind::Idle{..}|MutationKind::PowerProfile{..}=>None,
         };
         aios_policy::Scope{actions:[self.action_id.clone()].into(),resources:resource.into_iter().collect(),..Default::default()}
     }
@@ -199,15 +231,15 @@ impl PreparedMutation{
         let (output,recovery,changed)=match &self.kind{
             MutationKind::AudioDefault{direction,target,prior}=>{
                 let changed=!target.default;if changed{let id=target.id.to_string();command(WPCTL,&["set-default",&id])?;}
-                revalidate(&self)?;let current=selected_node(&handle(target.direction,&target.name),Some(direction))?;
-                if !current.default{return Err(ErrorCode::PartialResult);}
+                revalidate(&self)?;let reference=handle(target.direction,&target.name);
+                await_node(&reference,Some(direction),|node|node.default)?;
                 (json!({"direction":direction,"node_id":handle(target.direction,&target.name),"available":true}),
                     json!({"kind":"tool_call","action_id":"audio.default_set","arguments":{"direction":direction,"node_id":handle(prior.direction,&prior.name)}}),changed)
             },
             MutationKind::AudioMute{target,muted,prior}=>{
                 let changed=*prior!=*muted;if changed{let id=target.id.to_string();let value=if *muted{"1"}else{"0"};command(WPCTL,&["set-mute",&id,value])?;}
-                revalidate(&self)?;let current=selected_node(&handle(target.direction,&target.name),None)?;
-                if current.muted!=Some(*muted){return Err(ErrorCode::PartialResult);}
+                revalidate(&self)?;let reference=handle(target.direction,&target.name);
+                await_node(&reference,None,|node|node.muted==Some(*muted))?;
                 (json!({"node_id":handle(target.direction,&target.name),"muted":muted}),
                     json!({"kind":"tool_call","action_id":"audio.mute_set","arguments":{"node_id":handle(target.direction,&target.name),"muted":prior}}),changed)
             },
@@ -251,8 +283,19 @@ impl PreparedMutation{
                 (json!({"key":"display.idle_seconds","value":value,"ownership":"user"}),
                     json!({"kind":"tool_call","action_id":"settings.set","arguments":{"key":"display.idle_seconds","value":prior}}),changed)
             },
+            MutationKind::PowerProfile{value,prior,choices}=>{
+                let (current,current_choices)=power_profile_state()?;
+                if current!=*prior||current_choices!=*choices{return Err(ErrorCode::TargetChanged);}
+                let changed=value!=prior;if changed{
+                    let session=session_bus()?;
+                    let profile=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/PowerProfile","org.kde.Solid.PowerManagement.Actions.PowerProfile").map_err(|_|ErrorCode::UnsupportedCapability)?;
+                    let _:()=profile.call("setProfile",&value.as_str()).map_err(|_|ErrorCode::PermissionDenied)?;
+                }
+                revalidate(&self)?;await_power_profile(value)?;
+                (json!({"profile":value}),json!({"kind":"tool_call","action_id":"power.profile_set","arguments":{"profile":prior}}),changed)
+            },
         };
-        let provider=match &self.kind{MutationKind::Theme{..}=>"plasma-colorscheme",MutationKind::Backlight{..}=>"upower-kbd-backlight",MutationKind::Idle{..}=>"powerdevil-kconfig-pinned",_=>"pipewire-wireplumber"};
+        let provider=match &self.kind{MutationKind::Theme{..}=>"plasma-colorscheme",MutationKind::Backlight{..}=>"upower-kbd-backlight",MutationKind::Idle{..}=>"powerdevil-kconfig-pinned",MutationKind::PowerProfile{..}=>"powerdevil-powerprofiles",_=>"pipewire-wireplumber"};
         let result=envelope(provider,{
             let mut data=output;let map=data.as_object_mut().ok_or(ErrorCode::TargetChanged)?;
             map.insert("operation_id".into(),json!(self.operation_id));map.insert("transaction_id".into(),Value::Null);
@@ -287,4 +330,4 @@ pub fn available_actions(actions:&[String])->Vec<String>{
     }).cloned().collect()
 }
 
-#[cfg(test)]mod tests{use super::*;#[test]fn pinned_wpctl_shape_yields_stable_handles_and_missing_input(){let value="Audio\n ├─ Sinks:\n │  *   52. auto_null [vol: 1.00]\n ├─ Sources:\n │  \n ├─ Filters:\n";let nodes=parse_audio(value).unwrap();assert_eq!(nodes.len(),1);assert!(nodes[0].default);assert_eq!(nodes[0].muted,Some(false));assert_eq!(handle("output","auto_null"),handle("output","auto_null"));}#[test]fn malformed_unbounded_or_colliding_audio_is_refused(){assert!(parse_audio("Audio\n ├─ Sinks:\n │ * x. invalid [vol: 1.00]").unwrap().is_empty());assert_eq!(parse_audio(&"x".repeat(256*1024+1)),Err(ErrorCode::ResourceExhausted));assert_eq!(parse_audio("Audio\n ├─ Sinks:\n │ 1. duplicate [vol: 1.00]\n │ 2. duplicate [vol: 1.00]"),Err(ErrorCode::TargetChanged));}#[test]fn backlight_refuses_percentages_that_cannot_be_recovered_exactly(){assert_eq!(brightness_for_percent(37,100),Ok(37));assert_eq!(brightness_for_percent(100,1),Ok(1));assert_eq!(brightness_for_percent(1,1),Err(ErrorCode::UnsupportedCapability));}#[test]fn partial_native_observations_have_a_contract_valid_error(){let value=envelope("fixture",json!({"on_ac":true,"battery_percent":null,"profile":null,"available_profiles":[],"unsupported_fields":["battery_percent","profile"]}),false).unwrap();assert_eq!(value["error"]["code"],"PARTIAL_RESULT");assert!(aios_protocol::validation::validate_result("power.status",value.to_string().as_bytes()).is_ok());}}
+#[cfg(test)]mod tests{use super::*;#[test]fn pinned_wpctl_shape_yields_stable_handles_and_mute_state(){let value="Audio\n ├─ Sinks:\n │  *   52. auto_null [vol: 1.00]\n ├─ Sources:\n │  \n ├─ Filters:\n";let nodes=parse_audio(value).unwrap();assert_eq!(nodes.len(),1);assert!(nodes[0].default);assert_eq!(nodes[0].muted,Some(false));assert_eq!(handle("output","auto_null"),handle("output","auto_null"));let muted=parse_audio("Audio\n ├─ Sinks:\n │  *   52. auto_null [vol: 1.00 MUTED]\n ├─ Sources:\n").unwrap();assert_eq!(muted[0].muted,Some(true));}#[test]fn malformed_unbounded_or_colliding_audio_is_refused(){assert!(parse_audio("Audio\n ├─ Sinks:\n │ * x. invalid [vol: 1.00]").unwrap().is_empty());assert_eq!(parse_audio(&"x".repeat(256*1024+1)),Err(ErrorCode::ResourceExhausted));assert_eq!(parse_audio("Audio\n ├─ Sinks:\n │ 1. duplicate [vol: 1.00]\n │ 2. duplicate [vol: 1.00]"),Err(ErrorCode::TargetChanged));}#[test]fn backlight_refuses_percentages_that_cannot_be_recovered_exactly(){assert_eq!(brightness_for_percent(37,100),Ok(37));assert_eq!(brightness_for_percent(100,1),Ok(1));assert_eq!(brightness_for_percent(1,1),Err(ErrorCode::UnsupportedCapability));}#[test]fn partial_native_observations_have_a_contract_valid_error(){let value=envelope("fixture",json!({"on_ac":true,"battery_percent":null,"profile":null,"available_profiles":[],"unsupported_fields":["battery_percent","profile"]}),false).unwrap();assert_eq!(value["error"]["code"],"PARTIAL_RESULT");assert!(aios_protocol::validation::validate_result("power.status",value.to_string().as_bytes()).is_ok());}}

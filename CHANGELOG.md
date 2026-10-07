@@ -31,6 +31,11 @@
   revalidation.
 - Emit a schema-valid `PARTIAL_RESULT` error object with incomplete native
   observations instead of discarding truthful power data during validation.
+- Parse WirePlumber's actual `[vol: … MUTED]` status form and wait boundedly
+  for asynchronous default/mute readback before issuing a verified receipt.
+- Add the fixed PowerDevil power-profile mutation adapter with allowlisted
+  choices, stale-state checks, bounded readback and prior-profile recovery;
+  execution remains on the R2 exact-confirmation path.
 - Project only the two registered KDE settings files into the sandboxed
   session broker after late Plasma initialization or atomic configuration
   replacement.
