@@ -8,6 +8,15 @@ let
     { id = "kcalc"; attribute = [ "kdePackages" "kcalc" ]; display_name = "KCalc"; binaries = [ "kcalc" ]; desktop_ids = [ "org.kde.kcalc.desktop" ]; capability = "desktop_application"; }
     { id = "postgresql-17"; attribute = [ "postgresql_17" ]; display_name = "PostgreSQL 17"; binaries = [ "pg_isready" ]; desktop_ids = []; capability = "postgresql17"; }
   ];
+  reviewedOptions = [
+    { id = "power_policy.profile_on_ac"; value_kind = "power_profile"; }
+    { id = "power_policy.profile_on_battery"; value_kind = "power_profile"; }
+    { id = "services.openssh.enabled"; value_kind = "boolean"; }
+    { id = "services.openssh.open_firewall"; value_kind = "boolean"; }
+    { id = "services.postgresql.enabled"; value_kind = "boolean"; }
+    { id = "services.postgresql.listen_mode"; value_kind = "postgresql_listen_mode"; }
+    { id = "services.postgresql.package_id"; value_kind = "package_id"; }
+  ];
   entry = spec:
     let
       package = lib.getAttrFromPath spec.attribute pkgs;
@@ -21,6 +30,9 @@ let
     in assert lib.meta.availableOn pkgs.stdenv.hostPlatform package;
       assert !payload.unfree; # Initial catalog is entirely free; no broad allowUnfree.
       payload // { metadata_revision = builtins.hashString "sha256" (builtins.toJSON payload); };
+  optionEntry = spec: spec // {
+    metadata_revision = builtins.hashString "sha256" (builtins.toJSON spec);
+  };
   content = {
     schema_version = 1;
     base_template_revision = baseTemplateRevision;
@@ -29,6 +41,7 @@ let
     installation_state_version = "26.05";
     platform = "x86_64-linux";
     packages = map entry reviewed;
+    options = map optionEntry reviewedOptions;
   };
   catalog = { inherit content; catalog_revision = builtins.hashString "sha256" (builtins.toJSON content); };
 in {

@@ -35,9 +35,17 @@ fn catalog_value(unfree: bool) -> Value {
         p["metadata_revision"] = json!(hash(&p));
         entries.push(p);
     }
+    let options=[
+        ("power_policy.profile_on_ac","power_profile"),("power_policy.profile_on_battery","power_profile"),
+        ("services.openssh.enabled","boolean"),("services.openssh.open_firewall","boolean"),
+        ("services.postgresql.enabled","boolean"),("services.postgresql.listen_mode","postgresql_listen_mode"),
+        ("services.postgresql.package_id","package_id")].into_iter().map(|(id,value_kind)|{
+            let mut option=json!({"id":id,"value_kind":value_kind});
+            option["metadata_revision"]=json!(hash(&option));option
+        }).collect::<Vec<_>>();
     let content = json!({"schema_version":1,"base_template_revision":"1".repeat(64),"lock_sha256":"2".repeat(64),
         "nixpkgs_revision":"774debe7a0d1b496e35677ad955a1011c6ff74f3","installation_state_version":"26.05",
-        "platform":"x86_64-linux","packages":entries});
+        "platform":"x86_64-linux","packages":entries,"options":options});
     json!({"catalog_revision":hash(&content),"content":content})
 }
 fn catalog() -> Catalog {
@@ -237,6 +245,21 @@ fn catalog_tampering_duplicates_and_incomplete_metadata_are_rejected() {
             Catalog::from_installed(&serde_json::to_vec(&bad).unwrap()).unwrap_err(),
             Error::CatalogInvalid
         );
+    }
+    for case in ["missing-option","wrong-option-kind","stale-option-metadata"] {
+        let mut bad=v.clone();
+        match case {
+            "missing-option"=>{bad["content"]["options"].as_array_mut().unwrap().pop();},
+            "wrong-option-kind"=>{
+                bad["content"]["options"][0]["value_kind"]=json!("boolean");
+                let mut metadata=bad["content"]["options"][0].clone();
+                metadata.as_object_mut().unwrap().remove("metadata_revision");
+                bad["content"]["options"][0]["metadata_revision"]=json!(hash(&metadata));
+            },
+            _=>bad["content"]["options"][0]["metadata_revision"]=json!("0".repeat(64)),
+        }
+        bad["catalog_revision"]=json!(hash(&bad["content"]));
+        assert_eq!(Catalog::from_installed(&serde_json::to_vec(&bad).unwrap()).unwrap_err(),Error::CatalogInvalid,"{case}");
     }
     let s = serde_json::to_string(&v).unwrap();
     let duplicate = format!(

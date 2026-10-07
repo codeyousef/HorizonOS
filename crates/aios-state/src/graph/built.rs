@@ -2,7 +2,7 @@
 //! Embedded managed data is built state, not an approval receipt, a live service
 //! observation, or a complete inventory of packages and user profiles.
 use super::{generations, native::{Error, NativeTime, Result}, store::{GraphStore, Node, ProviderSnapshot, ProviderState, Scope, SourceTruth}, ObservationTime, SourceRevision};
-use crate::{Catalog, CatalogEntry, ManagedState, MAX_CATALOG_BYTES, MAX_MANIFEST_BYTES};
+use crate::{Catalog, CatalogEntry, ManagedState, OptionEntry, MAX_CATALOG_BYTES, MAX_MANIFEST_BYTES};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{fs::{self, OpenOptions}, io::Read, os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt}, path::{Path, PathBuf}};
@@ -23,6 +23,7 @@ pub struct BuiltConfiguration {
     pub installation_state_version: String,
     pub platform: String,
     pub catalog_packages: Vec<CatalogEntry>,
+    pub catalog_options: Vec<OptionEntry>,
     pub catalog_runtime: Vec<CatalogRuntimeObservation>,
     pub configuration: ManagedState,
 }
@@ -47,6 +48,18 @@ pub struct CatalogRuntimeObservation {
     runtime_available: bool,
     realized_package_closure: Option<String>,
     realized_store_hash: Option<String>,
+}
+fn option_value(state:&ManagedState,id:&str)->Result<serde_json::Value> {
+    match id {
+        "power_policy.profile_on_ac"=>serde_json::to_value(state.power_policy.profile_on_ac),
+        "power_policy.profile_on_battery"=>serde_json::to_value(state.power_policy.profile_on_battery),
+        "services.openssh.enabled"=>Ok(serde_json::json!(state.services.openssh.enabled)),
+        "services.openssh.open_firewall"=>Ok(serde_json::json!(state.services.openssh.open_firewall)),
+        "services.postgresql.enabled"=>Ok(serde_json::json!(state.services.postgresql.enabled)),
+        "services.postgresql.listen_mode"=>serde_json::to_value(state.services.postgresql.listen_mode),
+        "services.postgresql.package_id"=>Ok(serde_json::json!(state.services.postgresql.package_id)),
+        _=>return Err(invalid()),
+    }.map_err(|_|invalid())
 }
 fn changed() -> Error { Error::Native(aios_protocol::contracts::ErrorCode::TargetChanged) }
 fn invalid() -> Error { Error::Native(aios_protocol::contracts::ErrorCode::InvalidArgument) }
@@ -145,7 +158,7 @@ fn decode(running: String, profile: Option<String>, manifest: &[u8], catalog: &[
         manifest_sha256:hash(manifest),catalog_sha256:hash(catalog),catalog_revision:parsed.revision().into(),
         template_revision:content.base_template_revision.clone(),nixpkgs_revision:content.nixpkgs_revision.clone(),
         lock_sha256:content.lock_sha256.clone(),installation_state_version:content.installation_state_version.clone(),
-        platform:content.platform.clone(),catalog_packages,catalog_runtime,configuration:compiled.state})
+        platform:content.platform.clone(),catalog_packages,catalog_options:content.options.clone(),catalog_runtime,configuration:compiled.state})
 }
 /// No caller path or deserialized observation is accepted as native provenance.
 pub fn observe() -> Result<(ObservationTime, BuiltConfiguration)> {
@@ -181,11 +194,23 @@ impl NativeBuiltSnapshot {
                 "nixpkgs_revision":self.data.nixpkgs_revision,"lock_sha256":self.data.lock_sha256,
                 "installation_state_version":self.data.installation_state_version,"platform":self.data.platform,
                 "services":self.data.configuration.services,"power_policy":self.data.configuration.power_policy,
-                "configured_system_package_count":self.data.configuration.system_packages.len(),"captured":self.captured,
+                "configured_system_package_count":self.data.configuration.system_packages.len(),
+                "reviewed_option_count":self.data.catalog_options.len(),"captured":self.captured,
                 "approved_manifest_verified":false,"managed_transaction":null,"runtime_postconditions_verified":false,
-                "complete_package_inventory_verified":false,"execution_authority":false});
+                "complete_package_inventory_verified":false,"reviewed_option_catalog_complete":true,"execution_authority":false});
             let mut nodes=vec![Node{id:NODE.into(),kind:"configuration".into(),scope:Scope::System,provider:PROVIDER.into(),
                 stable_key:NODE.into(),properties,source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns}];
+            for option in &self.data.catalog_options {
+                let id=format!("catalog:option:{}",option.id);
+                nodes.push(Node{id:id.clone(),kind:"configuration_option".into(),scope:Scope::System,provider:PROVIDER.into(),stable_key:id,
+                    properties:serde_json::json!({"metadata":option,"intended":option_value(&self.data.configuration,&option.id)?,
+                        "effective":null,"effective_verified":false,"catalog_revision":self.data.catalog_revision,
+                        "catalog_sha256":self.data.catalog_sha256,"nixpkgs_revision":self.data.nixpkgs_revision,
+                        "lock_sha256":self.data.lock_sha256,"platform":self.data.platform,
+                        "access":{"read_scope":"system.configuration","propose_scope":"system.configuration.propose","direct_write":false},
+                        "reviewed_option_catalog_complete":true,"complete_nixos_option_inventory":false,"execution_authority":false}),
+                    source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns});
+            }
             for (package,runtime) in self.data.catalog_packages.iter().zip(&self.data.catalog_runtime) {
                 let id=format!("catalog:package:{}",package.id);
                 let selected=self.data.configuration.system_packages.contains(&package.id);
@@ -219,8 +244,16 @@ impl NativeBuiltSnapshot {
             "version":"17.7","licenses":["PostgreSQL"],"unfree":false,"platform":"x86_64-linux",
             "binaries":["pg_isready"],"desktop_ids":[],"capability":"postgresql17"});
         package["metadata_revision"]=serde_json::json!(hash(&aios_protocol::contracts::canonical_json(&package).unwrap()));
+        let options=[
+            ("power_policy.profile_on_ac","power_profile"),("power_policy.profile_on_battery","power_profile"),
+            ("services.openssh.enabled","boolean"),("services.openssh.open_firewall","boolean"),
+            ("services.postgresql.enabled","boolean"),("services.postgresql.listen_mode","postgresql_listen_mode"),
+            ("services.postgresql.package_id","package_id")].into_iter().map(|(id,value_kind)|{
+                let mut option=serde_json::json!({"id":id,"value_kind":value_kind});
+                option["metadata_revision"]=serde_json::json!(hash(&aios_protocol::contracts::canonical_json(&option).unwrap()));option
+            }).collect::<Vec<_>>();
         let content=serde_json::json!({"schema_version":1,"base_template_revision":"1".repeat(64),"lock_sha256":"2".repeat(64),
-            "nixpkgs_revision":"3".repeat(40),"installation_state_version":"26.05","platform":"x86_64-linux","packages":[package]});
+            "nixpkgs_revision":"3".repeat(40),"installation_state_version":"26.05","platform":"x86_64-linux","packages":[package],"options":options});
         serde_json::to_vec(&serde_json::json!({"catalog_revision":hash(&aios_protocol::contracts::canonical_json(&content).unwrap()),"content":content})).unwrap()
     }
     #[test] fn embedded_data_must_be_complete_canonical_and_bound_to_catalog() {
@@ -231,6 +264,7 @@ impl NativeBuiltSnapshot {
         assert_eq!(result.configuration,catalog.defaults());
         assert_eq!(result.catalog_packages.len(),1);
         assert_eq!(result.catalog_packages[0],*catalog.entry("postgresql-17").unwrap());
+        assert_eq!(result.catalog_options.len(),7);
         assert_eq!(result.catalog_runtime.len(),1);
         assert_eq!(result.catalog_runtime[0].id,"postgresql-17");
         assert!(result.catalog_runtime[0].binary_paths_verified);

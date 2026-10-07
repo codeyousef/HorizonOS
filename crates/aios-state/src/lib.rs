@@ -61,6 +61,21 @@ pub enum Capability {
     DesktopApplication,
     Postgresql17,
 }
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OptionKind {
+    Boolean,
+    PackageId,
+    PostgresqlListenMode,
+    PowerProfile,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct OptionEntry {
+    pub id: String,
+    pub value_kind: OptionKind,
+    pub metadata_revision: String,
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CatalogContent {
@@ -71,6 +86,7 @@ pub struct CatalogContent {
     pub installation_state_version: String,
     pub platform: String,
     pub packages: Vec<CatalogEntry>,
+    pub options: Vec<OptionEntry>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -162,6 +178,25 @@ impl Catalog {
             {
                 return Err(Error::CatalogInvalid);
             }
+        }
+        const OPTIONS:[(&str,OptionKind);7]=[
+            ("power_policy.profile_on_ac",OptionKind::PowerProfile),
+            ("power_policy.profile_on_battery",OptionKind::PowerProfile),
+            ("services.openssh.enabled",OptionKind::Boolean),
+            ("services.openssh.open_firewall",OptionKind::Boolean),
+            ("services.postgresql.enabled",OptionKind::Boolean),
+            ("services.postgresql.listen_mode",OptionKind::PostgresqlListenMode),
+            ("services.postgresql.package_id",OptionKind::PackageId),
+        ];
+        if c.options.len()!=OPTIONS.len() || !c.options.iter().zip(OPTIONS).all(|(option,(name,kind))|option.id==name&&option.value_kind==kind) {
+            return Err(Error::CatalogInvalid);
+        }
+        for option in &c.options {
+            if option.id.len()>128 || !option.id.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b"._-".contains(&b))
+                || !digest(&option.metadata_revision) { return Err(Error::CatalogInvalid); }
+            let mut metadata=serde_json::to_value(option).map_err(|_|Error::CatalogInvalid)?;
+            metadata.as_object_mut().ok_or(Error::CatalogInvalid)?.remove("metadata_revision");
+            if hash(&canonical_json(&metadata).map_err(|_|Error::CatalogInvalid)?)!=option.metadata_revision { return Err(Error::CatalogInvalid); }
         }
         Ok(Self {
             revision: e.catalog_revision,

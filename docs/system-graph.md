@@ -209,6 +209,13 @@ confers execution authority or claims a complete system/user/unmanaged inventory
 The same per-entry runtime observations are included in the root-private
 `--metadata` response so qualification can verify exact artifact outcomes rather
 than infer them from provider success.
+The reviewed option catalog is also revision-bound. Exactly the seven managed
+service and power options are emitted as `configuration_option` nodes with
+typed metadata, intended values, read/propose scopes and `direct_write=false`.
+Their effective values remain unknown until independent runtime providers verify
+them. `reviewed_option_catalog_complete=true` covers only this exported set;
+`complete_nixos_option_inventory=false` prevents it from claiming the full NixOS
+module option universe.
 The root-private `--metadata` diagnostic compares the cache with fresh native
 metadata and returns capture time and freshness without execution authority.
 

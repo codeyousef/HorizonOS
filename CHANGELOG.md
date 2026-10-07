@@ -11,4 +11,6 @@
   plan, live resources, broker incarnation, volatile nonce and expiry.
 - Expose immutable reviewed package-catalog provenance separately from managed
   selection, and verify declared runtime artifacts against the running Nix closure.
+- Export a revision-bound typed catalog for the seven managed configuration
+  options with explicit access and completeness semantics.
 - Initial Rust protocol framing and NixOS engineering scaffold.
