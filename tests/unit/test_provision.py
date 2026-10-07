@@ -1,5 +1,6 @@
 """Host provider fixtures. These do not execute or certify the guest installer."""
 import copy
+import hashlib
 import io
 import json
 import os
@@ -136,6 +137,43 @@ class ProvisionTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "MEDIA_DIGEST_MISMATCH")
         self.assertFalse((self.root / url.rsplit("/", 1)[1]).exists())
         self.assertFalse(list(self.root.glob("*.part")))
+
+    def test_stale_partial_download_is_replaced_and_network_failure_is_cleaned(self):
+        url = "https://releases.nixos.org/nixos/26.05/release/nixos-minimal-26.05.1234.abcdef-x86_64-linux.iso"
+        name = url.rsplit("/", 1)[1]
+        expected = hashlib.sha256(b"complete installer fixture").hexdigest()
+        checksum = lambda: io.BytesIO((expected + "\n").encode())
+        partial = self.root / (name + ".part")
+        partial.write_bytes(b"interrupted")
+        partial.chmod(0o600)
+        first = checksum()
+        first.geturl = lambda: url + ".sha256"
+        complete = io.BytesIO(b"complete installer fixture")
+        complete.geturl = lambda: url
+        with patch("aios_dev.provision.urllib.request.build_opener") as builder:
+            builder.return_value.open.side_effect = [first, complete]
+            result = fetch_media(self.root)
+        self.assertEqual(Path(result["path"]).read_bytes(), b"complete installer fixture")
+        self.assertFalse(partial.exists())
+
+        Path(result["path"]).unlink()
+        second = checksum()
+        second.geturl = lambda: url + ".sha256"
+
+        class BrokenDownload(io.BytesIO):
+            def read(self, size=-1):
+                if self.tell():
+                    raise OSError("interrupted")
+                return super().read(4)
+
+        broken = BrokenDownload(b"partial")
+        broken.geturl = lambda: url
+        with patch("aios_dev.provision.urllib.request.build_opener") as builder:
+            builder.return_value.open.side_effect = [second, broken]
+            with self.assertRaises(DevctlError) as caught:
+                fetch_media(self.root)
+        self.assertEqual(caught.exception.code, "MEDIA_DOWNLOAD_FAILED")
+        self.assertFalse(partial.exists())
 
     def test_seed_source_rejects_credentials_and_symlinks(self):
         for name in (".local/ssh/private", "tools/secret.pem", "docs/../secret", "/etc/shadow"):

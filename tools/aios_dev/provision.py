@@ -170,21 +170,38 @@ def fetch_media(directory: Path) -> dict:
         if not re.fullmatch(r"nixos-minimal-26\.05\.[A-Za-z0-9.-]+-x86_64-linux\.iso", filename):
             raise ValueError("Unexpected release filename")
         path = directory / filename
+        partial = directory / (filename + ".part")
         if path.exists():
             if path.is_symlink() or not path.is_file() or digest_file(path) != expected:
                 raise failure(ExitCode.VERIFICATION_FAILURE, "MEDIA_DIGEST_MISMATCH", "Cached installer failed checksum verification")
         else:
-            partial = directory / (filename + ".part")
-            with opener.open(url, timeout=30) as response:
-                if official_url(response.geturl()) != url:
-                    raise ValueError("Unexpected ISO redirect")
-                with os.fdopen(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), "wb") as handle:
-                    size = 0
-                    while chunk := response.read(1024 * 1024):
-                        size += len(chunk)
-                        if size > 4 * 1024**3:
-                            raise ValueError("Installer exceeds size limit")
-                        handle.write(chunk)
+            if partial.exists():
+                info = partial.lstat()
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                        or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+                    raise ValueError("Unsafe partial installer cache")
+                if digest_file(partial) == expected:
+                    partial.rename(path)
+                    return {"url": url, "checksum_requested_url": CHECKSUM_URL, "checksum_provenance_url": checksum_url,
+                            "sha256": expected, "verified": True, "path": str(path)}
+                partial.unlink()
+            created = False
+            try:
+                with opener.open(url, timeout=30) as response:
+                    if official_url(response.geturl()) != url:
+                        raise ValueError("Unexpected ISO redirect")
+                    with os.fdopen(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), "wb") as handle:
+                        created = True
+                        size = 0
+                        while chunk := response.read(1024 * 1024):
+                            size += len(chunk)
+                            if size > 4 * 1024**3:
+                                raise ValueError("Installer exceeds size limit")
+                            handle.write(chunk)
+            except Exception:
+                if created:
+                    partial.unlink(missing_ok=True)
+                raise
             if digest_file(partial) != expected:
                 partial.unlink()
                 raise failure(ExitCode.VERIFICATION_FAILURE, "MEDIA_DIGEST_MISMATCH", "Downloaded installer failed official checksum")
