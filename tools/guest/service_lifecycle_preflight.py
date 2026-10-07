@@ -120,8 +120,9 @@ def main():
     if model.returncode == 0 and "ActiveState=active" in model.stdout:
         raise RuntimeError("model service active in model-independent image")
     uid = pwd.getpwnam("tester").pw_uid
-    bus = Path(f"/run/user/{uid}/bus")
-    if not bus.exists() or bus.stat().st_uid != uid:
+    bus = f"/run/user/{uid}/bus"
+    available = command(expected, [RUNUSER, "-u", "tester", "--", "/run/current-system/sw/bin/test", "-S", bus], check=False)
+    if available.returncode != 0:
         raise RuntimeError("tester graphical user bus unavailable")
     for unit in ("aios-sessiond.service", "aios-processd.service", "aios-ui-agent.service"):
         user_restarts.append(restart(expected, unit, "tester"))
@@ -131,9 +132,9 @@ def main():
     try:
         command(expected, [LOGINCTL, "terminate-user", "tester"])
         deadline = time.monotonic() + 15
-        while Path(f"/run/user/{uid}").exists() and time.monotonic() < deadline:
+        while properties(expected, f"user@{uid}.service")["ActiveState"] != "inactive" and time.monotonic() < deadline:
             time.sleep(0.1)
-        logged_out = not Path(f"/run/user/{uid}").exists()
+        logged_out = properties(expected, f"user@{uid}.service")["ActiveState"] == "inactive"
         if not logged_out:
             raise RuntimeError("tester user manager survived logout")
         for unit in ("sshd.service", "NetworkManager.service"):
