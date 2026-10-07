@@ -312,6 +312,7 @@ fn native_udev_monitor_observes_removable_hotplug(){
     let before=aios_system::devices::read_block_devices().unwrap();
     let before_ids=before.devices.iter().map(|device|(device.major,device.minor)).collect::<std::collections::BTreeSet<_>>();
     let mut monitor=aios_system::devices::DeviceEvents::connect().unwrap();
+    eprintln!("AIOS_UDEV_MONITOR_READY");
     let deadline=std::time::Instant::now()+std::time::Duration::from_secs(20);
     let mut notifications=0_u64;let mut loss=false;
     while std::time::Instant::now()<deadline{
