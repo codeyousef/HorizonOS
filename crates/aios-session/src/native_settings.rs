@@ -18,6 +18,7 @@ fn system_bus()->Result<zbus::blocking::Connection,ErrorCode>{
     zbus::blocking::connection::Builder::address("unix:path=/run/dbus/system_bus_socket").map_err(|_|ErrorCode::UnsupportedCapability)?
         .method_timeout(Duration::from_millis(500)).build().map_err(|_|ErrorCode::UnsupportedCapability)
 }
+fn projected_setting(name:&str)->String{format!("/run/user/{}/aios/desktop-settings/{name}",nix::unistd::geteuid().as_raw())}
 fn envelope(provider:&str,data:Value,complete:bool)->Result<Value,ErrorCode>{
     let value=json!({"schema_version":1,"status":if complete{"ok"}else{"partial"},"observed_at":OffsetDateTime::now_utc().format(&Rfc3339).map_err(|_|ErrorCode::TargetChanged)?,
         "source":{"provider":provider,"provider_version":PROVIDER_VERSION},"evidence_ids":[],"complete":complete,"next_cursor":null,"data":data,"error":null});
@@ -63,7 +64,8 @@ fn audio_default(direction:&str)->Result<Value,ErrorCode>{
 fn setting(key:&str)->Result<Value,ErrorCode>{
     let (value,provider)=match key{
         "desktop.theme_mode"=>{
-            let value=command(KREADCONFIG,&["--file","kdeglobals","--group","General","--key","ColorScheme"])?;
+            let file=projected_setting("kdeglobals");
+            let value=command(KREADCONFIG,&["--file",&file,"--group","General","--key","ColorScheme"])?;
             let mode=match value.trim(){"BreezeLight"=>"light","BreezeDark"=>"dark",_=>return Err(ErrorCode::UnsupportedCapability)};
             (json!(mode),"kconfig-pinned")
         },
@@ -72,7 +74,8 @@ fn setting(key:&str)->Result<Value,ErrorCode>{
             let power=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement","org.kde.Solid.PowerManagement").map_err(|_|ErrorCode::UnsupportedCapability)?;
             let profile:String=power.call("currentProfile",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
             if !matches!(profile.as_str(),"AC"|"Battery"|"LowBattery"){return Err(ErrorCode::UnsupportedCapability);}
-            let value=command(KREADCONFIG,&["--file","powerdevilrc","--group",&profile,"--group","Display","--key","TurnOffDisplayIdleTimeoutSec"])?;
+            let file=projected_setting("powerdevilrc");
+            let value=command(KREADCONFIG,&["--file",&file,"--group",&profile,"--group","Display","--key","TurnOffDisplayIdleTimeoutSec"])?;
             let seconds=value.trim().parse::<u64>().map_err(|_|ErrorCode::UnsupportedCapability)?;
             if !(60..=3600).contains(&seconds){return Err(ErrorCode::UnsupportedCapability);}
             (json!(seconds),"powerdevil-kconfig-pinned")

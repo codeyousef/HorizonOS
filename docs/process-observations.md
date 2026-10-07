@@ -100,9 +100,10 @@ This is library verification in the guest, not installed broker qualification.
 `services.aios.session.enable` registers the reviewed package's user units and
 starts `aios-sessiond.service` through the native user manager's
 `default.target`. A fixed path unit watches only the two registered KDE settings
-files and restarts the broker when either appears or changes. This refreshes the
-broker's read-only file bind after late Plasma initialization or an atomic
-configuration replacement; it does not expose the rest of the home directory.
+files and projects bounded copies into the broker's private runtime directory
+when either appears or changes. The broker reads only those projected files,
+including after late Plasma initialization or atomic configuration replacement;
+it cannot read the rest of the home directory.
 The development image enables this independently of the incomplete global
 control-plane switch and model activation. Missing reviewed broker packages
 fail NixOS assertions. This wiring preserves the packaged sandbox and requires

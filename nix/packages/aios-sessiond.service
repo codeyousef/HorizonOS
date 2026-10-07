@@ -8,8 +8,6 @@ ConditionUser=!root
 Type=dbus
 BusName=org.aios.Session1
 ExecStart=@EXECUTABLE@
-Environment=HOME=%h
-Environment=XDG_CONFIG_HOME=%h/.config
 RuntimeDirectory=aios
 RuntimeDirectoryMode=0700
 UMask=0077
@@ -22,7 +20,7 @@ PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=tmpfs
 BindPaths=%t
-BindReadOnlyPaths=-%h/.config/kdeglobals -%h/.config/powerdevilrc
+BindReadOnlyPaths=-%t/aios/desktop-settings
 PrivateUsers=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

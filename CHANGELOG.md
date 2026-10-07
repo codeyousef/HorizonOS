@@ -20,7 +20,7 @@
   three registered desktop-setting adapters with stable handles, pinned bounded
   native queries, truthful unsupported/partial fields and write methods that
   remain approval-gated.
-- Refresh the sandboxed session broker when a registered KDE settings file
-  appears or changes, preserving exact-file read-only exposure after late
-  Plasma initialization and atomic configuration replacement.
+- Project only the two registered KDE settings files into the sandboxed
+  session broker after late Plasma initialization or atomic configuration
+  replacement.
 - Initial Rust protocol framing and NixOS engineering scaffold.

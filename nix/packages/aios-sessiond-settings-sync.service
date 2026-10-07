@@ -1,10 +1,14 @@
 [Unit]
-Description=Refresh AIOS broker settings visibility
+Description=Project registered desktop settings for AIOS
 ConditionUser=!root
 
 [Service]
 Type=oneshot
-ExecStart=@SYSTEMCTL@ --user try-restart aios-sessiond.service
+ExecStart=-@CP@ --no-preserve=mode,ownership,timestamps --reflink=never %h/.config/kdeglobals %t/aios/desktop-settings/kdeglobals
+ExecStart=-@CP@ --no-preserve=mode,ownership,timestamps --reflink=never %h/.config/powerdevilrc %t/aios/desktop-settings/powerdevilrc
+RuntimeDirectory=aios/desktop-settings
+RuntimeDirectoryMode=0700
+UMask=0077
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX
@@ -12,8 +16,7 @@ PrivateNetwork=yes
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=strict
-ProtectHome=tmpfs
-BindPaths=%t
+ProtectHome=read-only
 PrivateUsers=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
