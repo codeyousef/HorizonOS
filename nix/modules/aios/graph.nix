@@ -22,6 +22,7 @@ in {
     assertions = [ { assertion = aiosState != null; message = "Native graph ownership requires the packaged aios-state binaries."; } ];
     users.groups.aios-state = {};
     users.users.aios-state = { isSystemUser = true; group = "aios-state"; home = "/var/empty"; };
+    environment.systemPackages = lib.optional (aiosState != null) aiosState;
     systemd.services.aios-state = {
       description = "Horizon OS private native system graph";
       wantedBy = [ "multi-user.target" ]; after = [ "local-fs.target" "dbus.service" ];
