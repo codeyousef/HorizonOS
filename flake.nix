@@ -58,6 +58,7 @@
         AIOS_CONSENT_UI = "${consentUi}/bin/aios-scope-dialog";
         AIOS_WPCTL = "${pkgs.wireplumber}/bin/wpctl";
         AIOS_KREADCONFIG = "${pkgs.kdePackages.kconfig}/bin/kreadconfig6";
+        AIOS_SYSTEMCTL = "${self.nixosConfigurations.aios-dev.config.systemd.package}/bin/systemctl";
         AIOS_CONSENT_NATIVE = "${consentUi}/bin/.aios-scope-dialog-wrapped";
         AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";
         AIOS_KWIN_WRAPPER = "${pkgs.kdePackages.kwin}/bin/.kwin_wayland_wrapper-wrapped";
@@ -69,6 +70,8 @@
           install -Dm644 ${./nix/packages/aios-sessiond-settings.path} "$out/share/systemd/user/aios-sessiond-settings.path"
           install -Dm644 ${./nix/packages/aios-sessiond-settings-sync.service} "$out/share/systemd/user/aios-sessiond-settings-sync.service"
           substituteInPlace "$out/share/systemd/user/aios-sessiond-settings-sync.service" --replace-fail @CP@ "${pkgs.coreutils}/bin/cp"
+          install -Dm644 ${./nix/packages/aios-setting-theme.service} "$out/share/systemd/user/aios-setting-theme@.service"
+          substituteInPlace "$out/share/systemd/user/aios-setting-theme@.service" --replace-fail @APPLY@ "${pkgs.kdePackages.plasma-workspace}/bin/plasma-apply-colorscheme"
           install -Dm644 ${./nix/packages/aios-ui-agent.service} "$out/share/systemd/user/aios-ui-agent.service"
           substituteInPlace "$out/share/systemd/user/aios-ui-agent.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-ui-agent"
           install -Dm644 ${./nix/packages/aios-processd.service} "$out/share/systemd/user/aios-processd.service"

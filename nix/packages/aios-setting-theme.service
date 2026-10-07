@@ -1,14 +1,12 @@
 [Unit]
-Description=Project registered desktop settings for AIOS
+Description=Apply one registered Horizon OS desktop theme
 ConditionUser=!root
 
 [Service]
 Type=oneshot
-ExecStart=-@CP@ --no-preserve=mode,ownership,timestamps --reflink=never %h/.config/kdeglobals %t/aios/desktop-settings/kdeglobals
-ExecStart=-@CP@ --no-preserve=mode,ownership,timestamps --reflink=never %h/.config/powerdevilrc %t/aios/desktop-settings/powerdevilrc
-RuntimeDirectoryPreserve=yes
-RuntimeDirectory=aios/desktop-settings
-RuntimeDirectoryMode=0700
+ExecStart=@APPLY@ %i
+Environment=HOME=%h
+Environment=XDG_CONFIG_HOME=%h/.config
 UMask=0077
 NoNewPrivileges=yes
 CapabilityBoundingSet=
@@ -18,6 +16,7 @@ PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=read-only
+ReadWritePaths=%h/.config
 PrivateUsers=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
@@ -30,6 +29,6 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
-MemoryMax=64M
-TasksMax=16
+MemoryMax=128M
+TasksMax=32
 TimeoutStartSec=10

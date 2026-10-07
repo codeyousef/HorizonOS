@@ -20,9 +20,10 @@
   three registered desktop-setting adapters with stable handles, pinned bounded
   native queries, truthful unsupported/partial fields and write methods that
   remain approval-gated.
-- Add an authenticated R1 task-action route for exact audio default and mute
-  changes with opaque grants, live target revalidation, provider readback and a
-  typed prior-state recovery action; direct provider writes remain denied.
+- Add an authenticated R1 task-action route for exact audio default/mute and
+  desktop light/dark changes with opaque grants, live target revalidation,
+  provider readback and a typed prior-state recovery action; direct provider
+  writes remain denied.
 - Project only the two registered KDE settings files into the sandboxed
   session broker after late Plasma initialization or atomic configuration
   replacement.

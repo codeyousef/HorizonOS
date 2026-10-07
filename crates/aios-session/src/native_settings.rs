@@ -9,6 +9,7 @@ use time::{OffsetDateTime,format_description::well_known::Rfc3339};
 const PROVIDER_VERSION:&str=env!("CARGO_PKG_VERSION");
 const WPCTL:&str=match option_env!("AIOS_WPCTL"){Some(path)=>path,None=>"wpctl"};
 const KREADCONFIG:&str=match option_env!("AIOS_KREADCONFIG"){Some(path)=>path,None=>"kreadconfig6"};
+const SYSTEMCTL:&str=match option_env!("AIOS_SYSTEMCTL"){Some(path)=>path,None=>"systemctl"};
 fn session_bus()->Result<zbus::blocking::Connection,ErrorCode>{
     let address=format!("unix:path=/run/user/{}/bus",nix::unistd::geteuid().as_raw());
     zbus::blocking::connection::Builder::address(address.as_str()).map_err(|_|ErrorCode::UnsupportedCapability)?
@@ -99,6 +100,9 @@ fn setting(key:&str)->Result<Value,ErrorCode>{
     };
     envelope(provider,json!({"key":key,"value":value,"ownership":"user"}),true)
 }
+fn setting_value(key:&str)->Result<Value,ErrorCode>{
+    setting(key)?.get("data").and_then(|value|value.get("value")).cloned().ok_or(ErrorCode::TargetChanged)
+}
 fn power_status()->Result<Value,ErrorCode>{
     let session=session_bus()?;
     let profile=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/PowerProfile","org.kde.Solid.PowerManagement.Actions.PowerProfile").map_err(|_|ErrorCode::UnsupportedCapability)?;
@@ -117,6 +121,7 @@ fn power_status()->Result<Value,ErrorCode>{
 enum MutationKind{
     AudioDefault{direction:String,target:AudioNode,prior:AudioNode},
     AudioMute{target:AudioNode,muted:bool,prior:bool},
+    Theme{value:String,prior:String},
 }
 pub struct PreparedMutation{action_id:String,arguments:Value,operation_id:String,kind:MutationKind}
 pub struct MutationReceipt{pub output:Value,pub recovery:Value,pub changed:bool}
@@ -137,14 +142,25 @@ impl PreparedMutation{
                 let target=selected_node(reference,None)?;let prior=target.muted.ok_or(ErrorCode::UnsupportedCapability)?;
                 MutationKind::AudioMute{target,muted,prior}
             },
+            "settings.set"=>{
+                let key=arguments.get("key").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?;
+                if key!="desktop.theme_mode"{return Err(ErrorCode::UnsupportedCapability);}
+                let value=arguments.get("value").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?;
+                if !matches!(value,"light"|"dark"){return Err(ErrorCode::InvalidArgument);}
+                let prior=setting_value(key)?.as_str().ok_or(ErrorCode::TargetChanged)?.to_owned();
+                MutationKind::Theme{value:value.into(),prior}
+            },
             _=>return Err(ErrorCode::UnsupportedCapability),
         };
         Ok(Self{action_id:action.action_id().into(),arguments,operation_id,kind})
     }
     pub fn scope(&self)->aios_policy::Scope{
-        let target=match &self.kind{MutationKind::AudioDefault{target,..}|MutationKind::AudioMute{target,..}=>target};
-        aios_policy::Scope{actions:[self.action_id.clone()].into(),resources:[aios_policy::Resource{
-            field:"node_id".into(),kind:"scope-owner-expiry".into(),handle:handle(target.direction,&target.name),identity_sha256:node_identity(target)}].into(),..Default::default()}
+        let resource=match &self.kind{
+            MutationKind::AudioDefault{target,..}|MutationKind::AudioMute{target,..}=>Some(aios_policy::Resource{
+                field:"node_id".into(),kind:"scope-owner-expiry".into(),handle:handle(target.direction,&target.name),identity_sha256:node_identity(target)}),
+            MutationKind::Theme{..}=>None,
+        };
+        aios_policy::Scope{actions:[self.action_id.clone()].into(),resources:resource.into_iter().collect(),..Default::default()}
     }
     pub fn execute(mut self,mut revalidate:impl FnMut(&Self)->Result<(),ErrorCode>)->Result<MutationReceipt,ErrorCode>{
         revalidate(&self)?;
@@ -163,8 +179,19 @@ impl PreparedMutation{
                 (json!({"node_id":handle(target.direction,&target.name),"muted":muted}),
                     json!({"kind":"tool_call","action_id":"audio.mute_set","arguments":{"node_id":handle(target.direction,&target.name),"muted":prior}}),changed)
             },
+            MutationKind::Theme{value,prior}=>{
+                let changed=value!=prior;if changed{
+                    let scheme=match value.as_str(){"light"=>"BreezeLight","dark"=>"BreezeDark",_=>return Err(ErrorCode::InvalidArgument)};
+                    let unit=format!("aios-setting-theme@{scheme}.service");command(SYSTEMCTL,&["--user","start","--wait",&unit])?;
+                    command(SYSTEMCTL,&["--user","start","--wait","aios-sessiond-settings-sync.service"])?;
+                }
+                revalidate(&self)?;if setting_value("desktop.theme_mode")?!=json!(value){return Err(ErrorCode::PartialResult);}
+                (json!({"key":"desktop.theme_mode","value":value,"ownership":"user"}),
+                    json!({"kind":"tool_call","action_id":"settings.set","arguments":{"key":"desktop.theme_mode","value":prior}}),changed)
+            },
         };
-        let result=envelope("pipewire-wireplumber",{
+        let provider=if self.action_id=="settings.set"{"plasma-colorscheme"}else{"pipewire-wireplumber"};
+        let result=envelope(provider,{
             let mut data=output;let map=data.as_object_mut().ok_or(ErrorCode::TargetChanged)?;
             map.insert("operation_id".into(),json!(self.operation_id));map.insert("transaction_id".into(),Value::Null);
             map.insert("verification".into(),json!({"outcome":"verified","check_id":"native_readback","evidence_ids":[],"explanation":"Provider readback matched the requested value"}));data
@@ -192,7 +219,7 @@ pub fn available_actions(actions:&[String])->Vec<String>{
     let power=actions.iter().any(|id|id=="power.status").then(||power_status().is_ok());
     actions.iter().filter(|id|match id.as_str(){
         "audio.outputs"|"audio.inputs"|"audio.default_get"|"audio.default_set"|"audio.mute_set"=>audio==Some(true),
-        "settings.get"=>settings==Some(true),
+        "settings.get"|"settings.set"=>settings==Some(true),
         "power.status"=>power==Some(true),
         _=>false,
     }).cloned().collect()

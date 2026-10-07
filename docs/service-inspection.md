@@ -106,13 +106,15 @@ provider identities fail closed.
 Direct provider-interface invocation carries no bounded task grant, so every
 write action returns `AUTH_REQUIRED`, including Audio DefaultSet and MuteSet and
 Power ProfileSet. An authenticated caller may instead use Agent1
-`ExecuteTaskAction` with an exact `act` goal and typed action. The initial
-implementation accepts only the R1 audio default and mute actions. It mints an
+`ExecuteTaskAction` with an exact `act` goal and typed action. The R1 route
+accepts audio default/mute and the registered desktop theme only. It mints an
 opaque caller/boot/policy/action/resource/argument/expiry-bound task grant,
-revalidates the live caller and node immediately before the fixed `wpctl`
+revalidates the live caller and target immediately before a fixed provider
 effect, verifies provider readback, and returns the prior typed action as
-recovery data. It never accepts an approval boolean, command, numeric node ID
-or serialized grant. Settings writes and the R2 power profile remain gated.
+recovery data. Theme changes map only `light`/`dark` to the pinned Plasma
+color-scheme helper; no arbitrary KConfig command or scheme enters the API.
+It never accepts an approval boolean, command, numeric node ID or serialized
+grant. Display idle, keyboard backlight and the R2 power profile remain gated.
 The shared `aios-policy` evaluator binds each available read to the authenticated
 caller, original connection, request, fixed action and concrete broker-issued
 resources.
