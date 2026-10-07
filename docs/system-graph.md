@@ -157,8 +157,9 @@ from the native account database and inventories the two documented Nix profile
 locations for that account. It stores a private `Scope::User(uid)` graph under
 the user's state directory, reports stable selected/history closures as
 `user_profile`, and accepts no account, path, profile name, command or SQL input.
-Absence is explicit and ephemeral/non-profile store references remain incomplete
-until a separate scoped provider observes them.
+Unmanaged non-profile store references and ephemeral runtime references are
+reported as separate, explicitly incomplete inventory domains until distinct
+scoped providers observe them.
 
 The native pointers and history are rechecked before/after persistence.
 Generation diagnostics compare the cache with a new native read; missing,

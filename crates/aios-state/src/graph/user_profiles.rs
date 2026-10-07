@@ -18,7 +18,14 @@ const IDENTITY:Error=Error::Native(aios_protocol::contracts::ErrorCode::TargetCh
 pub struct UserProfile { pub profile_kind:String,pub selected_closure:String,pub selected_generation:u64,pub generations:Vec<UserProfileGeneration>,pub history_complete:bool }
 #[derive(Clone,Debug,PartialEq,Eq,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct UserProfiles { pub uid:u32,pub profiles:Vec<UserProfile>,pub unmanaged_inventory_complete:bool,pub unmanaged_inventory_reason:String }
+pub struct UserProfiles {
+    pub uid:u32,
+    pub profiles:Vec<UserProfile>,
+    pub unmanaged_inventory_complete:bool,
+    pub unmanaged_inventory_reason:String,
+    pub ephemeral_inventory_complete:bool,
+    pub ephemeral_inventory_reason:String,
+}
 
 fn account(uid:u32)->Result<(String,PathBuf)> {
     let entry=unsafe{libc::getpwuid(uid)};
@@ -89,7 +96,14 @@ pub fn observe()->Result<(ObservationTime,UserProfiles)>{
     let candidates=[("xdg",home.join(".local/state/nix/profiles/profile")),("per_user",PathBuf::from("/nix/var/nix/profiles/per-user").join(name).join("profile"))];
     let mut profiles=Vec::new();for (kind,path) in &candidates{if let Some(value)=profile(uid,kind,path)?{profiles.push(value);}}
     let now=NativeTime::observe()?.observation().clone();if captured.boot!=now.boot||now.monotonic_ns.checked_sub(captured.monotonic_ns).is_none_or(|age|age>2_000_000_000){return Err(Error::Expired);}
-    Ok((captured,UserProfiles{uid,profiles,unmanaged_inventory_complete:false,unmanaged_inventory_reason:"ephemeral_and_non_profile_store_references_require_separate_scoped_providers".into()}))
+    Ok((captured,UserProfiles{
+        uid,
+        profiles,
+        unmanaged_inventory_complete:false,
+        unmanaged_inventory_reason:"non_profile_store_references_require_separate_scoped_provider".into(),
+        ephemeral_inventory_complete:false,
+        ephemeral_inventory_reason:"ephemeral_runtime_references_require_separate_scoped_provider".into(),
+    }))
 }
 pub struct NativeUserProfileSnapshot{captured:ObservationTime,value:UserProfiles,token:Option<String>}
 impl NativeUserProfileSnapshot{

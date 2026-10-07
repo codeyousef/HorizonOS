@@ -18,8 +18,9 @@
 - Bind file, application and UI evidence locators to provider-issued concrete
   identity digests; trusted viewers receive no model/display URI.
 - Enumerate bounded system and per-user profile generation history using
-  separate native owners without cross-user profile leakage, while keeping
-  ephemeral inventory and unattributed management provenance explicitly unknown.
+  separate native owners without cross-user profile leakage, and report
+  ephemeral runtime and unmanaged non-profile inventory as distinct, explicitly
+  incomplete domains rather than conflating or inferring either.
 - Add authenticated read-only audio inventory/default, power status and the
   three registered desktop-setting adapters with stable handles, pinned bounded
   native queries, truthful unsupported/partial fields and write methods that
