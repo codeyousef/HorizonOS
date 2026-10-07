@@ -61,6 +61,16 @@ fn option_value(state:&ManagedState,id:&str)->Result<serde_json::Value> {
         _=>return Err(invalid()),
     }.map_err(|_|invalid())
 }
+fn option_properties(data:&BuiltConfiguration,option:&OptionEntry)->Result<serde_json::Value> {
+    let value=option_value(&data.configuration,&option.id)?;
+    Ok(serde_json::json!({"metadata":option,"intended":value,"effective":value,"effective_verified":true,
+        "effective_source":"running_closure_embedded_manifest","ownership":"declarative_system",
+        "catalog_revision":data.catalog_revision,"catalog_sha256":data.catalog_sha256,
+        "nixpkgs_revision":data.nixpkgs_revision,"lock_sha256":data.lock_sha256,"platform":data.platform,
+        "access":{"read_scope":"system.configuration","propose_scope":"system.configuration.propose","direct_write":false},
+        "reviewed_option_catalog_complete":true,"complete_nixos_option_inventory":false,
+        "runtime_postcondition_verified":false,"execution_authority":false}))
+}
 fn changed() -> Error { Error::Native(aios_protocol::contracts::ErrorCode::TargetChanged) }
 fn invalid() -> Error { Error::Native(aios_protocol::contracts::ErrorCode::InvalidArgument) }
 fn hash(bytes: &[u8]) -> String { format!("{:x}", Sha256::digest(bytes)) }
@@ -203,12 +213,7 @@ impl NativeBuiltSnapshot {
             for option in &self.data.catalog_options {
                 let id=format!("catalog:option:{}",option.id);
                 nodes.push(Node{id:id.clone(),kind:"configuration_option".into(),scope:Scope::System,provider:PROVIDER.into(),stable_key:id,
-                    properties:serde_json::json!({"metadata":option,"intended":option_value(&self.data.configuration,&option.id)?,
-                        "effective":null,"effective_verified":false,"catalog_revision":self.data.catalog_revision,
-                        "catalog_sha256":self.data.catalog_sha256,"nixpkgs_revision":self.data.nixpkgs_revision,
-                        "lock_sha256":self.data.lock_sha256,"platform":self.data.platform,
-                        "access":{"read_scope":"system.configuration","propose_scope":"system.configuration.propose","direct_write":false},
-                        "reviewed_option_catalog_complete":true,"complete_nixos_option_inventory":false,"execution_authority":false}),
+                    properties:option_properties(&self.data,option)?,
                     source_truth:SourceTruth::Built,realtime_ns:self.captured.realtime_ns});
             }
             for (package,runtime) in self.data.catalog_packages.iter().zip(&self.data.catalog_runtime) {
@@ -287,6 +292,18 @@ impl NativeBuiltSnapshot {
         }
         assert_eq!(store_root(Path::new("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-metadata/bin/tool")),
             Some((PathBuf::from("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-metadata"),"0123456789abcdfghijklmnpqrsvwxyz".into())));
+    }
+    #[test] fn running_closure_options_separate_effective_build_input_from_runtime_postcondition() {
+        let bytes=catalog();let catalog=Catalog::from_installed(&bytes).unwrap();
+        let canonical=catalog.compile(&serde_json::to_vec(&catalog.defaults()).unwrap()).unwrap().bytes;
+        let data=decode("fixture-realized-closure".into(),None,&canonical,&bytes).unwrap();
+        let option=data.catalog_options.iter().find(|option|option.id=="services.openssh.enabled").unwrap();
+        let properties=option_properties(&data,option).unwrap();
+        assert_eq!(properties["intended"],serde_json::json!(true));
+        assert_eq!(properties["effective"],serde_json::json!(true));
+        assert_eq!(properties["effective_verified"],serde_json::json!(true));
+        assert_eq!(properties["runtime_postcondition_verified"],serde_json::json!(false));
+        assert_eq!(properties["access"]["direct_write"],serde_json::json!(false));
     }
     #[test] fn writable_store_boundary_requires_nix_sticky_permissions() {
         for mode in [0o555,0o755,0o1775] { assert!(store_mode(mode)); }
