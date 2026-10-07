@@ -18,11 +18,14 @@ def main():
         raise RuntimeError("service lifecycle probe requires the disposable desktop image")
     token = secrets.token_hex(16)
     try:
-        descriptor = os.open(MARKER, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        # The token correlates this request; ownership and the fixed path unit
+        # authorize it. World-readability lets the capability-free root verifier
+        # read the marker without granting filesystem override capabilities.
+        descriptor = os.open(MARKER, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
         with os.fdopen(descriptor, "w") as marker:
             marker.write(token + "\n")
         marker_state = MARKER.lstat()
-        if marker_state.st_uid != os.geteuid() or stat.S_IMODE(marker_state.st_mode) != 0o600:
+        if marker_state.st_uid != os.geteuid() or stat.S_IMODE(marker_state.st_mode) != 0o644:
             raise RuntimeError("lifecycle request marker identity changed")
         deadline = time.monotonic() + 150
         report = None
