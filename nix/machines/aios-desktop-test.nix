@@ -85,6 +85,7 @@ in {
       # Fixed test-only root orchestration must read the dev-owned request and
       # tester bus, then enter the tester identity for its user manager.
       CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" "CAP_SETUID" "CAP_SETGID" ];
+      AmbientCapabilities = [ "CAP_DAC_READ_SEARCH" "CAP_SETUID" "CAP_SETGID" ];
       PrivateNetwork = true;
       PrivateTmp = false;
       ProtectSystem = "strict";

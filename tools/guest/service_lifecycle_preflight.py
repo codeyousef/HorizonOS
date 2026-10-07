@@ -123,7 +123,8 @@ def main():
     bus = f"/run/user/{uid}/bus"
     available = command(expected, [RUNUSER, "-u", "tester", "--", "/run/current-system/sw/bin/test", "-S", bus], check=False)
     if available.returncode != 0:
-        raise RuntimeError("tester graphical user bus unavailable")
+        detail = (available.stdout + " " + available.stderr).strip()[:256]
+        raise RuntimeError(f"tester graphical user bus unavailable: {detail}")
     for unit in ("aios-sessiond.service", "aios-processd.service", "aios-ui-agent.service"):
         user_restarts.append(restart(expected, unit, "tester"))
         infrastructure(expected)
