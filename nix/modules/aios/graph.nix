@@ -55,7 +55,6 @@ in {
         # profile paths this read-only provider must compare. UID DAC, no
         # capabilities and the syscall/address-family filters remain the bound.
         NoNewPrivileges = true;
-        CapabilityBoundingSet = "";
         RestrictAddressFamilies = [ "AF_UNIX" ];
         RestrictNamespaces = true;
         RestrictSUIDSGID = true;
