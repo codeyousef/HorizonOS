@@ -77,6 +77,7 @@ in {
   productDesktop = evaluate [ development product { services.aios.desktop.enable = true; } ];
   visualWithoutDesktop = evaluate [ development { services.aios.desktop.visualControl.enable = true; } ];
   initrdWithoutRecovery = evaluate [ development { services.aios.recovery.initrdDiagnostics.enable = true; } ];
+  networkAllowed = evaluate [ development { services.aios.model.allowNetwork = true; } ];
   wrongRole = evaluate [ development (enabled // { environment.etc."aios/guest-role".text = "production\n"; }) ];
   missingUuid = evaluate [ development enabled { services.aios.development.expectedVmUuid = lib.mkForce null; } ];
   extraNixTrust = evaluate [ development enabled { nix.settings.trusted-users = [ "root" "dev" ]; } ];
