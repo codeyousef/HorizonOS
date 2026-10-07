@@ -362,9 +362,12 @@ pub fn entry()->Result<()>{
         fs::create_dir(&root).unwrap();fs::set_permissions(&root,fs::Permissions::from_mode(0o700)).unwrap();
         let graph=GraphStore::open(&root,Scope::System).unwrap();
         let mut owner=Owner{graph,ids:vec![],attempts:0,successful:0,last_attempt:now.clone(),last_error:None,
-            generations:None,generation_error:None,last_generation_probe:now,generation_changes:0,event_watcher:false,event_error:None,systemd_notifications:0,event_refreshes:0,device_ids:vec![],device_error:None,metadata:None,metadata_error:None};
+            generations:None,generation_error:None,last_generation_probe:now.clone(),generation_changes:0,event_watcher:false,event_error:None,systemd_notifications:0,event_refreshes:0,
+            device_ids:vec![],device_error:None,device_watcher:false,device_event_error:None,device_notifications:0,device_event_refreshes:0,
+            mount_ids:vec![],mounts:None,mount_error:None,last_mount_probe:now,mount_changes:0,metadata:None,metadata_error:None};
         owner.reconcile().unwrap();
         assert!(!owner.device_ids.is_empty());assert!(owner.device_error.is_none());
+        assert!(!owner.mount_ids.is_empty());assert!(owner.mount_error.is_none());assert!(owner.mounts.is_some());
         assert!(owner.metadata_error.is_none());assert!(owner.metadata.is_some());
         let built=owner.request(Request::Metadata{}).unwrap();
         assert_eq!(built["data"]["freshness"],"Current");assert_eq!(built["data"]["source_truth"],"built");

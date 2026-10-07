@@ -64,6 +64,9 @@ fn system_and_packages(connection: &Connection, executor_owner: &str) {
     let root=storage["data"]["mounts"].as_array().unwrap().iter().find(|mount|mount["mount_path"]=="/").unwrap();
     assert!(root["capacity_bytes"].as_u64().unwrap()>0);
     assert!(root["free_bytes"].as_u64().unwrap()<=root["capacity_bytes"].as_u64().unwrap());
+    let full=storage["data"]["mounts"].as_array().unwrap().iter().find(|mount|mount["mount_path"]=="/mnt/aios-storage-fixture").unwrap();
+    assert_eq!(full["source_identity"],"filesystem:tmpfs");
+    assert!(full["free_bytes"].as_u64().unwrap()<=full["capacity_bytes"].as_u64().unwrap()/4);
     denied(system.call::<_,_,String>("ServiceRestart",&(action("system.service_restart",json!({"service_id":"untrusted-reference"})),)),"AUTH_REQUIRED");
     let packages=Proxy::new(connection,"org.aios.System1","/org/aios/Packages1","org.aios.Packages1").unwrap();
     let info=value(&packages,"Info",(action("packages.info",json!({"package_id":"kate"})),));

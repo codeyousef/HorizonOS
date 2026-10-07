@@ -305,3 +305,26 @@ fn real_hardware_storage_and_mount_graph_are_scoped_and_effect_free(){
         "mount_graph_rows":rows.len(),"mount_provider_status":state.status,"wrong_scope_refused":true,"udev_monitor_connected":true,
         "initial_udev_notifications":idle.notifications,"initial_udev_loss":idle.loss,"storage_effect_performed":false,"format_or_repair_registered":false}));
 }
+
+#[test]
+#[ignore="requires enrolled QEMU guest plus host-owned removable USB storage hotplug fixture"]
+fn native_udev_monitor_observes_removable_hotplug(){
+    let before=aios_system::devices::read_block_devices().unwrap();
+    let before_ids=before.devices.iter().map(|device|(device.major,device.minor)).collect::<std::collections::BTreeSet<_>>();
+    let mut monitor=aios_system::devices::DeviceEvents::connect().unwrap();
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(20);
+    let mut notifications=0_u64;let mut loss=false;
+    while std::time::Instant::now()<deadline{
+        let batch=monitor.poll().unwrap();notifications=notifications.saturating_add(batch.notifications);loss|=batch.loss;
+        if notifications>0{break;}std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(notifications>0);assert!(!loss);
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(10);
+    let device=loop{
+        let current=aios_system::devices::read_block_devices().unwrap();
+        if let Some(device)=current.devices.into_iter().find(|device|!before_ids.contains(&(device.major,device.minor))&&device.removable==Some(true)){break device;}
+        assert!(std::time::Instant::now()<deadline);std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    println!("AIOS_NATIVE_REMOVABLE_HOTPLUG={}",json!({"evidence_kind":"real-qemu-usb-storage-hotplug","device":device,
+        "udev_notifications":notifications,"udev_loss":loss,"preexisting_devices":before.devices.len(),"storage_effect_performed":false}));
+}
