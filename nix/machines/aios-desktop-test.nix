@@ -79,6 +79,7 @@ in {
       ExecStart = "${lifecycle}/bin/aios-service-lifecycle-preflight";
       RuntimeDirectory = "aios-service-lifecycle";
       RuntimeDirectoryMode = "0755";
+      RuntimeDirectoryPreserve = "yes";
       UMask = "0077";
       NoNewPrivileges = true;
       CapabilityBoundingSet = "";

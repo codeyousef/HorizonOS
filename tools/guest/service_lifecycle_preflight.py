@@ -89,6 +89,13 @@ def infrastructure(expected):
     return values
 
 
+def publish(value):
+    REPORT_DIR.mkdir(mode=0o755, exist_ok=True)
+    temporary = REPORT.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+    os.chmod(temporary, 0o644)
+    os.replace(temporary, REPORT)
+
 def main():
     if os.geteuid() != 0:
         raise RuntimeError("service lifecycle preflight requires root")
@@ -149,12 +156,26 @@ def main():
         "infrastructure_after": final_infrastructure,
         "limits": ["Disposable desktop-test image only; fixture absent from production composition."],
     }
-    temporary = REPORT.with_suffix(".tmp")
-    temporary.write_text(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")
-    os.chmod(temporary, 0o644)
-    os.replace(temporary, REPORT)
+    publish(result)
     MARKER.unlink()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        token = None
+        try:
+            value = MARKER.read_text()
+            if len(value) == 33 and value.endswith("\n") and all(c in "0123456789abcdef" for c in value[:-1]):
+                token = value.strip()
+        except OSError:
+            pass
+        publish({
+            "schema_version": 1,
+            "evidence_kind": "actual-installed-fixed-root-service-lifecycle-fixture",
+            "verified": False,
+            "request_token": token,
+            "error": {"kind": type(error).__name__, "message": str(error)[:512]},
+        })
+        raise
