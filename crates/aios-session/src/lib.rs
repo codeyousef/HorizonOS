@@ -15,6 +15,7 @@ pub mod native_startup;
 pub mod bus;
 pub mod inference;
 mod processes;
+mod native_settings;
 mod process_selection;
 use aios_protocol::{MAX_TASK_BYTES, read_frame_with_limit, write_frame, contracts::{Action, ErrorCode, ProviderError, parse_tool_call, canonical_json}};
 use aios_system::services::{service_result, validate_service_name};
@@ -472,6 +473,10 @@ impl State {
                 // write authority on this low-level observation route.
                 if !aios_protocol::registry::capability(action.action_id())?.read_only {
                     return Err(ErrorCode::AuthRequired);
+                }
+                if matches!(action.action_id(),"audio.outputs"|"audio.inputs"|"audio.default_get"|"power.status") {
+                    self.check_direct_read(peer,&action,ReadResources::default())?;
+                    return native_settings::invoke(&action);
                 }
                 match action {
                 Action::SystemInfo => {

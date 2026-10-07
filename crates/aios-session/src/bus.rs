@@ -183,15 +183,16 @@ impl Agent {
         Ok(json)
     }
     async fn capabilities_for(&self, connection: &Connection, header: Header<'_>, interface: &str, actions: &[&str]) -> Result<String> {
-        // Authenticate through the same control path even when the capability
-        // set is empty. A registered contract never implies provider readiness.
+        // Authenticate through the same control path before probing providers.
         self.dispatch(connection, header, Operation::GetCapabilities).await?;
+        let ids=actions.iter().map(|id|(*id).to_owned()).collect::<Vec<_>>();
+        let available=blocking::unblock(move||crate::native_settings::available_actions(&ids)).await;
         let contracts = actions.iter().map(|id| aios_protocol::registry::capability(id)
             .map(|contract| serde_json::json!({"action_id":id,"input_schema":contract.input_schema,
-                "output_schema":contract.output_schema,"availability":"unavailable"})))
+                "output_schema":contract.output_schema,"availability":if available.iter().any(|value|value.as_str()==*id){"available"}else{"unavailable"}})))
             .collect::<std::result::Result<Vec<_>,_>>()?;
         Ok(serde_json::json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),
-            "operation":"capabilities","interface":interface,"available_actions":[],"contracts":contracts}).to_string())
+            "operation":"capabilities","interface":interface,"available_actions":available,"contracts":contracts}).to_string())
     }
     async fn action(&self, connection: &Connection, header: Header<'_>, request_json: &str, expected: &str) -> Result<String> {
         let _admission = self.admit()?;
@@ -319,6 +320,9 @@ surface!(Files,"org.aios.Files1",[(search,"files.search"),(metadata,"files.metad
     (summarize,"files.summarize"),(copy,"files.copy"),(move_file,"files.move"),(trash,"files.trash"),(restore,"files.restore")]);
 surface!(Applications,"org.aios.Applications1",[(list,"apps.list"),(launch,"apps.launch"),(actions,"apps.actions"),(invoke,"apps.invoke")]);
 surface!(Settings,"org.aios.Settings1",[(get,"settings.get"),(set,"settings.set")]);
+surface!(Audio,"org.aios.Audio1",[(outputs,"audio.outputs"),(inputs,"audio.inputs"),(default_get,"audio.default_get"),
+    (default_set,"audio.default_set"),(mute_set,"audio.mute_set")]);
+surface!(Power,"org.aios.Power1",[(status,"power.status"),(profile_set,"power.profile_set")]);
 
 pub fn export(address: &str, state: SharedState) -> zbus::Result<zbus::blocking::Connection> {
     let agent = Agent::new(state);
@@ -327,6 +331,8 @@ pub fn export(address: &str, state: SharedState) -> zbus::Result<zbus::blocking:
         .serve_at("/org/aios/Files1",Files{agent:agent.clone()})?
         .serve_at("/org/aios/Applications1",Applications{agent:agent.clone()})?
         .serve_at("/org/aios/Settings1",Settings{agent:agent.clone()})?
+        .serve_at("/org/aios/Audio1",Audio{agent:agent.clone()})?
+        .serve_at("/org/aios/Power1",Power{agent:agent.clone()})?
         .serve_at("/org/aios/UI1",Ui{agent:agent.clone()})?
         .serve_at(PATH, agent)?.name(NAME)?.build()
 }

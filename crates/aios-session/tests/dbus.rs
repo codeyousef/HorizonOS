@@ -18,6 +18,10 @@ fn code(error: zbus::Error, expected: &str) {
     let zbus::Error::MethodError(name, _, _) = error else { panic!("unexpected error: {error}") };
     assert_eq!(name.as_str(),format!("org.aios.Error.{expected}"));
 }
+fn code_one_of(error:zbus::Error,expected:&[&str]){
+    let zbus::Error::MethodError(name,_,_)=error else{panic!("unexpected error: {error}")};
+    assert!(expected.iter().any(|value|name.as_str()==format!("org.aios.Error.{value}")));
+}
 
 #[test]
 fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
@@ -71,10 +75,12 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let own_ui=ui_xml.split("<interface name=\"org.aios.UI1\">").nth(1).unwrap().split("</interface>").next().unwrap();
     assert!(own_ui.contains("name=\"SelectSession\""));assert!(!own_ui.contains("<signal"));
     code(ui.call::<_,_,String>("SelectSession",&("aios-no-such-session",)).unwrap_err(),"TARGET_NOT_FOUND");
-    for (path, interface, methods) in [
-        ("/org/aios/Files1","org.aios.Files1",vec!["GetCapabilities","Search","Metadata","Read","Summarize","Copy","MoveFile","Trash","Restore"]),
-        ("/org/aios/Applications1","org.aios.Applications1",vec!["GetCapabilities","List","Launch","Actions","Invoke"]),
-        ("/org/aios/Settings1","org.aios.Settings1",vec!["GetCapabilities","Get","Set"]),
+    for (path, interface, methods, expected_available) in [
+        ("/org/aios/Files1","org.aios.Files1",vec!["GetCapabilities","Search","Metadata","Read","Summarize","Copy","MoveFile","Trash","Restore"],vec![]),
+        ("/org/aios/Applications1","org.aios.Applications1",vec!["GetCapabilities","List","Launch","Actions","Invoke"],vec![]),
+        ("/org/aios/Settings1","org.aios.Settings1",vec!["GetCapabilities","Get","Set"],vec![]),
+        ("/org/aios/Audio1","org.aios.Audio1",vec!["GetCapabilities","Outputs","Inputs","DefaultGet","DefaultSet","MuteSet"],vec!["audio.outputs","audio.inputs","audio.default_get"]),
+        ("/org/aios/Power1","org.aios.Power1",vec!["GetCapabilities","Status","ProfileSet"],vec!["power.status"]),
     ] {
         let introspection=Proxy::new(&conn,NAME,path,"org.freedesktop.DBus.Introspectable").unwrap();
         let xml:String=introspection.call("Introspect",&()).unwrap();
@@ -84,22 +90,26 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
         let surface=Proxy::new(&conn,NAME,path,interface).unwrap();
         let capabilities:String=surface.call("GetCapabilities",&()).unwrap();
         let capabilities:Value=serde_json::from_str(&capabilities).unwrap();
-        assert_eq!(capabilities["interface"],interface);assert!(capabilities["available_actions"].as_array().unwrap().is_empty());
-        assert!(capabilities["contracts"].as_array().unwrap().iter().all(|c|c["availability"]=="unavailable"));
+        assert_eq!(capabilities["interface"],interface);let available=capabilities["available_actions"].as_array().unwrap();
+        assert!(available.iter().all(|id|expected_available.contains(&id.as_str().unwrap())));
+        assert!(capabilities["contracts"].as_array().unwrap().iter().all(|c|c["availability"]==if available.contains(&c["action_id"]){"available"}else{"unavailable"}));
     }
     let files=Proxy::new(&conn,NAME,"/org/aios/Files1","org.aios.Files1").unwrap();
     let apps=Proxy::new(&conn,NAME,"/org/aios/Applications1","org.aios.Applications1").unwrap();
     let settings=Proxy::new(&conn,NAME,"/org/aios/Settings1","org.aios.Settings1").unwrap();
+    let audio=Proxy::new(&conn,NAME,"/org/aios/Audio1","org.aios.Audio1").unwrap();
+    let power=Proxy::new(&conn,NAME,"/org/aios/Power1","org.aios.Power1").unwrap();
     let action_request=|id:&str,args:Value|json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),
         "operation":{"kind":"invoke","tool_call":{"kind":"tool_call","action_id":id,"arguments":args}}}).to_string();
     let wrong_process_action=action_request("system.info",json!({}));
     code(api.call::<_,_,String>("ListProcesses",&(wrong_process_action.as_str(),)).unwrap_err(),"INVALID_ARGUMENT");
     let unknown_process=action_request("process.inspect",json!({"process_id":uuid::Uuid::new_v4().to_string()}));
-    // This replacement server has no installed managed process component;
-    // it must never fall back to local unsandboxed process access.
-    code(api.call::<_,_,String>("InspectProcess",&(unknown_process.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
+    // A managed process component may already be active on this real user bus.
+    // Either provider absence or denial of the unknown/unenrolled target is
+    // valid; success or fallback to local unsandboxed access is not.
+    code_one_of(api.call::<_,_,String>("InspectProcess",&(unknown_process.as_str(),)).unwrap_err(),&["UNSUPPORTED_CAPABILITY","PERMISSION_DENIED"]);
     let unsupported_process_app=action_request("process.list",json!({"app_id":"not-enrolled"}));
-    code(api.call::<_,_,String>("ListProcesses",&(unsupported_process_app.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
+    code_one_of(api.call::<_,_,String>("ListProcesses",&(unsupported_process_app.as_str(),)).unwrap_err(),&["UNSUPPORTED_CAPABILITY","PERMISSION_DENIED"]);
     let search=action_request("files.search",json!({"query":"synthetic fixture","root_handles":["not-enrolled"]}));
     code(files.call::<_,_,String>("Search",&(search.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
     let listing=action_request("apps.list",json!({}));
@@ -107,6 +117,12 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     code(files.call::<_,_,String>("Search",&(listing.as_str(),)).unwrap_err(),"INVALID_ARGUMENT");
     let get=action_request("settings.get",json!({"key":"desktop.theme_mode"}));
     code(settings.call::<_,_,String>("Get",&(get.as_str(),)).unwrap_err(),"UNSUPPORTED_CAPABILITY");
+    let outputs=action_request("audio.outputs",json!({}));
+    let outputs:String=audio.call("Outputs",&(outputs.as_str(),)).unwrap();
+    let outputs=aios_protocol::validation::validate_result("audio.outputs",outputs.as_bytes()).unwrap();
+    assert!(outputs["data"]["devices"].as_array().unwrap().iter().filter(|device|device["default"]==true).count()<=1);
+    let profile_set=action_request("power.profile_set",json!({"profile":"balanced"}));
+    code(power.call::<_,_,String>("ProfileSet",&(profile_set.as_str(),)).unwrap_err(),"AUTH_REQUIRED");
     let copy=action_request("files.copy",json!({"source_handle":"not-enrolled","destination_handle":"not-enrolled","basename":"fixture","collision_policy":"fail"}));
     code(files.call::<_,_,String>("Copy",&(copy.as_str(),)).unwrap_err(),"AUTH_REQUIRED");
     for forged in [search.replace("\"schema_version\":1","\"schema_version\":2"),

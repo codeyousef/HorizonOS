@@ -77,18 +77,26 @@ the bus instance and unique sender; another connection cannot inherit it.
 `--socket` fixtures export only the private endpoint.
 
 The same bus owner exports `org.aios.Files1`, `org.aios.Applications1`,
-`org.aios.Settings1` and `org.aios.UI1` at their corresponding `/org/aios/...`
-paths. All five interfaces share the same 16-call admission budget and caller
-authentication. Files exposes Search, Metadata, Read, Summarize, Copy,
-MoveFile, Trash and Restore; Applications exposes List, Launch, Actions and
-Invoke; Settings exposes Get and Set. Each action method takes one versioned
-control request with `operation.kind=invoke` and a strict registry `tool_call`.
-The method fixes the permitted action ID: Search accepts only `files.search`,
-for example. Callers cannot choose another dispatch namespace through its JSON.
+`org.aios.Settings1`, `org.aios.Audio1`, `org.aios.Power1` and `org.aios.UI1`
+at their corresponding `/org/aios/...` paths. The interfaces share the same
+16-call admission budget and caller authentication. Files exposes Search,
+Metadata, Read, Summarize, Copy, MoveFile, Trash and Restore; Applications
+exposes List, Launch, Actions and Invoke; Settings exposes Get and Set; Audio
+exposes Outputs, Inputs, DefaultGet, DefaultSet and MuteSet; Power exposes
+Status and ProfileSet. Each action method takes one versioned control request
+with `operation.kind=invoke` and a strict registry `tool_call`. The method fixes
+the permitted action ID: Search accepts only `files.search`, for example.
+Callers cannot choose another dispatch namespace through its JSON.
 GetCapabilities reports registered contracts separately from available actions.
-These file, application and settings providers currently report unavailable.
-Direct invocation carries no approved write plan; every write action returns
-`AUTH_REQUIRED`, even if a future provider is registered. The shared
+File, application and settings providers currently report unavailable. Audio
+inventory and defaults are available only when the pinned `wpctl status --name`
+shape can be read within fixed time and output bounds. Power status is available
+only when the authenticated session's PowerDevil profile API and system UPower
+API both answer; absent batteries and unavailable profile choices are explicit
+partial fields, never fabricated values. Audio handles derive from direction
+and the provider node name, not transient numeric node IDs. Direct invocation
+carries no approved write plan; every write action returns `AUTH_REQUIRED`,
+including Audio DefaultSet and MuteSet and Power ProfileSet. The shared
 `aios-policy` evaluator binds each available read to the authenticated caller,
 original connection, request, fixed action and concrete broker-issued resources.
 Successful reads still require the provider's current scope and resource checks.
