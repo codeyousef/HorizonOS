@@ -1,5 +1,5 @@
-//! Fixed read-only session adapters for pinned PipeWire/WirePlumber and KDE
-//! power services. Mutations remain behind approved task execution.
+//! Fixed session adapters for pinned PipeWire/WirePlumber, KDE and UPower
+//! providers. Mutations remain behind bounded task execution.
 use aios_protocol::contracts::ErrorCode;
 use serde_json::{Value,json};
 use sha2::{Digest,Sha256};
@@ -69,6 +69,31 @@ fn audio_default(direction:&str)->Result<Value,ErrorCode>{
     if !matches!(direction,"input"|"output"){return Err(ErrorCode::InvalidArgument);}let nodes=audio_nodes()?;let node=nodes.iter().find(|n|n.direction==direction&&n.default);
     envelope("pipewire-wireplumber",json!({"direction":direction,"node_id":node.map(|n|handle(direction,&n.name)),"available":node.is_some()}),true)
 }
+fn keyboard_state()->Result<(i32,i32,u64),ErrorCode>{
+    let system=system_bus()?;
+    let keyboard=zbus::blocking::Proxy::new(&system,"org.freedesktop.UPower","/org/freedesktop/UPower/KbdBacklight","org.freedesktop.UPower.KbdBacklight").map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let current:i32=keyboard.call("GetBrightness",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let maximum:i32=keyboard.call("GetMaxBrightness",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
+    if maximum<=0||current<0||current>maximum{return Err(ErrorCode::TargetChanged);}
+    let percent=((i64::from(current)*100+i64::from(maximum)/2)/i64::from(maximum)) as u64;
+    Ok((current,maximum,percent))
+}
+fn brightness_for_percent(percent:u64,maximum:i32)->Result<i32,ErrorCode>{
+    let brightness=((percent*i64::from(maximum) as u64+50)/100) as i32;
+    let represented=((i64::from(brightness)*100+i64::from(maximum)/2)/i64::from(maximum)) as u64;
+    if represented!=percent{return Err(ErrorCode::UnsupportedCapability);}Ok(brightness)
+}
+fn idle_state()->Result<(String,u64),ErrorCode>{
+    let session=session_bus()?;
+    let power=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement","org.kde.Solid.PowerManagement").map_err(|_|ErrorCode::UnsupportedCapability)?;
+    let profile:String=power.call("currentProfile",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
+    if !matches!(profile.as_str(),"AC"|"Battery"|"LowBattery"){return Err(ErrorCode::UnsupportedCapability);}
+    let file=projected_setting("powerdevilrc");
+    let value=command(KREADCONFIG,&["--file",&file,"--group",&profile,"--group","Display","--key","TurnOffDisplayIdleTimeoutSec"])?;
+    let seconds=value.trim().parse::<u64>().map_err(|_|ErrorCode::UnsupportedCapability)?;
+    if !(60..=3600).contains(&seconds){return Err(ErrorCode::UnsupportedCapability);}
+    Ok((profile,seconds))
+}
 fn setting(key:&str)->Result<Value,ErrorCode>{
     let (value,provider)=match key{
         "desktop.theme_mode"=>{
@@ -78,23 +103,12 @@ fn setting(key:&str)->Result<Value,ErrorCode>{
             (json!(mode),"kconfig-pinned")
         },
         "display.idle_seconds"=>{
-            let session=session_bus()?;
-            let power=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement","org.kde.Solid.PowerManagement").map_err(|_|ErrorCode::UnsupportedCapability)?;
-            let profile:String=power.call("currentProfile",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
-            if !matches!(profile.as_str(),"AC"|"Battery"|"LowBattery"){return Err(ErrorCode::UnsupportedCapability);}
-            let file=projected_setting("powerdevilrc");
-            let value=command(KREADCONFIG,&["--file",&file,"--group",&profile,"--group","Display","--key","TurnOffDisplayIdleTimeoutSec"])?;
-            let seconds=value.trim().parse::<u64>().map_err(|_|ErrorCode::UnsupportedCapability)?;
-            if !(60..=3600).contains(&seconds){return Err(ErrorCode::UnsupportedCapability);}
+            let (_,seconds)=idle_state()?;
             (json!(seconds),"powerdevil-kconfig-pinned")
         },
         "keyboard.backlight_percent"=>{
-            let system=system_bus()?;
-            let keyboard=zbus::blocking::Proxy::new(&system,"org.freedesktop.UPower","/org/freedesktop/UPower/KbdBacklight","org.freedesktop.UPower.KbdBacklight").map_err(|_|ErrorCode::UnsupportedCapability)?;
-            let current:i32=keyboard.call("GetBrightness",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
-            let maximum:i32=keyboard.call("GetMaxBrightness",&()).map_err(|_|ErrorCode::UnsupportedCapability)?;
-            if maximum<=0||current<0||current>maximum{return Err(ErrorCode::TargetChanged);}
-            (json!(((i64::from(current)*100+i64::from(maximum)/2)/i64::from(maximum)) as u64),"upower-kbd-backlight")
+            let (_,_,percent)=keyboard_state()?;
+            (json!(percent),"upower-kbd-backlight")
         },
         _=>return Err(ErrorCode::UnsupportedCapability),
     };
@@ -122,6 +136,8 @@ enum MutationKind{
     AudioDefault{direction:String,target:AudioNode,prior:AudioNode},
     AudioMute{target:AudioNode,muted:bool,prior:bool},
     Theme{value:String,prior:String},
+    Backlight{value:u64,prior:u64,prior_brightness:i32,maximum:i32},
+    Idle{value:u64,prior:u64,profile:String},
 }
 pub struct PreparedMutation{action_id:String,arguments:Value,operation_id:String,kind:MutationKind}
 pub struct MutationReceipt{pub output:Value,pub recovery:Value,pub changed:bool}
@@ -144,11 +160,26 @@ impl PreparedMutation{
             },
             "settings.set"=>{
                 let key=arguments.get("key").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?;
-                if key!="desktop.theme_mode"{return Err(ErrorCode::UnsupportedCapability);}
-                let value=arguments.get("value").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?;
-                if !matches!(value,"light"|"dark"){return Err(ErrorCode::InvalidArgument);}
-                let prior=setting_value(key)?.as_str().ok_or(ErrorCode::TargetChanged)?.to_owned();
-                MutationKind::Theme{value:value.into(),prior}
+                match key{
+                    "desktop.theme_mode"=>{
+                        let value=arguments.get("value").and_then(Value::as_str).ok_or(ErrorCode::InvalidArgument)?;
+                        if !matches!(value,"light"|"dark"){return Err(ErrorCode::InvalidArgument);}
+                        let prior=setting_value(key)?.as_str().ok_or(ErrorCode::TargetChanged)?.to_owned();
+                        MutationKind::Theme{value:value.into(),prior}
+                    },
+                    "keyboard.backlight_percent"=>{
+                        let value=arguments.get("value").and_then(Value::as_u64).filter(|value|*value<=100).ok_or(ErrorCode::InvalidArgument)?;
+                        let (prior_brightness,maximum,prior)=keyboard_state()?;
+                        brightness_for_percent(prior,maximum)?;brightness_for_percent(value,maximum)?;
+                        MutationKind::Backlight{value,prior,prior_brightness,maximum}
+                    },
+                    "display.idle_seconds"=>{
+                        let value=arguments.get("value").and_then(Value::as_u64).filter(|value|(60..=3600).contains(value)).ok_or(ErrorCode::InvalidArgument)?;
+                        let (profile,prior)=idle_state()?;
+                        MutationKind::Idle{value,prior,profile}
+                    },
+                    _=>return Err(ErrorCode::UnsupportedCapability),
+                }
             },
             _=>return Err(ErrorCode::UnsupportedCapability),
         };
@@ -158,7 +189,7 @@ impl PreparedMutation{
         let resource=match &self.kind{
             MutationKind::AudioDefault{target,..}|MutationKind::AudioMute{target,..}=>Some(aios_policy::Resource{
                 field:"node_id".into(),kind:"scope-owner-expiry".into(),handle:handle(target.direction,&target.name),identity_sha256:node_identity(target)}),
-            MutationKind::Theme{..}=>None,
+            MutationKind::Theme{..}|MutationKind::Backlight{..}|MutationKind::Idle{..}=>None,
         };
         aios_policy::Scope{actions:[self.action_id.clone()].into(),resources:resource.into_iter().collect(),..Default::default()}
     }
@@ -180,6 +211,7 @@ impl PreparedMutation{
                     json!({"kind":"tool_call","action_id":"audio.mute_set","arguments":{"node_id":handle(target.direction,&target.name),"muted":prior}}),changed)
             },
             MutationKind::Theme{value,prior}=>{
+                if setting_value("desktop.theme_mode")?!=json!(prior){return Err(ErrorCode::TargetChanged);}
                 let changed=value!=prior;if changed{
                     let scheme=match value.as_str(){"light"=>"BreezeLight","dark"=>"BreezeDark",_=>return Err(ErrorCode::InvalidArgument)};
                     let unit=format!("aios-setting-theme@{scheme}.service");command(SYSTEMCTL,&["--user","start","--wait",&unit])?;
@@ -189,8 +221,37 @@ impl PreparedMutation{
                 (json!({"key":"desktop.theme_mode","value":value,"ownership":"user"}),
                     json!({"kind":"tool_call","action_id":"settings.set","arguments":{"key":"desktop.theme_mode","value":prior}}),changed)
             },
+            MutationKind::Backlight{value,prior,prior_brightness,maximum}=>{
+                let (current,current_maximum,_)=keyboard_state()?;
+                if current!=*prior_brightness||current_maximum!=*maximum{return Err(ErrorCode::TargetChanged);}
+                let target=brightness_for_percent(*value,*maximum)?;let changed=current!=target;
+                if changed{
+                    let system=system_bus()?;
+                    let keyboard=zbus::blocking::Proxy::new(&system,"org.freedesktop.UPower","/org/freedesktop/UPower/KbdBacklight","org.freedesktop.UPower.KbdBacklight").map_err(|_|ErrorCode::UnsupportedCapability)?;
+                    let _:()=keyboard.call("SetBrightness",&target).map_err(|_|ErrorCode::PermissionDenied)?;
+                }
+                revalidate(&self)?;let (actual,actual_maximum,percent)=keyboard_state()?;
+                if actual!=target||actual_maximum!=*maximum||percent!=*value{return Err(ErrorCode::PartialResult);}
+                (json!({"key":"keyboard.backlight_percent","value":value,"ownership":"user"}),
+                    json!({"kind":"tool_call","action_id":"settings.set","arguments":{"key":"keyboard.backlight_percent","value":prior}}),changed)
+            },
+            MutationKind::Idle{value,prior,profile}=>{
+                let (current_profile,current)=idle_state()?;
+                if current_profile!=*profile||current!=*prior{return Err(ErrorCode::TargetChanged);}
+                let changed=value!=prior;if changed{
+                    let unit=format!("aios-setting-idle-{profile}@{value}.service");command(SYSTEMCTL,&["--user","start","--wait",&unit])?;
+                    let session=session_bus()?;
+                    let power=zbus::blocking::Proxy::new(&session,"org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement","org.kde.Solid.PowerManagement").map_err(|_|ErrorCode::UnsupportedCapability)?;
+                    let _:()=power.call("reparseConfiguration",&()).map_err(|_|ErrorCode::PartialResult)?;
+                    command(SYSTEMCTL,&["--user","start","--wait","aios-sessiond-settings-sync.service"])?;
+                }
+                revalidate(&self)?;let (actual_profile,actual)=idle_state()?;
+                if actual_profile!=*profile||actual!=*value{return Err(ErrorCode::PartialResult);}
+                (json!({"key":"display.idle_seconds","value":value,"ownership":"user"}),
+                    json!({"kind":"tool_call","action_id":"settings.set","arguments":{"key":"display.idle_seconds","value":prior}}),changed)
+            },
         };
-        let provider=if self.action_id=="settings.set"{"plasma-colorscheme"}else{"pipewire-wireplumber"};
+        let provider=match &self.kind{MutationKind::Theme{..}=>"plasma-colorscheme",MutationKind::Backlight{..}=>"upower-kbd-backlight",MutationKind::Idle{..}=>"powerdevil-kconfig-pinned",_=>"pipewire-wireplumber"};
         let result=envelope(provider,{
             let mut data=output;let map=data.as_object_mut().ok_or(ErrorCode::TargetChanged)?;
             map.insert("operation_id".into(),json!(self.operation_id));map.insert("transaction_id".into(),Value::Null);
@@ -225,4 +286,4 @@ pub fn available_actions(actions:&[String])->Vec<String>{
     }).cloned().collect()
 }
 
-#[cfg(test)]mod tests{use super::*;#[test]fn pinned_wpctl_shape_yields_stable_handles_and_missing_input(){let value="Audio\n ├─ Sinks:\n │  *   52. auto_null [vol: 1.00]\n ├─ Sources:\n │  \n ├─ Filters:\n";let nodes=parse_audio(value).unwrap();assert_eq!(nodes.len(),1);assert_eq!(nodes[0].id,52);assert!(nodes[0].default);assert_eq!(nodes[0].muted,Some(false));assert_eq!(handle("output","auto_null"),handle("output","auto_null"));}#[test]fn malformed_unbounded_or_colliding_audio_is_refused(){assert!(parse_audio("Audio\n ├─ Sinks:\n │ * x. invalid [vol: 1.00]").unwrap().is_empty());assert_eq!(parse_audio(&"x".repeat(256*1024+1)),Err(ErrorCode::ResourceExhausted));assert_eq!(parse_audio("Audio\n ├─ Sinks:\n │ 1. duplicate [vol: 1.00]\n │ 2. duplicate [vol: 1.00]"),Err(ErrorCode::TargetChanged));}}
+#[cfg(test)]mod tests{use super::*;#[test]fn pinned_wpctl_shape_yields_stable_handles_and_missing_input(){let value="Audio\n ├─ Sinks:\n │  *   52. auto_null [vol: 1.00]\n ├─ Sources:\n │  \n ├─ Filters:\n";let nodes=parse_audio(value).unwrap();assert_eq!(nodes.len(),1);assert_eq!(nodes[0].id,52);assert!(nodes[0].default);assert_eq!(nodes[0].muted,Some(false));assert_eq!(handle("output","auto_null"),handle("output","auto_null"));}#[test]fn malformed_unbounded_or_colliding_audio_is_refused(){assert!(parse_audio("Audio\n ├─ Sinks:\n │ * x. invalid [vol: 1.00]").unwrap().is_empty());assert_eq!(parse_audio(&"x".repeat(256*1024+1)),Err(ErrorCode::ResourceExhausted));assert_eq!(parse_audio("Audio\n ├─ Sinks:\n │ 1. duplicate [vol: 1.00]\n │ 2. duplicate [vol: 1.00]"),Err(ErrorCode::TargetChanged));}#[test]fn backlight_refuses_percentages_that_cannot_be_recovered_exactly(){assert_eq!(brightness_for_percent(37,100),Ok(37));assert_eq!(brightness_for_percent(100,1),Ok(1));assert_eq!(brightness_for_percent(1,1),Err(ErrorCode::UnsupportedCapability));}}

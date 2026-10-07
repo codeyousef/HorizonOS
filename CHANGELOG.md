@@ -24,6 +24,8 @@
   desktop light/dark changes with opaque grants, live target revalidation,
   provider readback and a typed prior-state recovery action; direct provider
   writes remain denied.
+- Add bounded PowerDevil display-idle and UPower keyboard-backlight task
+  actions with stale-state refusal, exact native readback and typed recovery.
 - Project only the two registered KDE settings files into the sandboxed
   session broker after late Plasma initialization or atomic configuration
   replacement.

@@ -72,6 +72,12 @@
           substituteInPlace "$out/share/systemd/user/aios-sessiond-settings-sync.service" --replace-fail @CP@ "${pkgs.coreutils}/bin/cp"
           install -Dm644 ${./nix/packages/aios-setting-theme.service} "$out/share/systemd/user/aios-setting-theme@.service"
           substituteInPlace "$out/share/systemd/user/aios-setting-theme@.service" --replace-fail @APPLY@ "${pkgs.kdePackages.plasma-workspace}/bin/plasma-apply-colorscheme"
+          for profile in AC Battery LowBattery; do
+            install -Dm644 ${./nix/packages/aios-setting-idle.service} "$out/share/systemd/user/aios-setting-idle-$profile@.service"
+            substituteInPlace "$out/share/systemd/user/aios-setting-idle-$profile@.service" \
+              --replace-fail @WRITE@ "${pkgs.kdePackages.kconfig}/bin/kwriteconfig6" \
+              --replace-fail @PROFILE@ "$profile"
+          done
           install -Dm644 ${./nix/packages/aios-ui-agent.service} "$out/share/systemd/user/aios-ui-agent.service"
           substituteInPlace "$out/share/systemd/user/aios-ui-agent.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-ui-agent"
           install -Dm644 ${./nix/packages/aios-processd.service} "$out/share/systemd/user/aios-processd.service"

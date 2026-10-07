@@ -1,0 +1,23 @@
+[Unit]
+Description=Apply one registered PowerDevil idle setting for AIOS
+
+[Service]
+Type=oneshot
+Environment=HOME=%h
+Environment=XDG_CONFIG_HOME=%h/.config
+ExecStart=@WRITE@ --file %h/.config/powerdevilrc --group @PROFILE@ --group Display --key TurnOffDisplayIdleTimeoutSec %i
+TimeoutStartSec=5s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
