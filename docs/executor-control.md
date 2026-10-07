@@ -10,9 +10,11 @@ including inherited worker threads and the x32 syscall route.
 
 System1 `Info` observes NixOS and systemd directly without executing a detector.
 `Hardware` reads a fixed, bounded CPU source plus native libudev/sysfs block-disk
-properties. It issues caller-scoped opaque device handles, redacts serial and WWN
-values to availability flags, and reports missing classes/properties as
-unsupported. `StorageStatus` reads only `/proc/self/mountinfo`, `statvfs` for
+properties and cross-checks each supported block identity/size against the fixed
+UDisks2 Block object. It issues caller-scoped opaque device handles, redacts
+serial and WWN values to availability flags, and reports missing UDisks objects,
+classes or properties as unsupported. `StorageStatus` reads only
+`/proc/self/mountinfo`, `statvfs` for
 visible mounts and the authenticated UID's native account home. It exposes fixed
 system mount paths plus caller-owned home/removable mount paths; block
 major/minor/filesystem identity is distinct from capacity and mount path. Neither
