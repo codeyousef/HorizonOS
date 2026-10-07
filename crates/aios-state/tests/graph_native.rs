@@ -35,7 +35,7 @@ fn native_service_evidence_viewer_rechecks_properties_scope_seal_and_deadline() 
     store.append_evidence(ObservationInput{id:"fixture-foreign-locator-observation".into(),provider:row.provider.clone(),entity_id:row.id,
         entity_revision:row.revision,time:captured.clone(),payload:current_view["data"].clone(),sensitivity:Sensitivity::Public},
         EvidenceInput{id:"fixture-foreign-locator".into(),scope:Scope::System,locator:SourceLocator::File{scope_handle:"fixture-file-scope".into(),
-            display_uri:"file:///etc/shadow".into(),content_hash:"a".repeat(64),range:DocumentRange::Lines{first:1,last:1}},excerpt:"fixture".into(),
+            identity_sha256:"b".repeat(64),display_uri:"file:///etc/shadow".into(),content_hash:"a".repeat(64),range:DocumentRange::Lines{first:1,last:1}},excerpt:"fixture".into(),
             authenticated_binding:"native-system-service-read".into(),access_lifetime_ns:5_000_000_000,freshness_class:aios_state::graph::FreshnessClass::Service,source_revision:SourceRevision::default()}).unwrap();
     assert!(matches!(view(&store,"fixture-foreign-locator"),Err(NativeError::Native(aios_protocol::contracts::ErrorCode::InvalidArgument))));
     let db=rusqlite::Connection::open(fixture.0.join("graph.sqlite3")).unwrap();

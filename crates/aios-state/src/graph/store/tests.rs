@@ -143,9 +143,15 @@ fn resolve(store:&GraphStore,now:crate::graph::ObservationTime,purpose:ReadPurpo
     let (mut o,mut e)=records();e.scope=Scope::User(1001);assert_eq!(store.append_evidence(o.clone(),e),Err(Error::WrongScope));
     let (_,mut e)=records();o.entity_revision=2;assert_eq!(store.append_evidence(o,e.clone()),Err(Error::IdentityChanged));
     let (mut foreign_provider,evidence)=records();foreign_provider.provider="unrelated-provider".into();assert_eq!(store.append_evidence(foreign_provider,evidence),Err(Error::IdentityChanged));
-    let (o,_)=records();e.locator=SourceLocator::File{scope_handle:"file-scope:a".into(),display_uri:"javascript:alert(1)".into(),content_hash:"a".repeat(64),range:DocumentRange::Pages{first:1,last:1}};assert_eq!(store.append_evidence(o.clone(),e.clone()),Err(Error::Invalid));
-    e.locator=SourceLocator::File{scope_handle:"file-scope:a".into(),display_uri:"file:///display-only/path".into(),content_hash:"a".repeat(64),range:DocumentRange::Pages{first:1,last:1}};
-    store.append_evidence(o,e).unwrap();let got=resolve(&store,observation_time(2),ReadPurpose::Current).unwrap();assert_eq!(got.viewer_target,ViewerTarget::ScopedFile{scope_handle:"file-scope:a".into(),content_hash:"a".repeat(64),range:DocumentRange::Pages{first:1,last:1}});
+    let identity="b".repeat(64);
+    let (o,_)=records();e.locator=SourceLocator::File{scope_handle:"file-scope:a".into(),identity_sha256:identity.clone(),display_uri:"javascript:alert(1)".into(),content_hash:"a".repeat(64),range:DocumentRange::Pages{first:1,last:1}};assert_eq!(store.append_evidence(o.clone(),e.clone()),Err(Error::Invalid));
+    e.locator=SourceLocator::File{scope_handle:"file-scope:a".into(),identity_sha256:identity.clone(),display_uri:"file:///display-only/path".into(),content_hash:"a".repeat(64),range:DocumentRange::Pages{first:1,last:1}};
+    store.append_evidence(o,e).unwrap();let got=resolve(&store,observation_time(2),ReadPurpose::Current).unwrap();assert_eq!(got.viewer_target,ViewerTarget::ScopedFile{scope_handle:"file-scope:a".into(),identity_sha256:identity.clone(),content_hash:"a".repeat(64),range:DocumentRange::Pages{first:1,last:1}});
+    let (mut o,mut e)=records();o.id="observation:ui".into();e.id="evidence:ui".into();
+    e.locator=SourceLocator::Ui{identity_sha256:identity.clone(),snapshot_handle:"snapshot:ui".into(),node_handle:"node:button".into()};
+    store.append_evidence(o,e).unwrap();
+    let ui=store.resolve_evidence("evidence:ui".into(),"origin:1.99:scope:a".into(),observation_time(2),crate::graph::SourceRevision::default(),ReadPurpose::Current).unwrap();
+    assert_eq!(ui.viewer_target,ViewerTarget::Ui{identity_sha256:identity,snapshot_handle:"snapshot:ui".into(),node_handle:"node:button".into()});
 }
 #[test] fn changed_locator_payload_or_provider_metadata_is_corrupt(){
     for mutation in ["UPDATE evidence SET excerpt='fabricated'","UPDATE observations SET payload_json='{}'","UPDATE observations SET provider='invented'","UPDATE observations SET sensitivity='public'"]{

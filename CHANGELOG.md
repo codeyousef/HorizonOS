@@ -15,6 +15,8 @@
   options with explicit access and completeness semantics.
 - Keep executor catalog/transaction fixture catalogs aligned with the complete
   reviewed managed-option schema so policy qualification exercises real plans.
+- Bind file, application and UI evidence locators to provider-issued concrete
+  identity digests; trusted viewers receive no model/display URI.
 - Enumerate bounded system and per-user profile generation history using
   separate native owners without cross-user profile leakage, while keeping
   ephemeral inventory and unattributed management provenance explicitly unknown.

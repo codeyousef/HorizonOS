@@ -26,17 +26,18 @@ impl DocumentRange {
 pub enum SourceLocator {
     Journal { boot_id:BootId,cursor:String },
     Service { unit:String,snapshot_id:String },
-    File { scope_handle:String,display_uri:String,content_hash:String,range:DocumentRange },
+    File { scope_handle:String,identity_sha256:String,display_uri:String,content_hash:String,range:DocumentRange },
     NixOption { option:String,template_revision:String },
-    Application { application_id:String,snapshot_handle:String },
-    Ui { snapshot_handle:String,node_handle:String },
+    Application { application_id:String,identity_sha256:String,snapshot_handle:String },
+    Ui { identity_sha256:String,snapshot_handle:String,node_handle:String },
 }
 #[derive(Clone,Debug,PartialEq,Eq)]
 pub enum ViewerTarget {
     Journal { boot_id:BootId,cursor:String }, Service { unit:String,snapshot_id:String },
-    ScopedFile { scope_handle:String,content_hash:String,range:DocumentRange },
+    ScopedFile { scope_handle:String,identity_sha256:String,content_hash:String,range:DocumentRange },
     NixOption { option:String,template_revision:String },
-    Application { application_id:String,snapshot_handle:String }, Ui { snapshot_handle:String,node_handle:String },
+    Application { application_id:String,identity_sha256:String,snapshot_handle:String },
+    Ui { identity_sha256:String,snapshot_handle:String,node_handle:String },
 }
 fn label(value:&str,max:usize)->bool{!value.is_empty() && value.len()<=max && !value.chars().any(char::is_control)}
 fn hash(value:&str)->bool{value.len()==64 && value.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b))}
@@ -45,21 +46,21 @@ impl SourceLocator {
     fn valid(&self)->bool{match self{
         Self::Journal{boot_id,cursor}=>boot_id.valid() && label(cursor,4096),
         Self::Service{unit,snapshot_id}=>key(unit,255) && unit.ends_with(".service") && !unit.contains('/') && key(snapshot_id,128),
-        Self::File{scope_handle,display_uri,content_hash,range}=>key(scope_handle,128) && label(display_uri,2048)
+        Self::File{scope_handle,identity_sha256,display_uri,content_hash,range}=>key(scope_handle,128) && hash(identity_sha256) && label(display_uri,2048)
             && display_uri.starts_with("file:///") && hash(content_hash) && range.valid(),
         Self::NixOption{option,template_revision}=>key(option,256) && hash(template_revision),
-        Self::Application{application_id,snapshot_handle}=>key(application_id,128) && key(snapshot_handle,128),
-        Self::Ui{snapshot_handle,node_handle}=>key(snapshot_handle,128) && key(node_handle,128),
+        Self::Application{application_id,identity_sha256,snapshot_handle}=>key(application_id,128) && hash(identity_sha256) && key(snapshot_handle,128),
+        Self::Ui{identity_sha256,snapshot_handle,node_handle}=>hash(identity_sha256) && key(snapshot_handle,128) && key(node_handle,128),
     }}
     pub fn viewer_target(&self)->ViewerTarget {match self{
         Self::Journal{boot_id,cursor}=>ViewerTarget::Journal{boot_id:boot_id.clone(),cursor:cursor.clone()},
         Self::Service{unit,snapshot_id}=>ViewerTarget::Service{unit:unit.clone(),snapshot_id:snapshot_id.clone()},
-        // The display URI never reaches the opener. A native scope handle and
-        // expected hash select the object; the viewer must revalidate both.
-        Self::File{scope_handle,content_hash,range,..}=>ViewerTarget::ScopedFile{scope_handle:scope_handle.clone(),content_hash:content_hash.clone(),range:range.clone()},
+        // Display text never reaches the opener. Trusted provider identities
+        // and scoped handles select objects; every viewer must revalidate both.
+        Self::File{scope_handle,identity_sha256,content_hash,range,..}=>ViewerTarget::ScopedFile{scope_handle:scope_handle.clone(),identity_sha256:identity_sha256.clone(),content_hash:content_hash.clone(),range:range.clone()},
         Self::NixOption{option,template_revision}=>ViewerTarget::NixOption{option:option.clone(),template_revision:template_revision.clone()},
-        Self::Application{application_id,snapshot_handle}=>ViewerTarget::Application{application_id:application_id.clone(),snapshot_handle:snapshot_handle.clone()},
-        Self::Ui{snapshot_handle,node_handle}=>ViewerTarget::Ui{snapshot_handle:snapshot_handle.clone(),node_handle:node_handle.clone()},
+        Self::Application{application_id,identity_sha256,snapshot_handle}=>ViewerTarget::Application{application_id:application_id.clone(),identity_sha256:identity_sha256.clone(),snapshot_handle:snapshot_handle.clone()},
+        Self::Ui{identity_sha256,snapshot_handle,node_handle}=>ViewerTarget::Ui{identity_sha256:identity_sha256.clone(),snapshot_handle:snapshot_handle.clone(),node_handle:node_handle.clone()},
     }}
 }
 #[derive(Clone,Debug)]
