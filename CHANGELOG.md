@@ -29,6 +29,8 @@
 - Admit the fixed argument shapes for every registered R0 native audio and
   power read through the direct-read grant instead of rejecting them at policy
   revalidation.
+- Emit a schema-valid `PARTIAL_RESULT` error object with incomplete native
+  observations instead of discarding truthful power data during validation.
 - Project only the two registered KDE settings files into the sandboxed
   session broker after late Plasma initialization or atomic configuration
   replacement.

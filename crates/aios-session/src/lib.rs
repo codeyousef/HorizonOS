@@ -900,7 +900,7 @@ mod tests {
     }
     #[test]
     fn direct_native_reads_admit_only_registered_argument_shapes() {
-        let resources=ReadResources::default();
+        let resources=ReadResources::default();let peer=peer_fixture();let mut state=State::default();
         for (id,args) in [
             ("audio.outputs",json!({})),("audio.inputs",json!({})),("power.status",json!({})),
             ("audio.default_get",json!({"direction":"output"})),
@@ -908,6 +908,8 @@ mod tests {
         ]{
             let scope=aios_policy::Scope{actions:[id.to_owned()].into(),..Default::default()};
             assert_eq!(aios_policy::CurrentResources::dynamic_arguments(&resources,id,&args,&scope),Ok(()));
+            let action=parse_tool_call(json!({"kind":"tool_call","action_id":id,"arguments":args}).to_string().as_bytes()).unwrap();
+            assert_eq!(state.check_direct_read(&peer,&action,ReadResources::default()),Ok(()),"{id}");
         }
         let scope=aios_policy::Scope{actions:["power.status".into()].into(),..Default::default()};
         assert_eq!(aios_policy::CurrentResources::dynamic_arguments(&resources,"power.status",&json!({"claimed":true}),&scope),Err(ErrorCode::UnsupportedCapability));
