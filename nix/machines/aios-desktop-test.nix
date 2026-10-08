@@ -89,7 +89,7 @@ in {
       PrivateNetwork = true;
       PrivateTmp = false;
       ProtectSystem = "strict";
-      ProtectHome = true;
+      ProtectHome = "read-only";
       ProtectKernelTunables = true;
       ProtectKernelModules = true;
       ProtectKernelLogs = true;

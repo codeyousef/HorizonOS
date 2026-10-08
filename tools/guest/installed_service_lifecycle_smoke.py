@@ -53,6 +53,15 @@ def main():
         expected = {"sshd.service", "NetworkManager.service", "display-manager.service"}
         if set(report.get("infrastructure_before", {})) != expected or set(report.get("infrastructure_after", {})) != expected:
             raise RuntimeError("login, management or network availability evidence is incomplete")
+        access = report.get("access_plan", {})
+        if set(access.get("accounts", {})) != {"aios-state"}:
+            raise RuntimeError("service-account access evidence is incomplete")
+        if len(access.get("unit_policies", [])) != 5 or len(access.get("private_paths", [])) != 9:
+            raise RuntimeError("unit or private-path access evidence is incomplete")
+        if set(access.get("documented_exceptions", {})) != {
+            "aios-state.service", "aios-execd.service", "aios-processd.service", "aios-ui-agent.service"
+        }:
+            raise RuntimeError("documented service exceptions are incomplete")
         print("AIOS_INSTALLED_SERVICE_LIFECYCLE " + json.dumps(report, sort_keys=True), flush=True)
     finally:
         try:

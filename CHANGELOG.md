@@ -6,8 +6,9 @@
   defaults, cross-option assertions, generated documentation coverage, and
   explicit model-independent desktop-image composition.
 - Add disposable-image service lifecycle qualification covering fixed system and
-  user unit restarts, model-disabled operation, logout cleanup, and independent
-  SSH, network, and display availability.
+  user unit restarts, effective systemd isolation, private socket/storage access
+  plans, model-disabled operation, logout cleanup, and independent SSH, network,
+  and display availability.
 - Ship standalone `ask` and `aiosctl ask --mode read-only` clients with human
   answer/citation output, optional typed JSON, and no shell-generation path.
 - Add human-readable `aiosctl inspect service` output while retaining complete

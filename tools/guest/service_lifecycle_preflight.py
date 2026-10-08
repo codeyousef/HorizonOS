@@ -63,6 +63,103 @@ def properties(expected, unit, user=None):
     return dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
 
 
+def policy(expected, unit, required, user=None):
+    names = ["LoadState", *required]
+    result = command(expected, [*systemctl(user), "show", unit, *[f"--property={name}" for name in names]])
+    values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    if values.get("LoadState") != "loaded":
+        raise RuntimeError(f"unit is not loaded: {unit}: {values}")
+    unordered = {"RestrictAddressFamilies"}
+    mismatches = {name: {"expected": value, "actual": values.get(name)}
+                  for name, value in required.items()
+                  if (set(values.get(name, "").split()) != set(value.split())
+                      if name in unordered else values.get(name) != value)}
+    if mismatches:
+        raise RuntimeError(f"unit access policy mismatch: {unit}: {mismatches}")
+    return {"unit": unit, "scope": "user" if user else "system", "properties": values}
+
+
+def private_path(path, expected_uid, expected_gid, expected_mode, expected_kind):
+    item = Path(path)
+    value = item.lstat()
+    kinds = {
+        "directory": stat.S_ISDIR,
+        "socket": stat.S_ISSOCK,
+    }
+    if (not kinds[expected_kind](value.st_mode) or value.st_uid != expected_uid
+            or value.st_gid != expected_gid or stat.S_IMODE(value.st_mode) != expected_mode):
+        raise RuntimeError(
+            f"private path access mismatch: {path}: "
+            f"uid={value.st_uid} gid={value.st_gid} mode={oct(stat.S_IMODE(value.st_mode))}"
+        )
+    if item.resolve() != item:
+        raise RuntimeError(f"private path is not canonical: {path}")
+    return {
+        "path": path,
+        "kind": expected_kind,
+        "uid": value.st_uid,
+        "gid": value.st_gid,
+        "mode": oct(expected_mode),
+    }
+
+
+def access_plan(expected):
+    state = pwd.getpwnam("aios-state")
+    tester = pwd.getpwnam("tester")
+    if state.pw_uid == 0 or state.pw_gid == 0 or state.pw_dir != "/var/empty":
+        raise RuntimeError("graph owner is not an isolated service account")
+    policies = [
+        policy(expected, "aios-state.service", {
+            "User": "aios-state", "Group": "aios-state", "NoNewPrivileges": "yes",
+            "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateDevices": "yes",
+            "PrivateNetwork": "no", "RestrictAddressFamilies": "AF_UNIX AF_NETLINK",
+            "RestrictNamespaces": "yes", "MemoryDenyWriteExecute": "yes",
+        }),
+        policy(expected, "aios-execd.service", {
+            "User": "root", "Group": "root", "NoNewPrivileges": "yes",
+            "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateNetwork": "yes",
+            "RestrictAddressFamilies": "AF_UNIX", "RestrictNamespaces": "yes",
+            "MemoryDenyWriteExecute": "yes",
+        }),
+        policy(expected, "aios-sessiond.service", {
+            "NoNewPrivileges": "yes", "ProtectSystem": "strict", "ProtectHome": "tmpfs",
+            "PrivateDevices": "yes", "PrivateNetwork": "yes",
+            "RestrictAddressFamilies": "AF_UNIX", "RestrictNamespaces": "yes",
+            "MemoryDenyWriteExecute": "yes",
+        }, "tester"),
+        policy(expected, "aios-processd.service", {
+            "NoNewPrivileges": "yes", "RestrictAddressFamilies": "AF_UNIX",
+            "RestrictNamespaces": "yes", "MemoryDenyWriteExecute": "yes",
+        }, "tester"),
+        policy(expected, "aios-ui-agent.service", {
+            "NoNewPrivileges": "yes", "RestrictAddressFamilies": "AF_UNIX",
+            "RestrictNamespaces": "yes", "MemoryDenyWriteExecute": "yes",
+        }, "tester"),
+    ]
+    paths = [
+        private_path("/run/aios-state", state.pw_uid, state.pw_gid, 0o700, "directory"),
+        private_path("/run/aios-state/owner.sock", state.pw_uid, state.pw_gid, 0o600, "socket"),
+        private_path("/var/lib/aios/state", state.pw_uid, state.pw_gid, 0o700, "directory"),
+        private_path(f"/run/user/{tester.pw_uid}/aios", tester.pw_uid, tester.pw_gid, 0o700, "directory"),
+        private_path(f"/run/user/{tester.pw_uid}/aios/session.sock", tester.pw_uid, tester.pw_gid, 0o600, "socket"),
+        private_path(f"/run/user/{tester.pw_uid}/aios-process", tester.pw_uid, tester.pw_gid, 0o700, "directory"),
+        private_path(f"/run/user/{tester.pw_uid}/aios-process/provider.sock", tester.pw_uid, tester.pw_gid, 0o600, "socket"),
+        private_path(f"/run/user/{tester.pw_uid}/aios-ui", tester.pw_uid, tester.pw_gid, 0o700, "directory"),
+        private_path(f"/run/user/{tester.pw_uid}/aios-ui/provider.sock", tester.pw_uid, tester.pw_gid, 0o600, "socket"),
+    ]
+    return {
+        "accounts": {"aios-state": {"uid": state.pw_uid, "gid": state.pw_gid, "home": state.pw_dir}},
+        "unit_policies": policies,
+        "private_paths": paths,
+        "documented_exceptions": {
+            "aios-state.service": "Host network namespace only for fixed read-only udev netlink subscription; IP address families denied.",
+            "aios-execd.service": "Root broker has only fixed typed transaction routes and two bounded capabilities; writes are limited by ReadWritePaths.",
+            "aios-processd.service": "Original user namespace required for native peer process identity; fixed own-user process route only.",
+            "aios-ui-agent.service": "Original user namespace required for native desktop process identity; fixed graphical routes only.",
+        },
+    }
+
+
 def restart(expected, unit, user=None):
     before = properties(expected, unit, user)
     if before["ActiveState"] != "active" or not before["MainPID"].isdigit() or int(before["MainPID"]) <= 1:
@@ -120,6 +217,7 @@ def main():
     for unit in ("aios-sessiond.service", "aios-processd.service", "aios-ui-agent.service"):
         user_restarts.append(restart(expected, unit, "tester"))
         infrastructure(expected)
+    access = access_plan(expected)
     command(expected, [SYSTEMCTL, "stop", "display-manager.service"])
     logged_out = False
     try:
@@ -144,6 +242,7 @@ def main():
         "identity": expected,
         "system_restarts": system_restarts,
         "user_restarts": user_restarts,
+        "access_plan": access,
         "model_active": False,
         "tester_runtime_removed": logged_out,
         "infrastructure_before": infrastructure_before,
