@@ -9,6 +9,10 @@
   user unit restarts, effective systemd isolation, private socket/storage access
   plans, model-disabled operation, logout cleanup, and independent SSH, network,
   and display availability.
+- Add an isolated `aios-observer` account and hardened `aios-observer.service`
+  that maintains a private, process-bound status record for fixed systemd and
+  udev subscriptions while exposing neither event payloads nor mutation/network
+  authority.
 - Ship standalone `ask` and `aiosctl ask --mode read-only` clients with human
   answer/citation output, optional typed JSON, and no shell-generation path.
 - Add human-readable `aiosctl inspect service` output while retaining complete

@@ -73,7 +73,7 @@ in {
   };
   systemd.services.aios-service-lifecycle-test = {
     description = "Disposable Horizon OS service lifecycle qualification";
-    after = [ "graphical.target" "aios-state.service" "aios-execd.service" ];
+    after = [ "graphical.target" "aios-state.service" "aios-observer.service" "aios-execd.service" ];
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${lifecycle}/bin/aios-service-lifecycle-preflight";

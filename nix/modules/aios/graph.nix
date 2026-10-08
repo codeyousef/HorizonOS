@@ -21,7 +21,9 @@ in {
   config = lib.mkIf cfg.enable {
     assertions = [ { assertion = aiosState != null; message = "Native graph ownership requires the packaged aios-state binaries."; } ];
     users.groups.aios-state = {};
+    users.groups.aios-observer = {};
     users.users.aios-state = { isSystemUser = true; group = "aios-state"; home = "/var/empty"; };
+    users.users.aios-observer = { isSystemUser = true; group = "aios-observer"; home = "/var/empty"; };
     environment.systemPackages = lib.optional (aiosState != null) aiosState;
     systemd.services.aios-state = {
       description = "Horizon OS private native system graph";
@@ -33,6 +35,21 @@ in {
         # Kernel uevents are delivered only in the host network namespace.
         # Keep IP sockets impossible while admitting the fixed libudev netlink
         # subscription used for read-only block-device invalidation.
+        PrivateNetwork = false;
+        RestrictAddressFamilies = [ "AF_UNIX" "AF_NETLINK" ];
+        Restart = "on-failure"; RestartSec = 2;
+      };
+    };
+    systemd.services.aios-observer = {
+      description = "Horizon OS filtered native event observer";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "dbus.service" "systemd-udevd.service" ];
+      serviceConfig = common // {
+        User = "aios-observer"; Group = "aios-observer";
+        Type = "exec"; ExecStart = "${aiosState}/bin/aios-observerd";
+        RuntimeDirectory = "aios-observer"; RuntimeDirectoryMode = "0700";
+        # Native udev invalidation requires the host network namespace. IP
+        # sockets remain impossible, and the daemon emits counters only.
         PrivateNetwork = false;
         RestrictAddressFamilies = [ "AF_UNIX" "AF_NETLINK" ];
         Restart = "on-failure"; RestartSec = 2;

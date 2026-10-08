@@ -24,3 +24,7 @@ path = "src/state_main.rs"
 [[bin]]
 name = "aios-user-stated"
 path = "src/user_state_main.rs"
+
+[[bin]]
+name = "aios-observerd"
+path = "src/observer_main.rs"

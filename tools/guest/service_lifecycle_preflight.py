@@ -84,6 +84,7 @@ def private_path(path, expected_uid, expected_gid, expected_mode, expected_kind)
     value = item.lstat()
     kinds = {
         "directory": stat.S_ISDIR,
+        "file": stat.S_ISREG,
         "socket": stat.S_ISSOCK,
     }
     if (not kinds[expected_kind](value.st_mode) or value.st_uid != expected_uid
@@ -105,12 +106,28 @@ def private_path(path, expected_uid, expected_gid, expected_mode, expected_kind)
 
 def access_plan(expected):
     state = pwd.getpwnam("aios-state")
+    observer = pwd.getpwnam("aios-observer")
     tester = pwd.getpwnam("tester")
     if state.pw_uid == 0 or state.pw_gid == 0 or state.pw_dir != "/var/empty":
         raise RuntimeError("graph owner is not an isolated service account")
+    if observer.pw_uid == 0 or observer.pw_gid == 0 or observer.pw_dir != "/var/empty":
+        raise RuntimeError("observer is not an isolated service account")
+    settled_services = {}
+    for unit in ("aios-state.service", "aios-observer.service", "aios-execd.service"):
+        current, elapsed_ms = settled(expected, unit)
+        settled_services[unit] = {"properties": current, "settled_ms": elapsed_ms}
+    for unit in ("aios-sessiond.service", "aios-processd.service", "aios-ui-agent.service"):
+        current, elapsed_ms = settled(expected, unit, "tester")
+        settled_services[unit] = {"properties": current, "settled_ms": elapsed_ms}
     policies = [
         policy(expected, "aios-state.service", {
             "User": "aios-state", "Group": "aios-state", "NoNewPrivileges": "yes",
+            "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateDevices": "yes",
+            "PrivateNetwork": "no", "RestrictAddressFamilies": "AF_UNIX AF_NETLINK",
+            "RestrictNamespaces": "yes", "MemoryDenyWriteExecute": "yes",
+        }),
+        policy(expected, "aios-observer.service", {
+            "User": "aios-observer", "Group": "aios-observer", "NoNewPrivileges": "yes",
             "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateDevices": "yes",
             "PrivateNetwork": "no", "RestrictAddressFamilies": "AF_UNIX AF_NETLINK",
             "RestrictNamespaces": "yes", "MemoryDenyWriteExecute": "yes",
@@ -140,6 +157,8 @@ def access_plan(expected):
         private_path("/run/aios-state", state.pw_uid, state.pw_gid, 0o700, "directory"),
         private_path("/run/aios-state/owner.sock", state.pw_uid, state.pw_gid, 0o600, "socket"),
         private_path("/var/lib/aios/state", state.pw_uid, state.pw_gid, 0o700, "directory"),
+        private_path("/run/aios-observer", observer.pw_uid, observer.pw_gid, 0o700, "directory"),
+        private_path("/run/aios-observer/status.json", observer.pw_uid, observer.pw_gid, 0o600, "file"),
         private_path(f"/run/user/{tester.pw_uid}/aios", tester.pw_uid, tester.pw_gid, 0o700, "directory"),
         private_path(f"/run/user/{tester.pw_uid}/aios/session.sock", tester.pw_uid, tester.pw_gid, 0o600, "socket"),
         private_path(f"/run/user/{tester.pw_uid}/aios-process", tester.pw_uid, tester.pw_gid, 0o700, "directory"),
@@ -147,12 +166,35 @@ def access_plan(expected):
         private_path(f"/run/user/{tester.pw_uid}/aios-ui", tester.pw_uid, tester.pw_gid, 0o700, "directory"),
         private_path(f"/run/user/{tester.pw_uid}/aios-ui/provider.sock", tester.pw_uid, tester.pw_gid, 0o600, "socket"),
     ]
+    expected_observer = {
+        "schema_version": 1,
+        "pid": int(settled_services["aios-observer.service"]["properties"]["MainPID"]),
+        "systemd_subscription": True,
+        "device_subscription": True,
+        "mutation_authority": False,
+        "network_egress": False,
+    }
+    observer_status = {}
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        observer_status = json.loads(Path("/run/aios-observer/status.json").read_text())
+        if all(observer_status.get(name) == value for name, value in expected_observer.items()):
+            break
+        time.sleep(0.1)
+    else:
+        raise RuntimeError(f"observer did not recover bounded native subscriptions: {observer_status}")
     return {
-        "accounts": {"aios-state": {"uid": state.pw_uid, "gid": state.pw_gid, "home": state.pw_dir}},
+        "accounts": {
+            "aios-state": {"uid": state.pw_uid, "gid": state.pw_gid, "home": state.pw_dir},
+            "aios-observer": {"uid": observer.pw_uid, "gid": observer.pw_gid, "home": observer.pw_dir},
+        },
         "unit_policies": policies,
         "private_paths": paths,
+        "observer_status": observer_status,
+        "settled_services": settled_services,
         "documented_exceptions": {
             "aios-state.service": "Host network namespace only for fixed read-only udev netlink subscription; IP address families denied.",
+            "aios-observer.service": "Host network namespace only for fixed read-only udev netlink subscription; IP address families denied.",
             "aios-execd.service": "Root broker has only fixed typed transaction routes and two bounded capabilities; writes are limited by ReadWritePaths.",
             "aios-processd.service": "Original user namespace required for native peer process identity; fixed own-user process route only.",
             "aios-ui-agent.service": "Original user namespace required for native desktop process identity; fixed graphical routes only.",
@@ -160,17 +202,38 @@ def access_plan(expected):
     }
 
 
+def settled(expected, unit, user=None):
+    started = time.monotonic()
+    deadline = started + 15
+    last = {}
+    while time.monotonic() < deadline:
+        current = properties(expected, unit, user)
+        last = current
+        if (current["ActiveState"] == "active" and current["MainPID"].isdigit()
+                and int(current["MainPID"]) > 1):
+            time.sleep(0.5)
+            stable = properties(expected, unit, user)
+            if (stable["ActiveState"] == "active"
+                    and stable["MainPID"] == current["MainPID"]
+                    and stable["InvocationID"] == current["InvocationID"]):
+                return stable, round((time.monotonic() - started) * 1000)
+        time.sleep(0.1)
+    raise RuntimeError(f"unit did not reach a stable active state: {unit}: {last}")
+
+
 def restart(expected, unit, user=None):
-    before = properties(expected, unit, user)
-    if before["ActiveState"] != "active" or not before["MainPID"].isdigit() or int(before["MainPID"]) <= 1:
-        raise RuntimeError(f"unit was not active before restart: {unit}: {before}")
+    before, before_settled_ms = settled(expected, unit, user)
     command(expected, [*systemctl(user), "restart", unit])
-    after = properties(expected, unit, user)
-    if after["ActiveState"] != "active" or not after["MainPID"].isdigit() or int(after["MainPID"]) <= 1:
-        raise RuntimeError(f"unit failed to restart: {unit}: {after}")
+    after, after_settled_ms = settled(expected, unit, user)
     if before["InvocationID"] == after["InvocationID"] or before["MainPID"] == after["MainPID"]:
         raise RuntimeError(f"unit identity did not change: {unit}")
-    return {"unit": unit, "before": before, "after": after}
+    return {
+        "unit": unit,
+        "before": before,
+        "after": after,
+        "before_settled_ms": before_settled_ms,
+        "after_settled_ms": after_settled_ms,
+    }
 
 
 def infrastructure(expected):
@@ -207,7 +270,7 @@ def main():
     system_restarts = []
     user_restarts = []
     infrastructure_before = infrastructure(expected)
-    for unit in ("aios-state.service", "aios-execd.service"):
+    for unit in ("aios-state.service", "aios-observer.service", "aios-execd.service"):
         system_restarts.append(restart(expected, unit))
         infrastructure(expected)
     model = command(expected, [SYSTEMCTL, "show", "aios-model.service", "--property=LoadState", "--property=ActiveState"], check=False)

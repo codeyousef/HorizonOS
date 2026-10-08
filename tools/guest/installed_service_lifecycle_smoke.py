@@ -46,7 +46,9 @@ def main():
                                              "report": report_identity}, sort_keys=True))
         if report.get("model_active") is not False or report.get("tester_runtime_removed") is not True:
             raise RuntimeError("model-independent or logout lifecycle invariant failed")
-        if [item.get("unit") for item in report.get("system_restarts", [])] != ["aios-state.service", "aios-execd.service"]:
+        if [item.get("unit") for item in report.get("system_restarts", [])] != [
+            "aios-state.service", "aios-observer.service", "aios-execd.service"
+        ]:
             raise RuntimeError("system AI service restart coverage is incomplete")
         if [item.get("unit") for item in report.get("user_restarts", [])] != ["aios-sessiond.service", "aios-processd.service", "aios-ui-agent.service"]:
             raise RuntimeError("user AI service restart coverage is incomplete")
@@ -54,12 +56,25 @@ def main():
         if set(report.get("infrastructure_before", {})) != expected or set(report.get("infrastructure_after", {})) != expected:
             raise RuntimeError("login, management or network availability evidence is incomplete")
         access = report.get("access_plan", {})
-        if set(access.get("accounts", {})) != {"aios-state"}:
+        if set(access.get("accounts", {})) != {"aios-state", "aios-observer"}:
             raise RuntimeError("service-account access evidence is incomplete")
-        if len(access.get("unit_policies", [])) != 5 or len(access.get("private_paths", [])) != 9:
+        if len(access.get("unit_policies", [])) != 6 or len(access.get("private_paths", [])) != 11:
             raise RuntimeError("unit or private-path access evidence is incomplete")
+        expected_ai_units = {
+            "aios-state.service", "aios-observer.service", "aios-execd.service",
+            "aios-sessiond.service", "aios-processd.service", "aios-ui-agent.service",
+        }
+        if set(access.get("settled_services", {})) != expected_ai_units:
+            raise RuntimeError("stable service evidence is incomplete")
+        observer = access.get("observer_status", {})
+        if (observer.get("systemd_subscription") is not True
+                or observer.get("device_subscription") is not True
+                or observer.get("mutation_authority") is not False
+                or observer.get("network_egress") is not False):
+            raise RuntimeError("native observer evidence is incomplete")
         if set(access.get("documented_exceptions", {})) != {
-            "aios-state.service", "aios-execd.service", "aios-processd.service", "aios-ui-agent.service"
+            "aios-state.service", "aios-observer.service", "aios-execd.service",
+            "aios-processd.service", "aios-ui-agent.service"
         }:
             raise RuntimeError("documented service exceptions are incomplete")
         print("AIOS_INSTALLED_SERVICE_LIFECYCLE " + json.dumps(report, sort_keys=True), flush=True)
