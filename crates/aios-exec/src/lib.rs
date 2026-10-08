@@ -1,6 +1,7 @@
 //! Deterministic broker preparation. No model shell, arbitrary Nix, or activation.
 pub mod approval;
 pub mod baseline;
+pub mod build_worker;
 pub mod bus;
 pub mod caller;
 pub mod candidate;

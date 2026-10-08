@@ -19,7 +19,7 @@ import snapshot as source
 
 PACKAGES = ("aios-consent-ui", "aios-core", "aios-model", "aios-desktop", "aios-cli", "aios-dev-tools")
 KINDS = {"resolve-lock", "build-packages", "build-system", "build-desktop-test", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "installed-session-inference-smoke", "consent-ui-smoke", "accessibility-smoke", "ui-provider-smoke", "model-compatibility-smoke", "upstream-compatibility-smoke", "host-boundary-smoke", "protocol-conformance-smoke", "model-profile-low-smoke", "model-profile-high-smoke", "model-inference-smoke", "model-service-smoke", "session-inference-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "installed-model-smoke", "installed-model-idle-smoke", "installed-model-lifecycle-smoke", "supervision-probe"}
-KINDS.add("installed-service-lifecycle-smoke")
+KINDS.update({"installed-service-lifecycle-smoke", "installed-builder-smoke"})
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 LIMIT = 4 * 1024**2
 cancelled = False
@@ -161,6 +161,8 @@ def commands(kind, release, package=None, job_directory=None):
         return [["python3", str(release / "tools/guest/installed_model_lifecycle_smoke.py")]]
     if kind == "installed-service-lifecycle-smoke":
         return [["python3", str(release / "tools/guest/installed_service_lifecycle_smoke.py")]]
+    if kind == "installed-builder-smoke":
+        return [["python3", str(release / "tools/guest/installed_builder_smoke.py")]]
     if kind == "installed-model-idle-smoke":
         return [["python3", str(release / "tools/guest/installed_model_idle.py")]]
     if kind == "installed-model-smoke":
@@ -203,7 +205,7 @@ def validate_start(request):
     return release, manifest
 
 
-def invoke(arguments, cwd, environment, timeout=1800):
+def invoke(arguments, cwd, environment, timeout=1380):
     global cancelled
     out, err = bytearray(), bytearray()
     child = subprocess.Popen(arguments, cwd=cwd, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)

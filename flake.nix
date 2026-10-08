@@ -39,7 +39,7 @@
       templateInputs = import ./nix/state/template-inputs.nix { root = ./.; };
       stateContract = import ./nix/state/catalog.nix {
         inherit pkgs;
-        nixpkgsRevision = nixpkgs.rev;
+        nixpkgsRevision = nixpkgs.rev or (builtins.fromJSON (builtins.readFile ./flake.lock)).nodes.nixpkgs.locked.rev;
         lockSha256 = builtins.hashFile "sha256" ./flake.lock;
         baseTemplateRevision = builtins.hashString "sha256" (builtins.toJSON templateInputs.files);
       };
@@ -90,6 +90,9 @@
       });
       executor = (productPackage "aios-exec" "aios-exec" "aios-execd").overrideAttrs (old: {
         AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";
+        AIOS_NIX = "${pkgs.nix}/bin/nix";
+        AIOS_NIX_STORE = "${pkgs.nix}/bin/nix-store";
+        AIOS_NIXPKGS = "${pkgs.path}";
         nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
         buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
         postInstall = (old.postInstall or "") + ''
@@ -98,6 +101,8 @@
           install -Dm644 ${./crates/aios-exec/policy/org.aios.Executor1.conf} "$out/share/dbus-1/system.d/org.aios.Executor1.conf"
           install -Dm644 ${./nix/packages/aios-execd.service} "$out/lib/systemd/system/aios-execd.service"
           substituteInPlace "$out/lib/systemd/system/aios-execd.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-execd"
+          install -Dm644 ${./nix/packages/aios-build.service} "$out/lib/systemd/system/aios-build.service"
+          substituteInPlace "$out/lib/systemd/system/aios-build.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-buildd"
         '';
       });
       model = (productPackage "aios-model" "aios-model" "aios-modeld").overrideAttrs (old: {
@@ -121,12 +126,12 @@
       };
       nixosConfigurations.aios-desktop-test = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosState = state; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
+        specialArgs = { aiosBaseSystem = self.nixosConfigurations.aios-dev.config.system.build.toplevel; aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosState = state; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ./nix/machines/aios-desktop-test.nix ];
       };
       nixosConfigurations.aios-model-test = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosState = state; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
+        specialArgs = { aiosBaseSystem = self.nixosConfigurations.aios-dev.config.system.build.toplevel; aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosState = state; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ./nix/machines/aios-desktop-test.nix ./nix/machines/aios-model-test.nix ];
       };
       nixosModules.default = import ./nix/modules/aios;

@@ -19,6 +19,7 @@ const MANIFEST: &str = "candidate.json";
 const MAX_FILES: usize = 4096;
 const MAX_FILE: u64 = 16 * 1024 * 1024;
 const MAX_TOTAL: u64 = 64 * 1024 * 1024;
+const MAX_MANIFEST: u64 = 1024 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FileEntry {
@@ -547,6 +548,56 @@ impl CandidateStore {
             &candidate.digest,
             self.owner,
         )
+    }
+    pub(crate) fn registered(candidate_sha256: &str) -> Result<Candidate> {
+        if !digest(candidate_sha256) {
+            return Err(Error::Invalid);
+        }
+        let store = Self::load(Path::new("/var/lib/aios/candidates"), 0, true)?;
+        store.verify_anchor()?;
+        let directory = child(&store.root, candidate_sha256, true)?;
+        owned(&directory, 0, Some(0o555), true)?;
+        let file = child(&directory, MANIFEST, false)?;
+        owned(&file, 0, Some(0o444), false)?;
+        let before = file.metadata()?;
+        if before.len() == 0 || before.len() > MAX_MANIFEST || before.nlink() != 1 {
+            return Err(Error::Integrity);
+        }
+        let mut bytes = Vec::with_capacity(before.len() as usize);
+        (&file).take(MAX_MANIFEST + 1).read_to_end(&mut bytes)?;
+        let after = file.metadata()?;
+        if bytes.len() as u64 != before.len()
+            || (
+                before.dev(),
+                before.ino(),
+                before.len(),
+                before.mtime(),
+                before.mtime_nsec(),
+                before.ctime(),
+                before.ctime_nsec(),
+            ) != (
+                after.dev(),
+                after.ino(),
+                after.len(),
+                after.mtime(),
+                after.mtime_nsec(),
+                after.ctime(),
+                after.ctime_nsec(),
+            )
+        {
+            return Err(Error::Integrity);
+        }
+        let manifest: CandidateManifest = serde_json::from_slice(&bytes)?;
+        if canonical(&manifest)? != bytes || sha256(&bytes) != candidate_sha256 {
+            return Err(Error::Integrity);
+        }
+        let candidate = Candidate {
+            manifest,
+            digest: candidate_sha256.into(),
+            path: Path::new("/var/lib/aios/candidates").join(candidate_sha256),
+        };
+        store.verify(&candidate)?;
+        Ok(candidate)
     }
 }
 fn write(root: &File, name: &str, bytes: &[u8], mode: u32, owner: u32) -> Result<()> {

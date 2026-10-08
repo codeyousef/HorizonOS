@@ -31,13 +31,15 @@
       message = "Production excludes disposable test scenario profiles."; }
     { assertion = builtins.all (name: !(builtins.hasAttr name config.systemd.services)) [
         "aios-storage-full-fixture" "aios-removable-device-fixture"
-        "aios-service-lifecycle-test" "aios-graph-denied-probe"
-        "aios-graph-acceptance" "aios-service-failure-fixture"
-        "aios-service-restart-fixture" "aios-model-acceptance"
+        "aios-service-lifecycle-test" "aios-builder-qualification"
+        "aios-graph-denied-probe" "aios-graph-acceptance"
+        "aios-service-failure-fixture" "aios-service-restart-fixture"
+        "aios-model-acceptance"
       ];
       message = "Production excludes fixed acceptance fixture services."; }
-    { assertion = !(builtins.hasAttr "aios-service-lifecycle-test" config.systemd.paths)
-        && !(builtins.hasAttr "aios-removable-device-fixture" config.systemd.timers);
+    { assertion = builtins.all (name: !(builtins.hasAttr name config.systemd.paths)) [
+        "aios-service-lifecycle-test" "aios-builder-qualification"
+      ] && !(builtins.hasAttr "aios-removable-device-fixture" config.systemd.timers);
       message = "Production excludes fixed acceptance fixture activation units."; }
   ];
   nix.settings.trusted-users = lib.mkDefault [ "root" ];

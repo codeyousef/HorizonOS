@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import pwd
 import stat
+import struct
+import uuid
 import subprocess
 import socket
 import time
@@ -104,16 +106,65 @@ def private_path(path, expected_uid, expected_gid, expected_mode, expected_kind)
     }
 
 
+def build_status(expected):
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(3)
+    client.connect("/run/aios-build/worker.sock")
+    peer_pid, peer_uid, peer_gid = struct.unpack(
+        "3i",
+        client.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")),
+    )
+    request = json.dumps({
+        "operation": "status",
+        "schema_version": 1,
+        "request_id": str(uuid.uuid4()),
+    }, sort_keys=True, separators=(",", ":")).encode()
+    client.sendall(len(request).to_bytes(4, "big") + request)
+    size = int.from_bytes(client.recv(4), "big")
+    if size <= 0 or size > 65536:
+        raise RuntimeError("candidate builder status frame is invalid")
+    chunks = bytearray()
+    while len(chunks) < size:
+        chunk = client.recv(size - len(chunks))
+        if not chunk:
+            raise RuntimeError("candidate builder closed its status response")
+        chunks.extend(chunk)
+    response = json.loads(chunks)
+    client.close()
+    if response.get("ok") is not True:
+        raise RuntimeError(f"candidate builder rejected fixed status request: {response}")
+    current = properties(expected, "aios-build.service")
+    builder = pwd.getpwnam("aios-builder")
+    expected_status = {
+        "schema_version": 1,
+        "uid": builder.pw_uid,
+        "candidate_build_authority": True,
+        "activation_authority": False,
+        "candidate_template_selection": False,
+        "nix_trusted_user": False,
+        "network_egress": False,
+    }
+    data = response.get("data", {})
+    if (any(data.get(name) != value for name, value in expected_status.items())
+            or peer_pid != int(current["MainPID"]) or peer_uid != builder.pw_uid
+            or peer_gid != builder.pw_gid):
+        raise RuntimeError(f"candidate builder identity/status mismatch: {response}")
+    return {"peer_pid": peer_pid, "peer_uid": peer_uid, "peer_gid": peer_gid, "data": data}
+
+
 def access_plan(expected):
     state = pwd.getpwnam("aios-state")
     observer = pwd.getpwnam("aios-observer")
+    builder = pwd.getpwnam("aios-builder")
     tester = pwd.getpwnam("tester")
     if state.pw_uid == 0 or state.pw_gid == 0 or state.pw_dir != "/var/empty":
         raise RuntimeError("graph owner is not an isolated service account")
     if observer.pw_uid == 0 or observer.pw_gid == 0 or observer.pw_dir != "/var/empty":
         raise RuntimeError("observer is not an isolated service account")
+    if builder.pw_uid == 0 or builder.pw_gid == 0 or builder.pw_dir != "/var/empty":
+        raise RuntimeError("candidate builder is not an isolated service account")
     settled_services = {}
-    for unit in ("aios-state.service", "aios-observer.service", "aios-execd.service"):
+    for unit in ("aios-state.service", "aios-observer.service", "aios-build.service", "aios-execd.service"):
         current, elapsed_ms = settled(expected, unit)
         settled_services[unit] = {"properties": current, "settled_ms": elapsed_ms}
     for unit in ("aios-sessiond.service", "aios-processd.service", "aios-ui-agent.service"):
@@ -130,6 +181,12 @@ def access_plan(expected):
             "User": "aios-observer", "Group": "aios-observer", "NoNewPrivileges": "yes",
             "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateDevices": "yes",
             "PrivateNetwork": "no", "RestrictAddressFamilies": "AF_UNIX AF_NETLINK",
+            "RestrictNamespaces": "yes", "MemoryDenyWriteExecute": "yes",
+        }),
+        policy(expected, "aios-build.service", {
+            "User": "aios-builder", "Group": "aios-builder", "NoNewPrivileges": "yes",
+            "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateDevices": "yes",
+            "PrivateNetwork": "yes", "RestrictAddressFamilies": "AF_UNIX",
             "RestrictNamespaces": "yes", "MemoryDenyWriteExecute": "yes",
         }),
         policy(expected, "aios-execd.service", {
@@ -159,6 +216,11 @@ def access_plan(expected):
         private_path("/var/lib/aios/state", state.pw_uid, state.pw_gid, 0o700, "directory"),
         private_path("/run/aios-observer", observer.pw_uid, observer.pw_gid, 0o700, "directory"),
         private_path("/run/aios-observer/status.json", observer.pw_uid, observer.pw_gid, 0o600, "file"),
+        private_path("/run/aios-build", builder.pw_uid, builder.pw_gid, 0o700, "directory"),
+        private_path("/run/aios-build/worker.sock", builder.pw_uid, builder.pw_gid, 0o600, "socket"),
+        private_path("/var/lib/aios/build", builder.pw_uid, builder.pw_gid, 0o700, "directory"),
+        private_path("/var/lib/aios/build/roots", builder.pw_uid, builder.pw_gid, 0o700, "directory"),
+        private_path("/var/lib/aios/build/cache", builder.pw_uid, builder.pw_gid, 0o700, "directory"),
         private_path(f"/run/user/{tester.pw_uid}/aios", tester.pw_uid, tester.pw_gid, 0o700, "directory"),
         private_path(f"/run/user/{tester.pw_uid}/aios/session.sock", tester.pw_uid, tester.pw_gid, 0o600, "socket"),
         private_path(f"/run/user/{tester.pw_uid}/aios-process", tester.pw_uid, tester.pw_gid, 0o700, "directory"),
@@ -183,18 +245,30 @@ def access_plan(expected):
         time.sleep(0.1)
     else:
         raise RuntimeError(f"observer did not recover bounded native subscriptions: {observer_status}")
+    candidate_builder = build_status(expected)
+    trusted = []
+    for line in Path("/etc/nix/nix.conf").read_text().splitlines():
+        value = line.split("#", 1)[0].strip()
+        if value.startswith("trusted-users") and "=" in value:
+            trusted.extend(value.split("=", 1)[1].split())
+    if trusted != ["root"]:
+        raise RuntimeError(f"Nix trusted-user boundary is not root-only: {trusted}")
     return {
         "accounts": {
             "aios-state": {"uid": state.pw_uid, "gid": state.pw_gid, "home": state.pw_dir},
             "aios-observer": {"uid": observer.pw_uid, "gid": observer.pw_gid, "home": observer.pw_dir},
+            "aios-builder": {"uid": builder.pw_uid, "gid": builder.pw_gid, "home": builder.pw_dir},
         },
         "unit_policies": policies,
         "private_paths": paths,
         "observer_status": observer_status,
+        "candidate_builder": candidate_builder,
+        "nix_trusted_users": trusted,
         "settled_services": settled_services,
         "documented_exceptions": {
             "aios-state.service": "Host network namespace only for fixed read-only udev netlink subscription; IP address families denied.",
             "aios-observer.service": "Host network namespace only for fixed read-only udev netlink subscription; IP address families denied.",
+            "aios-build.service": "Untrusted fixed candidate worker can reach only the Nix daemon and sealed root-owned candidates; it has no activation API or IP sockets.",
             "aios-execd.service": "Root broker has only fixed typed transaction routes and two bounded capabilities; writes are limited by ReadWritePaths.",
             "aios-processd.service": "Original user namespace required for native peer process identity; fixed own-user process route only.",
             "aios-ui-agent.service": "Original user namespace required for native desktop process identity; fixed graphical routes only.",
@@ -270,7 +344,7 @@ def main():
     system_restarts = []
     user_restarts = []
     infrastructure_before = infrastructure(expected)
-    for unit in ("aios-state.service", "aios-observer.service", "aios-execd.service"):
+    for unit in ("aios-state.service", "aios-observer.service", "aios-build.service", "aios-execd.service"):
         system_restarts.append(restart(expected, unit))
         infrastructure(expected)
     model = command(expected, [SYSTEMCTL, "show", "aios-model.service", "--property=LoadState", "--property=ActiveState"], check=False)

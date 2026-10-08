@@ -17,7 +17,17 @@
   environment.systemPackages = [ aiosExecutor ];
   services.dbus.packages = [ aiosExecutor ];
   systemd.packages = [ aiosExecutor ];
+  users.groups.aios-builder = {};
+  users.users.aios-builder = {
+    isSystemUser = true;
+    group = "aios-builder";
+    home = "/var/empty";
+  };
   systemd.services.aios-execd = {
+    wantedBy = [ "multi-user.target" ];
+    overrideStrategy = "asDropin";
+  };
+  systemd.services.aios-build = {
     wantedBy = [ "multi-user.target" ];
     overrideStrategy = "asDropin";
   };
@@ -33,10 +43,16 @@
       polkit_package = "${config.security.polkit.package.out}";
     };
   };
-  assertions = [{
-    assertion = !config.security.polkit.debug;
-    message = "Horizon OS does not permit polkit debug logging in its approval configuration.";
-  }];
+  assertions = [
+    {
+      assertion = !config.security.polkit.debug;
+      message = "Horizon OS does not permit polkit debug logging in its approval configuration.";
+    }
+    {
+      assertion = config.nix.settings.trusted-users == [ "root" ];
+      message = "Candidate builds require root to remain the only Nix trusted-user.";
+    }
+  ];
   systemd.tmpfiles.rules = [
     "d /var/lib/aios 0755 root root -"
     "d /var/lib/aios/candidates 0755 root root -"

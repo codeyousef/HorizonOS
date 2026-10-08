@@ -1,10 +1,16 @@
 # Synthetic disposable desktop only. Never import into a production image.
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, aiosBaseSystem, ... }:
 let
   lifecycle = pkgs.writeShellScriptBin "aios-service-lifecycle-preflight" ''
     exec ${pkgs.python3}/bin/python3 -I ${../../tools/guest/service_lifecycle_preflight.py}
   '';
+  builderQualification = pkgs.writeShellScriptBin "aios-builder-preflight" ''
+    exec ${pkgs.python3}/bin/python3 -I ${../../tools/guest/builder_preflight.py}
+  '';
 in {
+  # Keep the production-shaped default baseline closure available so this
+  # disposable image qualifies candidate evaluation/building, not cache access.
+  system.extraDependencies = [ aiosBaseSystem ];
   imports = [ ./aios-graph-test.nix ];
   services.displayManager.autoLogin = { enable = lib.mkForce true; user = "tester"; };
   services.displayManager.defaultSession = "plasma";
@@ -64,6 +70,50 @@ in {
       Unit = "aios-removable-device-fixture.service";
     };
   };
+  systemd.paths.aios-builder-qualification = {
+    wantedBy = [ "multi-user.target" ];
+    pathConfig = {
+      PathExists = "/tmp/aios-builder-request";
+      Unit = "aios-builder-qualification.service";
+    };
+  };
+  systemd.services.aios-builder-qualification = {
+    description = "Disposable Horizon OS candidate builder qualification";
+    after = [ "aios-build.service" ];
+    requires = [ "aios-build.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${builderQualification}/bin/aios-builder-preflight";
+      RuntimeDirectory = "aios-builder-qualification";
+      RuntimeDirectoryMode = "0755";
+      RuntimeDirectoryPreserve = "yes";
+      UMask = "0077";
+      NoNewPrivileges = true;
+      # This fixed test-only root fixture reads a dev-owned request and connects
+      # to the builder-owned root-only socket. The worker retains build authority.
+      CapabilityBoundingSet = [ "CAP_DAC_OVERRIDE" "CAP_DAC_READ_SEARCH" ];
+      AmbientCapabilities = [ "CAP_DAC_OVERRIDE" "CAP_DAC_READ_SEARCH" ];
+      PrivateNetwork = true;
+      PrivateTmp = false;
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      ProtectKernelTunables = true;
+      ProtectKernelModules = true;
+      ProtectKernelLogs = true;
+      ProtectControlGroups = true;
+      RestrictAddressFamilies = [ "AF_UNIX" ];
+      RestrictNamespaces = true;
+      RestrictSUIDSGID = true;
+      LockPersonality = true;
+      MemoryDenyWriteExecute = true;
+      SystemCallArchitectures = "native";
+      SystemCallFilter = [ "@system-service" ];
+      ReadWritePaths = [ "/tmp" "/run/aios-builder-qualification" ];
+      TimeoutStartSec = 1380;
+      TasksMax = 16;
+      MemoryMax = "128M";
+    };
+  };
   systemd.paths.aios-service-lifecycle-test = {
     wantedBy = [ "multi-user.target" ];
     pathConfig = {
@@ -73,7 +123,7 @@ in {
   };
   systemd.services.aios-service-lifecycle-test = {
     description = "Disposable Horizon OS service lifecycle qualification";
-    after = [ "graphical.target" "aios-state.service" "aios-observer.service" "aios-execd.service" ];
+    after = [ "graphical.target" "aios-state.service" "aios-observer.service" "aios-build.service" "aios-execd.service" ];
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${lifecycle}/bin/aios-service-lifecycle-preflight";
@@ -83,9 +133,10 @@ in {
       UMask = "0077";
       NoNewPrivileges = true;
       # Fixed test-only root orchestration must read the dev-owned request and
-      # tester bus, then enter the tester identity for its user manager.
-      CapabilityBoundingSet = [ "CAP_DAC_READ_SEARCH" "CAP_SETUID" "CAP_SETGID" ];
-      AmbientCapabilities = [ "CAP_DAC_READ_SEARCH" "CAP_SETUID" "CAP_SETGID" ];
+      # tester bus, enter the tester identity for its user manager, and connect
+      # to the builder-owned root-only status socket.
+      CapabilityBoundingSet = [ "CAP_DAC_OVERRIDE" "CAP_DAC_READ_SEARCH" "CAP_SETUID" "CAP_SETGID" ];
+      AmbientCapabilities = [ "CAP_DAC_OVERRIDE" "CAP_DAC_READ_SEARCH" "CAP_SETUID" "CAP_SETGID" ];
       PrivateNetwork = true;
       PrivateTmp = false;
       ProtectSystem = "strict";
@@ -109,6 +160,7 @@ in {
   };
   environment.systemPackages = [
     lifecycle
+    builderQualification
     (pkgs.writeScriptBin "aios-desktop-test-probe" ''
       #!${pkgs.runtimeShell}
       exec ${pkgs.python3}/bin/python3 -I ${../../tools/guest/desktop_probe.py}

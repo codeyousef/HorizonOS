@@ -22,3 +22,7 @@ zbus = { version = "5.19", features = ["blocking-api"] }
 [[bin]]
 name = "aios-execd"
 path = "src/main.rs"
+
+[[bin]]
+name = "aios-buildd"
+path = "src/build_main.rs"
