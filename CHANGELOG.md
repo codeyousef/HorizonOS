@@ -14,9 +14,10 @@
   udev subscriptions while exposing neither event payloads nor mutation/network
   authority.
 - Add a root-authenticated, network-isolated `aios-build` worker that reopens
-  sealed Executor1 candidates, enforces disk and closure resource limits, builds
-  only the fixed reviewed system target, inventories closure deltas, and retains
-  an indirect GC root without activation or boot-selection authority.
+  sealed Executor1 candidates, rejects unapproved templates, substituters,
+  baselines and resource bounds, builds only the fixed reviewed system target,
+  inventories closure deltas, and retains verified prior/candidate indirect GC
+  roots without activation or boot-selection authority.
 - Ship standalone `ask` and `aiosctl ask --mode read-only` clients with human
   answer/citation output, optional typed JSON, and no shell-generation path.
 - Add human-readable `aiosctl inspect service` output while retaining complete

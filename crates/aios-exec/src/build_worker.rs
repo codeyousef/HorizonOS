@@ -47,6 +47,8 @@ enum Error {
     Candidate,
     PinnedInput,
     Io,
+    Baseline,
+    TargetChanged,
     Resource,
     Timeout,
     Build {
@@ -99,6 +101,7 @@ struct BuildResult {
     nar_bytes: u64,
     measured_download_bytes: Option<u64>,
     gc_root: String,
+    prior_gc_root: String,
 }
 
 fn account() -> Result<u32> {
@@ -321,6 +324,30 @@ fn inventory(nix: &str, closure: &str) -> Result<(BTreeSet<String>, u64)> {
     Ok((paths, bytes))
 }
 
+fn retain(nix_store: &str, root: &Path, closure: &str) -> Result<()> {
+    let root_text = root.to_str().ok_or(Error::Invalid)?;
+    match fs::symlink_metadata(root) {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let _ = run(
+                nix_store,
+                &["--realise", closure, "--add-root", root_text, "--indirect"],
+                QUERY_TIMEOUT,
+                4096,
+            )?;
+        }
+        Err(_) => return Err(Error::Io),
+    }
+    let metadata = fs::symlink_metadata(root)?;
+    if !metadata.file_type().is_symlink()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || fs::canonicalize(root)? != Path::new(closure)
+    {
+        return Err(Error::IntegrityAt("gc-root-state"));
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build(
     plan_id: &str,
@@ -353,6 +380,10 @@ fn build(
         || candidate.path() != Path::new(CANDIDATES).join(candidate_sha256)
     {
         return Err(Error::Candidate);
+    }
+    let baseline = fs::canonicalize("/run/current-system")?;
+    if baseline != Path::new(baseline_closure) {
+        return Err(Error::Baseline);
     }
     let required = max_build_bytes
         .checked_add(recovery_reserve_bytes)
@@ -429,27 +460,15 @@ fn build(
     let inventory: Vec<_> = candidate_paths.iter().cloned().collect();
     let inventory_bytes =
         crate::canonical(&inventory).map_err(|_| Error::IntegrityAt("inventory-canonical"))?;
-    let root = Path::new(ROOTS).join(plan_id);
+    if fs::canonicalize("/run/current-system")? != baseline {
+        return Err(Error::TargetChanged);
+    }
+    let root = Path::new(ROOTS).join(format!("{plan_id}-candidate"));
+    let prior_root = Path::new(ROOTS).join(format!("{plan_id}-prior"));
+    retain(nix_store, &prior_root, baseline_closure)?;
+    retain(nix_store, &root, &closure)?;
     let root_text = root.to_str().ok_or(Error::Invalid)?;
-    match fs::symlink_metadata(&root) {
-        Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let _ = run(
-                nix_store,
-                &["--realise", &closure, "--add-root", root_text, "--indirect"],
-                QUERY_TIMEOUT,
-                4096,
-            )?;
-        }
-        Err(_) => return Err(Error::Io),
-    }
-    let metadata = fs::symlink_metadata(&root)?;
-    if !metadata.file_type().is_symlink()
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || fs::canonicalize(&root)? != Path::new(&closure)
-    {
-        return Err(Error::IntegrityAt("gc-root-state"));
-    }
+    let prior_root_text = prior_root.to_str().ok_or(Error::Invalid)?;
     let result = BuildResult {
         candidate_sha256: candidate_sha256.into(),
         derivation,
@@ -466,6 +485,7 @@ fn build(
         nar_bytes,
         measured_download_bytes: Some(0),
         gc_root: root_text.into(),
+        prior_gc_root: prior_root_text.into(),
     };
     Ok(result)
 }

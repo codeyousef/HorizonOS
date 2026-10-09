@@ -49,6 +49,19 @@ def receive(connection, bound):
         raise RuntimeError("candidate builder reply length is invalid")
     return json.loads(connection.recv(length, socket.MSG_WAITALL))
 
+def transact(request):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(1260)
+        connection.connect(str(SOCKET))
+        peer = struct.unpack(
+            "3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
+        )
+        if peer[0] <= 0 or peer[1] == 0 or peer[2] == 0:
+            raise RuntimeError("candidate builder peer identity is invalid")
+        encoded = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+        connection.sendall(struct.pack(">I", len(encoded)) + encoded)
+        return receive(connection, 8 * 1024 * 1024), peer
+
 
 def main():
     identity = target_identity()
@@ -85,20 +98,43 @@ def main():
                 or manifest.get("template_sha256") != request["template_sha256"]
                 or manifest.get("managed_sha256") != request["managed_sha256"]):
             raise RuntimeError("sealed candidate metadata does not match request")
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-            connection.settimeout(1260)
-            connection.connect(str(SOCKET))
-            peer_pid, peer_uid, peer_gid = struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
-            if peer_pid <= 0 or peer_uid == 0 or peer_gid == 0:
-                raise RuntimeError("candidate builder peer identity is invalid")
-            encoded = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
-            connection.sendall(struct.pack(">I", len(encoded)) + encoded)
-            response = receive(connection, 8 * 1024 * 1024)
+        denials = {}
+        probes = (
+            ("substituter", {"approved_cache": "https://unapproved.invalid"}, "Invalid"),
+            ("template", {"template_sha256": "0" * 64}, "Candidate"),
+            ("baseline", {"baseline_closure": os.path.realpath("/run/current-system/sw")}, "Baseline"),
+            ("resource", {"max_build_bytes": 16 * 1024 * 1024 * 1024 + 1}, "Invalid"),
+        )
+        for name, changes, expected_error in probes:
+            probe = request | changes | {
+                "request_id": str(uuid.uuid4()),
+                "plan_id": str(uuid.uuid4()),
+            }
+            denied, _ = transact(probe)
+            if denied.get("ok") is not False or denied.get("error") != expected_error:
+                raise RuntimeError(
+                    f"candidate builder accepted {name} probe: "
+                    + json.dumps(denied, sort_keys=True)
+                )
+            denials[name] = denied["error"]
+        response, peer = transact(request)
+        peer_pid, peer_uid, peer_gid = peer
         data = response.get("data", {})
         if response.get("ok") is not True or data.get("schema_version") != 1 or data.get("request_id") != request["request_id"]:
             raise RuntimeError("candidate builder rejected fixed qualification request: " + json.dumps(response, sort_keys=True))
+        build = data.get("build", {})
+        roots = {
+            "candidate": (Path(build.get("gc_root", "")), build.get("closure")),
+            "prior": (Path(build.get("prior_gc_root", "")), request["baseline_closure"]),
+        }
+        for name, (root, expected) in roots.items():
+            state = root.lstat()
+            if (not stat.S_ISLNK(state.st_mode) or state.st_uid != peer_uid
+                    or os.path.realpath(root) != expected):
+                raise RuntimeError(f"candidate builder {name} GC root is invalid")
         report.update({"verified": True, "request_token": token, "request": request,
-                       "response": response, "builder_peer": {"pid": peer_pid, "uid": peer_uid, "gid": peer_gid},
+                       "response": response, "denials": denials,
+                       "builder_peer": {"pid": peer_pid, "uid": peer_uid, "gid": peer_gid},
                        "current_system_after": os.path.realpath("/run/current-system")})
         if target_identity() != identity:
             raise RuntimeError("target changed during candidate build")

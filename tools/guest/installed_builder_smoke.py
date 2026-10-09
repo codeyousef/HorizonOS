@@ -126,13 +126,20 @@ def main():
                 or not str(build.get("derivation", "")).startswith("/nix/store/")
                 or not str(build.get("derivation", "")).endswith(".drv")
                 or not str(build.get("closure", "")).startswith("/nix/store/")
-                or build.get("gc_root") != "/var/lib/aios/build/roots/" + request["plan_id"]
+                or build.get("gc_root") != "/var/lib/aios/build/roots/" + request["plan_id"] + "-candidate"
+                or build.get("prior_gc_root") != "/var/lib/aios/build/roots/" + request["plan_id"] + "-prior"
                 or not isinstance(build.get("nar_bytes"), int) or build["nar_bytes"] <= 0
                 or build["nar_bytes"] > request["max_build_bytes"]
                 or build.get("measured_download_bytes") != 0
                 or len(str(build.get("inventory_sha256", ""))) != 64
                 or not isinstance(build.get("added_paths"), list)
-                or not isinstance(build.get("removed_paths"), list)):
+                or not isinstance(build.get("removed_paths"), list)
+                or report.get("denials") != {
+                    "baseline": "Baseline",
+                    "resource": "Invalid",
+                    "substituter": "Invalid",
+                    "template": "Candidate",
+                }):
             raise RuntimeError("candidate build evidence is incomplete: " + json.dumps(response, sort_keys=True))
         peer = report.get("builder_peer", {})
         if peer.get("uid") in (None, 0) or peer.get("gid") in (None, 0) or peer.get("pid", 0) <= 0:
