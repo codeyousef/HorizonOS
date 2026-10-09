@@ -688,7 +688,9 @@ pub(crate) fn supervise(
             || data.request_id != request_id {
             return Err(Error::Integrity);
         }
-        if worker_identity(&stream, uid)? != peer {
+        let rechecked_peer = worker_identity(&stream, uid)?;
+        if (rechecked_peer.pid, rechecked_peer.uid, rechecked_peer.gid)
+            != (peer.pid, peer.uid, peer.gid) {
             return Err(Error::TargetChanged);
         }
         let rechecked = CandidateStore::registered(&plan.candidate_sha256)
