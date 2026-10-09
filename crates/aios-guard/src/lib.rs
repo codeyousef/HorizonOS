@@ -2,6 +2,7 @@
 //! The real root activation/health adapter is not yet qualified or enabled.
 pub mod activation;
 pub mod native;
+pub mod runtime;
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};

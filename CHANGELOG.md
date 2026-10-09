@@ -18,6 +18,11 @@
   baselines and resource bounds, builds only the fixed reviewed system target,
   inventories closure deltas, and retains verified prior/candidate indirect GC
   roots without activation or boot-selection authority.
+- Add a root-only native guard adapter that revalidates enrolled target and
+  immutable closure artifacts, probes fixed executor/graph health endpoints,
+  retains exact recovery closures, and maps only typed guard effects to the
+  pinned activation commands. It remains unreachable from the public CLI until
+  authenticated broker/independent-service orchestration is connected.
 - Add authenticated `aiosctl plan` and transaction inspection, authorization,
   apply and rollback-plan commands for bounded package intents. Prepared plans
   persist only for the same UID, boot, system bus and live logind session;

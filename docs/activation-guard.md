@@ -24,10 +24,16 @@ entry; it does not promise recovery from firmware or kernel failure.
 
 `NativeIntake` is not deserializable. Its artifact-binding method compares the
 actual prior pointers, retained guard and candidate file hashes with a typed
-plan. It provides no authorization, build provenance, durable plan registration,
-GC retention, health approval, armed process or activation effect. Model-only
-runtime intake is still unavailable. These remaining checks must precede any
-use of the activation adapter.
+plan. The root-only `NativeAdapter` consumes that capability, independently
+recaptures enrolled identity and immutable pointers around every effect, probes
+only the fixed Executor1 introspection and private graph-status endpoints, and
+retains exact prior/candidate closures under a transaction-specific root-owned
+Nix GC-root directory. It maps typed system effects to the pinned commands below;
+managed-state publication is verification of the immutable running closure,
+not a second mutable manifest write. Model-only runtime intake is unavailable.
+The adapter has no CLI constructor: authenticated broker handoff, independent
+template-service supervision and host heartbeat transport must still be
+connected before activation can be invoked.
 
 Fresh development image instrumentation records the actual installed root guard
 preflight in a protected RAM file. The registered `installed-guard` observer
@@ -108,13 +114,15 @@ recover a hung kernel, failed disk or firmware fault.
 
 ## Pinned command descriptions
 
-The activation module describes a fixed command set; it does not spawn commands.
-It selects the exact approved closure's wrapped `switch-to-configuration test`,
-the retained Nix package's `nix-env --profile /nix/var/nix/profiles/system --set`
-with the approved closure, and that closure's `switch-to-configuration boot`.
-Recovery selects the separately recorded prior closures. The environment is
-cleared, including upstream activation bypass variables. No rebuild, mutable
-configuration path, arbitrary Nix expression or client-provided argv is accepted.
+The activation module describes the only command set admitted by the native
+adapter. It selects the exact approved closure's wrapped
+`switch-to-configuration test`, the retained Nix package's
+`nix-env --profile /nix/var/nix/profiles/system --set` with the approved closure,
+and that closure's `switch-to-configuration boot`. Recovery selects the
+separately recorded prior closures. The environment is cleared, including
+upstream activation bypass variables. Standard input and output are closed.
+No rebuild, mutable configuration path, arbitrary Nix expression or
+client-provided argv is accepted.
 
 The adapter targets Nixpkgs revision
 `774debe7a0d1b496e35677ad955a1011c6ff74f3`. Its interface is grounded in the pinned

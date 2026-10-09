@@ -45,7 +45,8 @@ def main():
     formatted = []
     for relative in ("crates/aios-guard/src/lib.rs", "crates/aios-guard/src/main.rs",
                      "crates/aios-guard/src/activation.rs", "crates/aios-guard/src/native.rs",
-                     "crates/aios-exec/src/native.rs", "crates/aios-exec/src/health.rs",
+                     "crates/aios-guard/src/runtime.rs", "crates/aios-exec/src/native.rs",
+                     "crates/aios-exec/src/health.rs",
                      "crates/aios-exec/src/health/tests.rs", "crates/aios-guard/tests/guard.rs"):
         original = (release / relative).read_bytes()
         result = subprocess.check_output(["nix", "develop", *locked, reference,

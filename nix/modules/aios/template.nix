@@ -67,5 +67,6 @@
     "d /var/lib/aios 0755 root root -"
     "d /var/lib/aios/candidates 0755 root root -"
     "d /var/lib/aios/transactions 0700 root root -"
+    "d /nix/var/nix/gcroots/aios-guard 0700 root root -"
   ];
 }
