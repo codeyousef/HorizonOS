@@ -86,6 +86,89 @@ fn run(args: Vec<String>) {
             Err(code) => api_error(code),
         }
     }
+    let plan = match args.as_slice() {
+        [command, text] if command == "plan" => Some((text.as_str(), false)),
+        [command, text, flag] if command == "plan" && flag == "--json" => {
+            Some((text.as_str(), true))
+        }
+        _ => None,
+    };
+    if let Some((text, json)) = plan {
+        let result = plan_intent(text).and_then(|(operation,package)| {
+            aios_session::bus::Client::connect_user_bus()?
+                .prepare_package(operation,&package,text)
+        });
+        match result {
+            Ok(value) => {
+                if json {
+                    println!("{value}");
+                } else {
+                    println!(
+                        "Plan: {}\nDigest: {}\nState: {}",
+                        value["data"]["plan_id"].as_str().unwrap_or(""),
+                        value["data"]["plan_sha256"].as_str().unwrap_or(""),
+                        value["data"]["status"]["state"].as_str().unwrap_or("unknown"),
+                    );
+                }
+                return;
+            }
+            Err(code) => api_error(code),
+        }
+    }
+    let transaction = match args.as_slice() {
+        [command, operation, id]
+            if command == "transaction"
+                && matches!(
+                    operation.as_str(),
+                    "inspect" | "authorize" | "apply" | "rollback-plan"
+                ) =>
+        {
+            Some((operation.as_str(), id.as_str(), false))
+        }
+        [command, operation, id, flag]
+            if command == "transaction"
+                && matches!(
+                    operation.as_str(),
+                    "inspect" | "authorize" | "apply" | "rollback-plan"
+                )
+                && flag == "--json" =>
+        {
+            Some((operation.as_str(), id.as_str(), true))
+        }
+        _ => None,
+    };
+    if let Some((operation, id, json)) = transaction {
+        let result = aios_session::bus::Client::connect_user_bus().and_then(|client| {
+            match operation {
+                "inspect" => client.transaction(id),
+                "rollback-plan" => client.rollback_plan(id),
+                "authorize" => client.authorize_transaction(id),
+                "apply" => client.apply_transaction(id),
+                _ => unreachable!(),
+            }
+        });
+        match result {
+            Ok(value) => {
+                if json {
+                    println!("{value}");
+                } else {
+                    println!(
+                        "Transaction: {}\nState: {}",
+                        id,
+                        value["data"]["status"]["state"]
+                            .as_str()
+                            .or_else(|| value["data"]["state"].as_str())
+                            .unwrap_or("unknown"),
+                    );
+                }
+                return;
+            }
+            Err(code) if matches!(operation, "authorize" | "apply") => {
+                api_error_with_plan(code, id)
+            }
+            Err(code) => api_error(code),
+        }
+    }
     if args == ["system", "info", "--json"] {
         let call = br#"{"kind":"tool_call","action_id":"system.info","arguments":{}}"#;
         match parse_tool_call(call) {
@@ -124,6 +207,37 @@ fn run(args: Vec<String>) {
                 return;
             },
             Err(code)=>api_error(code),
+        }
+    }
+    let automation_json = match args.as_slice() {
+        [a, b] if a == "automation" && b == "list" => Some(false),
+        [a, b, flag] if a == "automation" && b == "list" && flag == "--json" => Some(true),
+        _ => None,
+    };
+    if let Some(json) = automation_json {
+        match aios_session::bus::Client::connect_user_bus()
+            .and_then(|client| client.list_automations())
+        {
+            Ok(value) => {
+                if json {
+                    println!("{value}");
+                } else if value["data"]["definitions"]
+                    .as_array()
+                    .is_some_and(Vec::is_empty)
+                {
+                    println!("No automation definitions.");
+                } else if let Some(definitions) = value["data"]["definitions"].as_array() {
+                    for definition in definitions {
+                        println!(
+                            "{}\t{}",
+                            definition["automation_id"].as_str().unwrap_or(""),
+                            definition["name"].as_str().unwrap_or("")
+                        );
+                    }
+                }
+                return;
+            }
+            Err(code) => api_error(code),
         }
     }
     let package = match args.as_slice() {
@@ -241,8 +355,32 @@ fn run(args: Vec<String>) {
         if let Err(error) = result { eprintln!("aiosctl: {error}"); std::process::exit(1); }
         return;
     }
-    eprintln!("Usage: aiosctl status --json | ask [--mode read-only] TEXT [--json] | ask TEXT --json --service UNIT | package search QUERY [--json] | package info ID [--json] | graph status [--json] | privacy scopes [--json] | history list [--json] | model status [--json] | model unload [--json] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | process list --json | process terminate SESSION BOOT_UUID PID START_TICKS GOAL --json | system info --json | inspect service UNIT [--json] [--socket PRIVATE_PATH]");
+    eprintln!("Usage: aiosctl status --json | ask [--mode read-only] TEXT [--json] | ask TEXT --json --service UNIT | plan TEXT [--json] | transaction inspect|authorize|apply|rollback-plan ID [--json] | automation list [--json] | package search QUERY [--json] | package info ID [--json] | graph status [--json] | privacy scopes [--json] | history list [--json] | model status [--json] | model unload [--json] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | process list --json | process terminate SESSION BOOT_UUID PID START_TICKS GOAL --json | system info --json | inspect service UNIT [--json] [--socket PRIVATE_PATH]");
     std::process::exit(2);
+}
+
+fn plan_intent(
+    text: &str,
+) -> Result<(&'static str,String), aios_protocol::contracts::ErrorCode> {
+    use aios_protocol::contracts::ErrorCode;
+    let (operation, package) = text.trim().split_once(' ').ok_or(ErrorCode::InvalidArgument)?;
+    let operation = if operation.eq_ignore_ascii_case("install") {
+        "install"
+    } else if operation.eq_ignore_ascii_case("remove") {
+        "remove"
+    } else {
+        return Err(ErrorCode::InvalidArgument);
+    };
+    let package = package.trim().to_ascii_lowercase();
+    if package.is_empty()
+        || package.len() > 64
+        || !package
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(ErrorCode::InvalidArgument);
+    }
+    Ok((operation,package))
 }
 
 fn ask_arguments(args: &[String]) -> Option<(&str, bool)> {
@@ -448,6 +586,25 @@ fn unverified_termination(id:&str,code:aios_protocol::contracts::ErrorCode,cance
         ]{assert_eq!(standalone_ask_arguments(&denied),None);}
         assert_eq!(ask_arguments(&values(&["ask","--mode","shell","id"])),None);
     }
+    #[test]fn plan_parser_accepts_only_bounded_package_intents(){
+        assert_eq!(
+            plan_intent("Install Blender").unwrap(),
+            ("install","blender".to_owned())
+        );
+        assert_eq!(
+            plan_intent("remove postgresql-17").unwrap(),
+            ("remove","postgresql-17".to_owned())
+        );
+        for denied in [
+            "",
+            "Install",
+            "Enable blender",
+            "Install ../../etc/passwd",
+            "Install two packages",
+        ] {
+            assert_eq!(plan_intent(denied), Err(ErrorCode::InvalidArgument));
+        }
+    }
     #[test]fn human_ask_output_preserves_answer_and_citations(){
         let status=json!({"state":"completed","output":{"response":{"kind":"answer","text":"The unit failed.","evidence_ids":["ev-1","ev-2"]}}});
         assert_eq!(human_ask_output(&status).unwrap(),"The unit failed.\n\nEvidence:\n- ev-1\n- ev-2");
@@ -528,5 +685,12 @@ fn new_nonce() -> String { uuid::Uuid::new_v4().to_string() }
 fn api_error(code: aios_protocol::contracts::ErrorCode) -> ! {
     println!("{}",serde_json::json!({"schema_version":1,"request_id":new_nonce(),"operation":"client_error",
         "error":{"code":code,"message":"Authenticated session API unavailable or request denied","retryable":false}}));
+    std::process::exit(1);
+}
+
+fn api_error_with_plan(code: aios_protocol::contracts::ErrorCode, plan_id: &str) -> ! {
+    println!("{}",serde_json::json!({"schema_version":1,"request_id":new_nonce(),"operation":"client_error",
+        "data":{"plan_id":plan_id},"error":{"code":code,
+        "message":"Transaction authorization or execution was denied","retryable":false}}));
     std::process::exit(1);
 }

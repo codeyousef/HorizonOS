@@ -70,6 +70,17 @@ exists. They never claim installation, capability verification or final authoriz
 The broker must prepare its own plan from actual intended/running/profile/boot-selected
 state, build its registered candidate, and freeze the final plan before approval.
 
+`aiosctl plan "Install Blender"` and `aiosctl plan "Remove Blender"` map only
+that bounded package grammar to typed catalog intents. The authenticated session
+broker retains the root-authenticated Executor1 connection and binds plan IDs to
+the originating UID and live logind session, so separate CLI invocations cannot
+substitute a client-owned hash or another session's plan. The returned UUID and
+digest identify the immutable plan.
+`aiosctl transaction inspect|authorize|apply|rollback-plan UUID` obtains plan
+hashes from the broker rather than accepting client-supplied hashes. In a
+headless session, authorization and apply fail with `AUTH_REQUIRED` while
+retaining the concrete plan UUID in the typed error; they never infer consent.
+
 ## Verification scope
 
 Through the protected host workflow:

@@ -12,6 +12,7 @@ pub(crate) mod process_termination;
 mod process_tasks;
 mod process_control;
 pub mod native_startup;
+mod executor_bridge;
 pub mod bus;
 pub mod inference;
 mod processes;
@@ -52,6 +53,7 @@ pub enum Operation {
     GetCapabilities,
     PrivacyScopes,
     ListHistory,
+    ListAutomations,
     GetSystemInfo,
     SelectUiSession { session_id: String },
     ListUiWindows { session_handle: String },
@@ -489,6 +491,17 @@ impl State {
                     "owner":"authenticated_client","persistent":false,"retention_ms":300000},
                     "mutation_performed":false}))
             },
+            Operation::ListAutomations => Ok(json!({
+                "schema_version": 1,
+                "operation": "automation_list",
+                "data": {
+                    "definitions": [],
+                    "owner": "authenticated_client",
+                    "persistent": false,
+                    "scheduling_available": false
+                },
+                "mutation_performed": false
+            })),
             Operation::GetCapabilities => Ok(json!({"schema_version":1,"request_id":Uuid::new_v4().to_string(),"operation":"capabilities","actions":["system.info","system.service_status"],
                 "read_only":true,"inference_available":self.inference_available,"inference_configured":self.inference_configured,"ui_enabled":false,"ui_session_selection_available":true,"transport":"private-unix",
                 "session_history":{"opt_in_required":true,"max_selected":4,"retention_ms":300000,"owner":"authenticated_client","persistent":false},"task_request_max_bytes":MAX_TASK_BYTES,"session_associated":peer.logind_session.is_some()})),

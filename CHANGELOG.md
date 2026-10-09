@@ -18,6 +18,11 @@
   baselines and resource bounds, builds only the fixed reviewed system target,
   inventories closure deltas, and retains verified prior/candidate indirect GC
   roots without activation or boot-selection authority.
+- Add authenticated `aiosctl plan` and transaction inspection, authorization,
+  apply and rollback-plan commands for bounded package intents; headless denials
+  preserve the concrete plan ID instead of claiming consent.
+- Add model-independent `aiosctl automation list` output that truthfully reports
+  no persistent definitions while scheduling remains unavailable.
 - Ship standalone `ask` and `aiosctl ask --mode read-only` clients with human
   answer/citation output, optional typed JSON, and no shell-generation path.
 - Add human-readable `aiosctl inspect service` output while retaining complete

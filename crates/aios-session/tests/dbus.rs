@@ -86,7 +86,7 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let conn = connect(); let api = proxy(&conn);
     let introspection = Proxy::new(&conn, NAME, PATH, "org.freedesktop.DBus.Introspectable").unwrap();
     let xml: String = introspection.call("Introspect", &()).unwrap();
-    for method in ["GetCapabilities", "PrivacyScopes", "ListHistory", "ModelStatus", "UnloadModel", "Submit", "GetStatus", "GetEvents", "Cancel", "Forget", "ListProcesses", "InspectProcess"] {
+    for method in ["GetCapabilities", "PrivacyScopes", "ListHistory", "ListAutomations", "PreparePackage", "GetTransaction", "AuthorizeTransaction", "ApplyTransaction", "RequestRollbackPlan", "ModelStatus", "UnloadModel", "Submit", "GetStatus", "GetEvents", "Cancel", "Forget", "ListProcesses", "InspectProcess"] {
         assert!(xml.contains(&format!("name=\"{method}\"")));
     }
     let agent_xml = xml.split("<interface name=\"org.aios.Agent1\">").nth(1).unwrap().split("</interface>").next().unwrap();
@@ -170,6 +170,12 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let history:Value=serde_json::from_str(&api.call::<_,_,String>("ListHistory",&()).unwrap()).unwrap();
     assert_eq!(history["operation"],"history_list");assert_eq!(history["data"]["entries"],json!([]));
     assert_eq!(history["data"]["owner"],"authenticated_client");assert_eq!(history["mutation_performed"],false);
+    let automations:Value=serde_json::from_str(&api.call::<_,_,String>("ListAutomations",&()).unwrap()).unwrap();
+    assert_eq!(automations["operation"],"automation_list");
+    assert_eq!(automations["data"]["definitions"],json!([]));
+    assert_eq!(automations["data"]["persistent"],false);
+    assert_eq!(automations["data"]["scheduling_available"],false);
+    assert_eq!(automations["mutation_performed"],false);
     code(api.call::<_,_,String>("ModelStatus",&()).unwrap_err(),"MODEL_UNAVAILABLE");
     code(api.call::<_,_,String>("UnloadModel",&()).unwrap_err(),"MODEL_UNAVAILABLE");
     let submitted = request("Private prompt must not be broadcast", "dbus-real-nonce");

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use zbus::blocking::{Connection, Proxy};
 
-const NAME: &str = "org.aios.System1";
+const SYSTEM_NAME: &str = "org.aios.System1";
 const SYSTEM_PATH: &str = "/org/aios/System1";
 const PACKAGES_PATH: &str = "/org/aios/Packages1";
 
@@ -21,12 +21,12 @@ impl Client {
             .method_timeout(Duration::from_secs(5))
             .build()
             .map_err(|_| ErrorCode::UnsupportedCapability)?;
-        let (owner, bus_id, owner_pid) = subject(&connection)?;
+        let (owner, bus_id, owner_pid) = subject(&connection, SYSTEM_NAME)?;
         Ok(Self { connection, owner, bus_id, owner_pid })
     }
 
     fn verify(&self) -> Result<(), ErrorCode> {
-        let current = subject(&self.connection)?;
+        let current = subject(&self.connection, SYSTEM_NAME)?;
         if current != (self.owner.clone(), self.bus_id.clone(), self.owner_pid) {
             return Err(ErrorCode::TargetChanged);
         }
@@ -80,10 +80,11 @@ impl Client {
     }
 }
 
-fn subject(connection: &Connection) -> Result<(String, String, u32), ErrorCode> {
+
+fn subject(connection: &Connection, name: &str) -> Result<(String, String, u32), ErrorCode> {
     let bus = Proxy::new(connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus")
         .map_err(|_| ErrorCode::UnsupportedCapability)?;
-    let owner: String = bus.call("GetNameOwner", &(NAME,)).map_err(|_| ErrorCode::UnsupportedCapability)?;
+    let owner: String = bus.call("GetNameOwner", &(name,)).map_err(|_| ErrorCode::UnsupportedCapability)?;
     if !owner.starts_with(':') {
         return Err(ErrorCode::PermissionDenied);
     }
@@ -96,6 +97,7 @@ fn subject(connection: &Connection) -> Result<(String, String, u32), ErrorCode> 
     let bus_id: String = bus.call("GetId", &()).map_err(|_| ErrorCode::PermissionDenied)?;
     Ok((owner, bus_id, pid))
 }
+ 
 
 fn client_error(error: zbus::Error) -> ErrorCode {
     if let zbus::Error::MethodError(name, _, _) = &error {

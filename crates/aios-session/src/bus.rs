@@ -34,11 +34,11 @@ struct Admission(Arc<AtomicUsize>);
 impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); } }
 
 #[derive(Clone)]
-pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,control_active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>>,processes:Arc<Mutex<HashMap<(String,String),ProcessConnection>>> }
+pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,control_active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>>,processes:Arc<Mutex<HashMap<(String,String),ProcessConnection>>>,executor:Arc<Mutex<Option<crate::executor_bridge::Bridge>>> }
 struct UiConnection { peer:Peer,expires:Instant,client:Arc<crate::graphical::Connection> }
 struct ProcessConnection { peer:Peer,expires:u64,client:crate::process_selection::Connection,control:Arc<crate::process_control::Connection> }
 impl Agent {
-    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),control_active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())),processes:Arc::new(Mutex::new(HashMap::new())) } }
+    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),control_active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())),processes:Arc::new(Mutex::new(HashMap::new())),executor:Arc::new(Mutex::new(None)) } }
     fn admit(&self) -> Result<Admission> {
         if self.active.fetch_add(1, Ordering::AcqRel) >= 16 {
             self.active.fetch_sub(1, Ordering::AcqRel);
@@ -220,6 +220,38 @@ impl Agent {
         if json.len() > aios_protocol::MAX_FRAME_BYTES { return Err(ErrorCode::ResourceExhausted.into()); }
         Ok(json)
     }
+    async fn executor_call<F>(
+        &self,
+        connection: &Connection,
+        header: Header<'_>,
+        call: F,
+    ) -> Result<String>
+    where
+        F: FnOnce(&mut crate::executor_bridge::Bridge, &Peer) -> std::result::Result<Value, ErrorCode>
+            + Send
+            + 'static,
+    {
+        let peer = Self::peer(connection, &header).await?;
+        let original = peer.clone();
+        let executor = self.executor.clone();
+        let outcome = blocking::unblock(move || {
+            let mut bridge = executor.lock().map_err(|_| ErrorCode::ResourceExhausted)?;
+            if bridge.is_none() {
+                *bridge = Some(crate::executor_bridge::Bridge::connect()?);
+            }
+            call(bridge.as_mut().expect("initialized above"), &original)
+        })
+        .await;
+        if Self::peer(connection, &header).await? != peer {
+            return Err(ErrorCode::TargetChanged.into());
+        }
+        let value = outcome?;
+        let json = serde_json::to_string(&value).map_err(|_| ErrorCode::InvalidArgument)?;
+        if json.len() > aios_protocol::MAX_FRAME_BYTES {
+            return Err(ErrorCode::ResourceExhausted.into());
+        }
+        Ok(json)
+    }
 }
 
 #[zbus::interface(name = "org.aios.Agent1")]
@@ -270,6 +302,29 @@ impl Agent {
     }
     async fn list_history(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
         self.json(connection,header,Operation::ListHistory).await
+    }
+    async fn list_automations(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        self.json(connection,header,Operation::ListAutomations).await
+    }
+    async fn prepare_package(&self, operation: &str, package_id: &str, text: &str, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        let operation=operation.to_owned();let package_id=package_id.to_owned();let text=text.to_owned();
+        self.executor_call(connection,header,move|bridge,peer|bridge.prepare_package(peer,&operation,&package_id,&text)).await
+    }
+    async fn get_transaction(&self, id: &str, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        let id=id.to_owned();
+        self.executor_call(connection,header,move|bridge,peer|bridge.transaction(peer,&id)).await
+    }
+    async fn authorize_transaction(&self, id: &str, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        let id=id.to_owned();
+        self.executor_call(connection,header,move|bridge,peer|bridge.authorize(peer,&id)).await
+    }
+    async fn apply_transaction(&self, id: &str, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        let id=id.to_owned();
+        self.executor_call(connection,header,move|bridge,peer|bridge.execute(peer,&id)).await
+    }
+    async fn request_rollback_plan(&self, id: &str, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
+        let id=id.to_owned();
+        self.executor_call(connection,header,move|bridge,peer|bridge.rollback_plan(peer,&id)).await
     }
     async fn model_status(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
         self.dispatch(connection, header, Operation::GetCapabilities).await?;
@@ -454,7 +509,7 @@ impl Client {
     pub fn connect_user_bus() -> std::result::Result<Self, ErrorCode> {
         let address = format!("unix:path=/run/user/{}/bus", nix::unistd::geteuid());
         let connection = zbus::blocking::connection::Builder::address(address.as_str()).map_err(|_| ErrorCode::UnsupportedCapability)?
-            .method_timeout(Duration::from_secs(5)).build().map_err(|_| ErrorCode::UnsupportedCapability)?;
+            .method_timeout(Duration::from_secs(35)).build().map_err(|_| ErrorCode::UnsupportedCapability)?;
         let (owner, peer) = Self::subject(&connection)?;
         Ok(Self { connection, owner, peer })
     }
@@ -509,6 +564,41 @@ impl Client {
             return Err(ErrorCode::TargetChanged);
         }
         Ok(value)
+    }
+    pub fn list_automations(&self) -> std::result::Result<Value, ErrorCode> {
+        let value:Value=serde_json::from_str(&self.call("ListAutomations",&())?).map_err(|_|ErrorCode::InvalidArgument)?;
+        if value["schema_version"]!=1 || value["operation"]!="automation_list" || value["mutation_performed"]!=false
+            || value["data"]["owner"]!="authenticated_client" || value["data"]["persistent"]!=false
+            || value["data"]["scheduling_available"]!=false || !value["data"]["definitions"].is_array() {
+            return Err(ErrorCode::TargetChanged);
+        }
+        Ok(value)
+    }
+    pub fn prepare_package(&self, operation:&str, package_id:&str, text:&str) -> std::result::Result<Value,ErrorCode> {
+        if !matches!(operation,"install"|"remove"){return Err(ErrorCode::InvalidArgument);}
+        let value:Value=serde_json::from_str(&self.call("PreparePackage",&(operation,package_id,text))?).map_err(|_|ErrorCode::InvalidArgument)?;
+        if value["schema_version"]!=1 || value["operation"]!="prepared_plan"
+            || !value["data"]["plan_id"].as_str().is_some_and(crate::uuid)
+            || !value["data"]["plan_sha256"].as_str().is_some_and(|hash|hash.len()==64) {
+            return Err(ErrorCode::TargetChanged);
+        }
+        Ok(value)
+    }
+    pub fn transaction(&self,id:&str)->std::result::Result<Value,ErrorCode>{
+        self.transaction_call("GetTransaction",id)
+    }
+    pub fn authorize_transaction(&self,id:&str)->std::result::Result<Value,ErrorCode>{
+        self.transaction_call("AuthorizeTransaction",id)
+    }
+    pub fn apply_transaction(&self,id:&str)->std::result::Result<Value,ErrorCode>{
+        self.transaction_call("ApplyTransaction",id)
+    }
+    pub fn rollback_plan(&self,id:&str)->std::result::Result<Value,ErrorCode>{
+        self.transaction_call("RequestRollbackPlan",id)
+    }
+    fn transaction_call(&self,method:&str,id:&str)->std::result::Result<Value,ErrorCode>{
+        if !crate::uuid(id){return Err(ErrorCode::InvalidArgument);}
+        serde_json::from_str(&self.call(method,&(id,))?).map_err(|_|ErrorCode::InvalidArgument)
     }
     pub fn model_status(&self) -> std::result::Result<Value, ErrorCode> {
         let value:Value=serde_json::from_str(&self.call("ModelStatus",&())?).map_err(|_|ErrorCode::InvalidArgument)?;
