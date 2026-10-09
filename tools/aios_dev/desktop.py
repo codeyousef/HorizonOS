@@ -74,7 +74,7 @@ def fixture_configuration(owner, *, with_model=False):
         "ssh_port": acceptance.free_port(),
         "vcpus": 8,
         "memory_mib": 16384,
-        "disk_gib": 96,
+        "disk_gib": 64,
         # Disposable workspaces can themselves belong to a nested development
         # workspace. Keep AF_UNIX control endpoints below the portable limit.
         "qmp_socket": ".local/vm/q",
@@ -113,6 +113,12 @@ def prepare(owner, *, with_model=False):
     if with_model:
         model_seed.copy_cache(owner.root, directory)
     plan = provision.prepare_plan(config)
+    # The owner is needed only to authenticate the source snapshot. Stop it
+    # before allocating the 16 GiB disposable installer so this workflow never
+    # accumulates two QEMU guests.
+    code, _ = vm.stop(owner)
+    if code != ExitCode.SUCCESS:
+        raise DevctlError(code, "OWNER_VM_STOP_FAILED", "Development VM did not stop before disposable provisioning")
     code, result = provision.create(config, plan["guest_uuid"])
     if code != ExitCode.SUCCESS:
         raise DevctlError(code, "DESKTOP_PROVISION_FAILED", "Disposable desktop provisioning failed")
