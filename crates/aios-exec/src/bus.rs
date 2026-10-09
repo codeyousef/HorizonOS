@@ -371,6 +371,19 @@ impl Runtime {
         );
         self.prepared(&id, caller.identity().uid)
     }
+    fn approval_reference(&self, caller: &VerifiedCaller, id: &str, hash: &str) -> Result<()> {
+        references(id, Some(hash))?;
+        self.owner(id, caller)?;
+        let status = self.ledger.status(id, caller.identity().uid)?;
+        if status.state == State::Cancelled {
+            return Err(ErrorCode::Cancelled.into());
+        }
+        let final_hash = status.final_plan_sha256.as_deref().ok_or(ErrorCode::AuthRequired)?;
+        if hash != final_hash {
+            return Err(ErrorCode::PlanChanged.into());
+        }
+        Ok(())
+    }
     fn dispatch(&mut self, caller: &VerifiedCaller, operation: Operation) -> Result<Value> {
         match operation {
             Operation::SystemCapabilities(scope) => system::capabilities(scope),
@@ -382,8 +395,8 @@ impl Runtime {
             Operation::Capabilities => Ok(envelope(
                 "capabilities",
                 json!({"interface":NAME,"prepare":true,"private_plans":true,
-                "native_caller_verified":true,"authorize":false,"execute":false,"rollback":false,"resource_consent":false,
-                "trusted_confirmation":false,"max_request_bytes":MAX_TASK_BYTES,"max_reply_bytes":MAX_FRAME_BYTES}),
+                "native_caller_verified":true,"authorize":true,"execute":false,"rollback":false,"resource_consent":false,
+                "trusted_confirmation":true,"max_request_bytes":MAX_TASK_BYTES,"max_reply_bytes":MAX_FRAME_BYTES}),
             )),
             Operation::Prepare(raw) => self.prepare(caller, &raw),
             Operation::GetPlan(id) => {
@@ -406,28 +419,25 @@ impl Runtime {
                     json!({"complete":status.state==State::Cancelled,"status":status,"system_effects_performed":false}),
                 ))
             }
-            Operation::Authorize(id, hash) | Operation::Execute(id, hash) => {
-                references(&id, Some(&hash))?;
-                self.owner(&id, caller)?;
-                let plan = self.ledger.get_plan(&id, caller.identity().uid)?;
-                let status = self.ledger.status(&id, caller.identity().uid)?;
-                if status.state == State::Cancelled {
-                    return Err(ErrorCode::Cancelled.into());
+            Operation::Authorize(id, hash) => {
+                self.approval_reference(caller, &id, &hash)?;
+                let status = self.authorizer.authorize_interactive(
+                    &self.ledger, caller, &id, &hash)?;
+                Ok(envelope("authorization", json!({
+                    "plan_id": id,
+                    "plan_sha256": hash,
+                    "status": status,
+                    "system_effects_performed": false,
+                })))
+            }
+            Operation::Execute(id, hash) => {
+                self.approval_reference(caller, &id, &hash)?;
+                let authorization = self.authorizer.consume(
+                    &self.ledger, caller, &id, &hash)?;
+                if authorization.plan_id() != id || authorization.plan_hash() != hash {
+                    return Err(ErrorCode::TargetChanged.into());
                 }
-                if hash
-                    != status
-                        .final_plan_sha256
-                        .as_deref()
-                        .unwrap_or(&plan.digest()?)
-                {
-                    return Err(ErrorCode::PlanChanged.into());
-                }
-                if boottime_ms()? >= plan.preparation_expires_monotonic_ms {
-                    return Err(ErrorCode::ApprovalExpired.into());
-                }
-                // No production TrustedConfirmation constructor exists yet.
-                // Interface availability does not fabricate polkit/UI consent.
-                Err(ErrorCode::AuthRequired.into())
+                Err(ErrorCode::UnsupportedCapability.into())
             }
             Operation::Rollback(id) => {
                 self.owner(&id, caller)?;

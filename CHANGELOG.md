@@ -22,6 +22,9 @@
   apply and rollback-plan commands for bounded package intents. Prepared plans
   persist only for the same UID, boot, system bus and live logind session;
   headless denials preserve the concrete plan ID instead of claiming consent.
+- Add broker-owned final-plan TTY confirmation with foreground process/session
+  checks, control-safe immutable impact/recovery rendering, an exact plan-bound
+  phrase, and mandatory separate fresh native polkit authentication.
 - Add model-independent `aiosctl automation list` output that truthfully reports
   no persistent definitions while scheduling remains unavailable.
 - Keep disposable desktop QMP and serial endpoints within the portable Unix

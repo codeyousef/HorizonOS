@@ -55,6 +55,26 @@ orchestration or exposed through public signal actions. Policy fixtures and Qt
 widget fixtures do not prove an installed native termination consent or effect.
 Those require source-bound installed service and native interaction qualification.
 
+## Exact-plan TTY confirmation
+
+Final R2 system plans also have a broker-owned terminal path. The root executor
+reopens file descriptor 0 of the authenticated D-Bus caller through `/proc`,
+requires an active non-root `tty` logind session, a user-owned character device,
+and the caller's process group and session to be that terminal's foreground
+owners. A pipe, redirected input, background job, reconnect or another session
+cannot provide confirmation.
+
+The broker writes a bounded canonical presentation containing the exact plan
+and closure digests, target, semantic changes, risk, reboot requirement, ordered
+steps, policy revision, expiration and the explicit recovery limit. Control and
+non-ASCII bytes are escaped before reaching the terminal. Confirmation requires
+typing `AUTHORIZE <exact-plan-id>` before the final five-minute deadline. The
+response is consumed in broker memory and never becomes a request field, token,
+status value or log entry. A successful response only constructs the internal
+`TrustedConfirmation`; fresh native polkit administrator authentication for the
+original system-bus subject remains mandatory. AIOS UI automation has no TTY or
+polkit operation and cannot observe or activate this surface.
+
 ## Private transport
 
 The supervising unprivileged broker supplies one anonymous Unix socket as file

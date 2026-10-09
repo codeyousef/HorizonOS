@@ -1,6 +1,7 @@
 //! Volatile, single-use exact-plan system authorization. No RPC or activation.
 pub(crate) mod policy;
 mod polkit;
+mod tty;
 use crate::{
     Error, Result,
     caller::{CallerIdentity, ServiceIdentity, SystemBus, VerifiedCaller},
@@ -9,11 +10,12 @@ use crate::{
     sha256,
 };
 use serde::Serialize;
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-/// Minting requires a qualified trusted confirmation adapter. No native
-/// constructor exists until the immutable UI/TTY confirmation path is connected.
-/// Neither model output nor a caller-supplied approved=true can produce this.
+/// Minting requires the broker-owned foreground TTY confirmation adapter and
+/// a separate fresh native polkit challenge. Neither model output nor a
+/// caller-supplied decision can construct this value.
 pub struct TrustedConfirmation {
     binding_sha256: String,
 }
@@ -203,7 +205,7 @@ impl Authorizer {
         caller: &VerifiedCaller,
         id: &str,
         hash: &str,
-    ) -> Result<(Binding, policy::InstalledPolicy)> {
+    ) -> Result<(Binding, policy::InstalledPolicy, Value)> {
         self.bus.recheck(caller)?;
         let (prepared, plan, actual_hash) = ledger.approval_snapshot(id, caller.identity().uid)?;
         let policy = policy::InstalledPolicy::load(self.bus.target())?;
@@ -215,7 +217,6 @@ impl Authorizer {
             return Err(Error::TargetChanged);
         }
         if prepared.requester.uid != identity.uid
-            || prepared.requester.bus_sender != identity.sender
             || identity.session.as_ref().map(|s| s.id.as_str())
                 != Some(prepared.requester.logind_session.as_str())
         {
@@ -247,7 +248,36 @@ impl Authorizer {
         };
         binding.validate_time(boottime_ms()?)?;
         self.bus.recheck(caller)?;
-        Ok((binding, policy))
+        let presentation = json!({
+            "schema_version": 1,
+            "kind": "exact_system_plan",
+            "plan_id": binding.plan_id,
+            "plan_sha256": binding.plan_hash,
+            "target": {
+                "installation_uuid": binding.target.installation_uuid,
+                "boot_id": binding.target.boot_id,
+                "role": binding.target.role,
+            },
+            "candidate_closure": binding.closure,
+            "semantic_changes": {
+                "added_packages": plan.semantic_preview.added_packages,
+                "removed_packages": plan.semantic_preview.removed_packages,
+                "changes": plan.semantic_preview.changes,
+                "user_data_deleted": plan.semantic_preview.user_data_deleted,
+                "database_data_may_remain": plan.semantic_preview.database_data_may_remain,
+                "notes": plan.semantic_preview.notes,
+            },
+            "risk": plan.semantic_preview.risk,
+            "reboot_required": plan.reboot_required,
+            "recovery": {
+                "kind": plan.semantic_preview.recovery,
+                "limit": "Restores the exact prior configuration; application or database data may remain.",
+            },
+            "ordered_steps": plan.ordered_steps,
+            "policy_revision": binding.policy_revision,
+            "expires_monotonic_ms": binding.expires_at,
+        });
+        Ok((binding, policy, presentation))
     }
     pub fn authorize(
         &mut self,
@@ -257,7 +287,7 @@ impl Authorizer {
         hash: &str,
         confirmation: TrustedConfirmation,
     ) -> Result<AuthorizationStatus> {
-        let (binding, policy) = self.binding(ledger, caller, id, hash)?;
+        let (binding, policy, _) = self.binding(ledger, caller, id, hash)?;
         if confirmation.binding_sha256 != binding.confirmation_digest()? {
             return Err(Error::Integrity);
         }
@@ -265,13 +295,24 @@ impl Authorizer {
             return Err(Error::Conflict);
         }
         let native = polkit::authenticate(&self.bus, caller, &policy, &binding)?;
-        let (current, current_policy) = self.binding(ledger, caller, id, hash)?;
+        let (current, current_policy, _) = self.binding(ledger, caller, id, hash)?;
         if current != binding || current_policy.revision != policy.revision {
             return Err(Error::TargetChanged);
         }
         self.volatile
             .issue(binding, confirmation, native, boottime_ms()?)?;
         Ok(AuthorizationStatus::SystemAuthorized)
+    }
+    pub fn authorize_interactive(
+        &mut self,
+        ledger: &Ledger,
+        caller: &VerifiedCaller,
+        id: &str,
+        hash: &str,
+    ) -> Result<AuthorizationStatus> {
+        let (binding, _, presentation) = self.binding(ledger, caller, id, hash)?;
+        let confirmation = tty::confirm(&self.bus, caller, &binding, &presentation)?;
+        self.authorize(ledger, caller, id, hash, confirmation)
     }
     pub fn consume(
         &mut self,
@@ -280,7 +321,7 @@ impl Authorizer {
         id: &str,
         hash: &str,
     ) -> Result<VerifiedSystemAuthorization> {
-        let (binding, policy) = match self.binding(ledger, caller, id, hash) {
+        let (binding, policy, _) = match self.binding(ledger, caller, id, hash) {
             Ok(context) => context,
             Err(error) => {
                 if self

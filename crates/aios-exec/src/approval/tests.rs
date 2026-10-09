@@ -1,7 +1,7 @@
 //! Authorization receipts/native UI/polkit results below are explicitly fixtures.
 use super::*;
 use crate::caller::SessionIdentity;
-fn binding() -> Binding {
+pub(super) fn binding() -> Binding {
     Binding {
         plan_id: uuid::Uuid::new_v4().to_string(),
         plan_hash: "a".repeat(64),

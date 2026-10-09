@@ -112,10 +112,18 @@ authorization is rejected; a fresh uncached native challenge must succeed.
 The cancellation ID stays internal and errors produce no authority proof.
 
 `TrustedConfirmation` is a separate non-deserializable, single-use capability.
-It currently has **no production constructor**: the qualified immutable UI/TTY
-confirmation adapter must be connected before authorization can run. There is no
-`approved=true` path. Fixture confirmations and polkit results are not evidence of
-native administrator authentication or human confirmation.
+For final plans, `Authorize` reopens only the authenticated caller process's
+foreground TTY. The broker renders bounded immutable plan, target, closure,
+semantic impact, reboot and honest recovery-limit data with terminal controls
+escaped, then requires the exact plan-bound phrase. Pipes, background process
+groups, non-TTY sessions, stale sessions and root callers fail closed. The
+caller supplies no decision field and cannot submit a confirmation token.
+
+TTY confirmation is only the first gate. A separate fresh uncached native
+polkit administrator challenge must then succeed for the caller's actual
+system-bus-name subject before a volatile receipt exists. Headless or
+preliminary plans continue to return `AUTH_REQUIRED`. Fixture confirmations,
+terminal automation and polkit fixtures are not evidence of human review.
 
 Receipts and their random nonces exist only in broker memory. They bind caller
 process/session/bus/boot, exact final hash/closure/target, policy, polkit owner and
