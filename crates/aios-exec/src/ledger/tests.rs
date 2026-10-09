@@ -480,6 +480,47 @@ fn corrupted_plan_or_missing_schema_blocks_without_deleting_ledger() {
     assert!(f.base.join("fixture-ledger.sqlite").exists());
 }
 #[test]
+fn full_ledger_refuses_a_new_transaction_without_partial_registration() {
+    let f = fixture();
+    let mut ledger = ledger(&f);
+    let (plan, candidate) = prepare(&f);
+    let page_count: i64 = ledger
+        .connection
+        .query_row("PRAGMA page_count", [], |row| row.get(0))
+        .unwrap();
+    ledger
+        .connection
+        .pragma_update(None, "max_page_count", page_count)
+        .unwrap();
+    let mut sequence = 0_i64;
+    for bytes in [8192, 4096, 2048, 1024, 512, 256, 128, 64, 32, 16] {
+        let payload = "x".repeat(bytes);
+        if ledger
+            .connection
+            .execute(
+                "INSERT INTO events(id,revision,state,kind) VALUES(?1,?2,'FAILED',?3)",
+                params![format!("full-{sequence}"), sequence, payload],
+            )
+            .is_ok()
+        {
+            sequence += 1;
+        }
+    }
+    assert_eq!(
+        ledger.register(&plan, &candidate, &f.store).err(),
+        Some(Error::Ledger)
+    );
+    let registered: i64 = ledger
+        .connection
+        .query_row(
+            "SELECT count(*) FROM plans WHERE id=?1",
+            [&plan.plan_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(registered, 0);
+}
+#[test]
 fn malformed_schema_and_duplicate_fields_cannot_make_a_prepared_plan() {
     let f = fixture();
     let (p, _) = prepare(&f);
