@@ -297,6 +297,10 @@ fn install_remove_preview_preserves_data_and_unknown_costs() {
         }]
     );
     assert!(!add.final_authorization_ready);
+    assert_eq!(
+        add.recovery,
+        Recovery::ReversibleConfigurationDataMayRemain
+    );
     assert!(
         add.candidate_closure.is_none()
             && add.build_bytes.is_none()
@@ -374,6 +378,10 @@ fn postgres_initialization_requires_observed_absent_data() {
         .unwrap();
     assert_eq!(preview.validators, [Validator::PostgresqlUnixReadiness]);
     assert!(preview.database_data_may_remain);
+    assert_eq!(
+        preview.recovery,
+        Recovery::ReversibleConfigurationDataMayRemain
+    );
     let enabled = c
         .compile(&serde_json::to_vec(&preview.candidate_manifest).unwrap())
         .unwrap();
