@@ -71,11 +71,11 @@ The broker must prepare its own plan from actual intended/running/profile/boot-s
 state, build its registered candidate, and freeze the final plan before approval.
 
 `aiosctl plan "Install Blender"` and `aiosctl plan "Remove Blender"` map only
-that bounded package grammar to typed catalog intents. The authenticated session
-broker retains the root-authenticated Executor1 connection and binds plan IDs to
-the originating UID and live logind session, so separate CLI invocations cannot
-substitute a client-owned hash or another session's plan. The returned UUID and
-digest identify the immutable plan.
+that bounded package grammar to typed catalog intents. Executor1 binds prepared
+plans to the originating UID, boot, system-bus instance and exact live logind
+session. A later CLI process in that same session can inspect the plan, while
+another user, session, boot or bus cannot. Client-supplied plan hashes are never
+accepted. The returned UUID and digest identify the immutable plan.
 `aiosctl transaction inspect|authorize|apply|rollback-plan UUID` obtains plan
 hashes from the broker rather than accepting client-supplied hashes. In a
 headless session, authorization and apply fail with `AUTH_REQUIRED` while

@@ -184,7 +184,7 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False, 
             and type(observation.get("root_bus_owner_uid")) is int and observation["root_bus_owner_uid"] == 0 and type(observation.get("root_bus_owner_pid")) is int
             and observation["root_bus_owner_pid"] > 0
             and all(observation.get(key) is True for key in ("native_caller_and_baseline_verified","typed_denials_verified",
-                "reconnect_denials_verified","durable_pre_effect_cancellation_verified","bus_ownership_policy_verified","system_and_packages_verified"))
+                "same_session_reconnect_verified","durable_pre_effect_cancellation_verified","bus_ownership_policy_verified","system_and_packages_verified"))
             and observation.get("trusted_confirmation_verified") is False and observation.get("activation_performed") is False)
     except (ValueError, UnicodeError, TypeError, KeyError, AttributeError):
         valid = False

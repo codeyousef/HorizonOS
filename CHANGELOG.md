@@ -19,8 +19,9 @@
   inventories closure deltas, and retains verified prior/candidate indirect GC
   roots without activation or boot-selection authority.
 - Add authenticated `aiosctl plan` and transaction inspection, authorization,
-  apply and rollback-plan commands for bounded package intents; headless denials
-  preserve the concrete plan ID instead of claiming consent.
+  apply and rollback-plan commands for bounded package intents. Prepared plans
+  persist only for the same UID, boot, system bus and live logind session;
+  headless denials preserve the concrete plan ID instead of claiming consent.
 - Add model-independent `aiosctl automation list` output that truthfully reports
   no persistent definitions while scheduling remains unavailable.
 - Ship standalone `ask` and `aiosctl ask --mode read-only` clients with human

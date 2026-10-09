@@ -172,7 +172,11 @@ fn references(id: &str, hash: Option<&str>) -> Result<()> {
     Ok(())
 }
 fn caller_matches(expected: &CallerIdentity, actual: &CallerIdentity) -> Result<()> {
-    if expected != actual {
+    if expected.uid != actual.uid
+        || expected.boot_id != actual.boot_id
+        || expected.bus_id != actual.bus_id
+        || expected.session != actual.session
+    {
         return Err(ErrorCode::PermissionDenied.into());
     }
     Ok(())
@@ -223,7 +227,7 @@ impl Runtime {
         references(id, None)?;
         let owner = self.owners.get(id).ok_or(ErrorCode::PermissionDenied)?;
         caller_matches(owner.caller.identity(), caller.identity())?;
-        self.authorizer.bus().recheck(&owner.caller)?;
+        self.authorizer.bus().recheck(caller)?;
         Ok(owner)
     }
     fn cleanup(&mut self) -> crate::Result<()> {
@@ -240,9 +244,12 @@ impl Runtime {
                 if now.saturating_sub(owner.created_ms) > TERMINAL_RETENTION_MS {
                     expired.push(id.clone());
                 }
-            } else if self.authorizer.bus().recheck(&owner.caller).is_err() {
-                self.ledger
-                    .request_cancel(id, owner.caller.identity().uid)?;
+            } else if status.state == State::Planned {
+                let plan = self.ledger.get_plan(id, owner.caller.identity().uid)?;
+                if now >= plan.preparation_expires_monotonic_ms {
+                    self.ledger
+                        .request_cancel(id, owner.caller.identity().uid)?;
+                }
             }
         }
         self.authorizer.bus().target().recheck()?;
@@ -704,7 +711,7 @@ mod tests {
         );
     }
     #[test]
-    fn cached_caller_scope_does_not_survive_uid_process_boot_or_reconnect_changes() {
+    fn plan_ownership_survives_process_reconnect_only_within_the_exact_session() {
         let original = CallerIdentity {
             uid: 1000,
             pid: 44,
@@ -712,26 +719,30 @@ mod tests {
             boot_id: uuid::Uuid::new_v4().to_string(),
             bus_id: "a".repeat(32),
             sender: ":1.8".into(),
-            session: None,
+            session: Some(crate::caller::SessionIdentity {
+                id: "42".into(),
+                remote: true,
+                kind: "tty".into(),
+                class: "user".into(),
+                state: "active".into(),
+                active: true,
+            }),
         };
         assert!(caller_matches(&original, &original).is_ok());
-        let mut changed = original.clone();
-        changed.uid = 1001;
-        assert!(caller_matches(&original, &changed).is_err());
-        changed = original.clone();
-        changed.pid += 1;
-        assert!(caller_matches(&original, &changed).is_err());
-        changed = original.clone();
-        changed.start_ticks += 1;
-        assert!(caller_matches(&original, &changed).is_err());
-        changed = original.clone();
-        changed.sender = ":1.9".into();
-        assert!(caller_matches(&original, &changed).is_err());
-        changed = original.clone();
-        changed.bus_id = "b".repeat(32);
-        assert!(caller_matches(&original, &changed).is_err());
-        changed = original.clone();
-        changed.boot_id = uuid::Uuid::new_v4().to_string();
-        assert!(caller_matches(&original, &changed).is_err());
+        let mut reconnect = original.clone();
+        reconnect.pid += 1;
+        reconnect.start_ticks += 1;
+        reconnect.sender = ":1.9".into();
+        assert!(caller_matches(&original, &reconnect).is_ok());
+        for field in 0..4 {
+            let mut changed = reconnect.clone();
+            match field {
+                0 => changed.uid += 1,
+                1 => changed.boot_id = uuid::Uuid::new_v4().to_string(),
+                2 => changed.bus_id = "b".repeat(32),
+                _ => changed.session.as_mut().unwrap().id = "43".into(),
+            }
+            assert!(caller_matches(&original, &changed).is_err(), "field {field}");
+        }
     }
 }

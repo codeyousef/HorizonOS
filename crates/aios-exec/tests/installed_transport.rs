@@ -190,12 +190,13 @@ fn installed_native_transport_is_private_typed_and_cancellable() {
     denied(proxy.call::<_, _, String>("Execute", &(id, hash)), "AUTH_REQUIRED");
     let other = Connection::system().unwrap();
     let reconnected = Proxy::new(&other, aios_exec::bus::NAME, aios_exec::bus::PATH, aios_exec::bus::NAME).unwrap();
-    for method in ["GetPlan", "GetTransaction", "CancelTransaction", "RequestRollback"] {
-        denied(reconnected.call::<_, _, String>(method, &(id,)), "PERMISSION_DENIED");
-    }
-    let before = value(&proxy, "GetTransaction", (id,));
+    assert_ne!(connection.unique_name(),other.unique_name());
+    assert_eq!(value(&reconnected,"GetPlan",(id,))["data"]["plan_sha256"],hash);
+    let before = value(&reconnected, "GetTransaction", (id,));
     assert_eq!(before["data"]["status"]["state"], "PLANNED");
-    let cancelled = value(&proxy, "CancelTransaction", (id,));
+    denied(reconnected.call::<_, _, String>("Authorize", &(id, hash)), "AUTH_REQUIRED");
+    denied(reconnected.call::<_, _, String>("RequestRollback", &(id,)), "UNSUPPORTED_CAPABILITY");
+    let cancelled = value(&reconnected, "CancelTransaction", (id,));
     assert_eq!(cancelled["data"]["complete"], true);
     assert_eq!(cancelled["data"]["status"]["state"], "CANCELLED");
     assert_eq!(value(&proxy, "CancelTransaction", (id,))["data"]["complete"], true);
@@ -204,7 +205,7 @@ fn installed_native_transport_is_private_typed_and_cancellable() {
     assert!(after["data"]["history"].as_array().unwrap().len() > before["data"]["history"].as_array().unwrap().len());
     println!("AIOS_INSTALLED_EXECUTOR {}", json!({"uid":uid,"root_bus_owner_uid":owner_uid,"root_bus_owner_pid":owner_pid,
         "plan_id":id,"native_caller_and_baseline_verified":true,"typed_denials_verified":true,
-        "reconnect_denials_verified":true,"durable_pre_effect_cancellation_verified":true,
+        "same_session_reconnect_verified":true,"durable_pre_effect_cancellation_verified":true,
         "bus_ownership_policy_verified":true,"system_and_packages_verified":true,
         "trusted_confirmation_verified":false,"activation_performed":false}));
 }

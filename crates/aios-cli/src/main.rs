@@ -95,7 +95,7 @@ fn run(args: Vec<String>) {
     };
     if let Some((text, json)) = plan {
         let result = plan_intent(text).and_then(|(operation,package)| {
-            aios_session::bus::Client::connect_user_bus()?
+            native::ExecutorClient::connect()?
                 .prepare_package(operation,&package,text)
         });
         match result {
@@ -138,15 +138,25 @@ fn run(args: Vec<String>) {
         _ => None,
     };
     if let Some((operation, id, json)) = transaction {
-        let result = aios_session::bus::Client::connect_user_bus().and_then(|client| {
+        let result = (|| {
+            let client = native::ExecutorClient::connect()?;
             match operation {
                 "inspect" => client.transaction(id),
                 "rollback-plan" => client.rollback_plan(id),
-                "authorize" => client.authorize_transaction(id),
-                "apply" => client.apply_transaction(id),
+                "authorize" | "apply" => {
+                    let plan = client.plan(id)?;
+                    let hash = plan["data"]["plan_sha256"]
+                        .as_str()
+                        .ok_or(aios_protocol::contracts::ErrorCode::TargetChanged)?;
+                    if operation == "authorize" {
+                        client.authorize(id, hash)
+                    } else {
+                        client.execute(id, hash)
+                    }
+                }
                 _ => unreachable!(),
             }
-        });
+        })();
         match result {
             Ok(value) => {
                 if json {

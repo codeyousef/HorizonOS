@@ -86,7 +86,7 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     let conn = connect(); let api = proxy(&conn);
     let introspection = Proxy::new(&conn, NAME, PATH, "org.freedesktop.DBus.Introspectable").unwrap();
     let xml: String = introspection.call("Introspect", &()).unwrap();
-    for method in ["GetCapabilities", "PrivacyScopes", "ListHistory", "ListAutomations", "PreparePackage", "GetTransaction", "AuthorizeTransaction", "ApplyTransaction", "RequestRollbackPlan", "ModelStatus", "UnloadModel", "Submit", "GetStatus", "GetEvents", "Cancel", "Forget", "ListProcesses", "InspectProcess"] {
+    for method in ["GetCapabilities", "PrivacyScopes", "ListHistory", "ListAutomations", "ModelStatus", "UnloadModel", "Submit", "GetStatus", "GetEvents", "Cancel", "Forget", "ListProcesses", "InspectProcess"] {
         assert!(xml.contains(&format!("name=\"{method}\"")));
     }
     let agent_xml = xml.split("<interface name=\"org.aios.Agent1\">").nth(1).unwrap().split("</interface>").next().unwrap();

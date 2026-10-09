@@ -4,8 +4,10 @@ use std::time::Duration;
 use zbus::blocking::{Connection, Proxy};
 
 const SYSTEM_NAME: &str = "org.aios.System1";
+const EXECUTOR_NAME: &str = "org.aios.Executor1";
 const SYSTEM_PATH: &str = "/org/aios/System1";
 const PACKAGES_PATH: &str = "/org/aios/Packages1";
+const EXECUTOR_PATH: &str = "/org/aios/Executor1";
 
 pub struct Client {
     connection: Connection,
@@ -80,6 +82,103 @@ impl Client {
     }
 }
 
+
+pub struct ExecutorClient {
+    connection: Connection,
+    owner: String,
+    bus_id: String,
+    owner_pid: u32,
+}
+
+impl ExecutorClient {
+    pub fn connect() -> Result<Self, ErrorCode> {
+        let connection = zbus::blocking::connection::Builder::address(
+            "unix:path=/run/dbus/system_bus_socket",
+        )
+        .map_err(|_| ErrorCode::UnsupportedCapability)?
+        .method_timeout(Duration::from_secs(35))
+        .build()
+        .map_err(|_| ErrorCode::UnsupportedCapability)?;
+        let (owner, bus_id, owner_pid) = subject(&connection, EXECUTOR_NAME)?;
+        Ok(Self { connection, owner, bus_id, owner_pid })
+    }
+
+    fn call<B: serde::Serialize + zbus::zvariant::DynamicType>(
+        &self,
+        method: &str,
+        body: &B,
+    ) -> Result<Value, ErrorCode> {
+        if subject(&self.connection, EXECUTOR_NAME)?
+            != (self.owner.clone(), self.bus_id.clone(), self.owner_pid)
+        {
+            return Err(ErrorCode::TargetChanged);
+        }
+        let proxy = Proxy::new(
+            &self.connection,
+            self.owner.as_str(),
+            EXECUTOR_PATH,
+            "org.aios.Executor1",
+        )
+        .map_err(|_| ErrorCode::UnsupportedCapability)?;
+        let raw: String = proxy.call(method, body).map_err(client_error)?;
+        if subject(&self.connection, EXECUTOR_NAME)?
+            != (self.owner.clone(), self.bus_id.clone(), self.owner_pid)
+        {
+            return Err(ErrorCode::TargetChanged);
+        }
+        if raw.len() > aios_protocol::MAX_FRAME_BYTES {
+            return Err(ErrorCode::ResourceExhausted);
+        }
+        serde_json::from_str(&raw).map_err(|_| ErrorCode::InvalidArgument)
+    }
+
+    pub fn prepare_package(
+        &self,
+        operation: &str,
+        package_id: &str,
+        text: &str,
+    ) -> Result<Value, ErrorCode> {
+        if !matches!(operation, "install" | "remove") {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        let request = json!({
+            "schema_version": 1,
+            "request_id": uuid::Uuid::new_v4().to_string(),
+            "operation": "prepare",
+            "mode": "act",
+            "intent_text": text,
+            "intent": {
+                "action": if operation == "install" { "install_package" } else { "remove_package" },
+                "package_id": package_id,
+            },
+        })
+        .to_string();
+        if request.len() > aios_protocol::MAX_TASK_BYTES {
+            return Err(ErrorCode::ResourceExhausted);
+        }
+        self.call("Prepare", &(request.as_str(),))
+    }
+
+    pub fn plan(&self, id: &str) -> Result<Value, ErrorCode> {
+        self.call("GetPlan", &(id,))
+    }
+
+    pub fn transaction(&self, id: &str) -> Result<Value, ErrorCode> {
+        self.call("GetTransaction", &(id,))
+    }
+
+    pub fn authorize(&self, id: &str, hash: &str) -> Result<Value, ErrorCode> {
+        self.call("Authorize", &(id, hash))
+    }
+
+    pub fn execute(&self, id: &str, hash: &str) -> Result<Value, ErrorCode> {
+        self.call("Execute", &(id, hash))
+    }
+
+    pub fn rollback_plan(&self, id: &str) -> Result<Value, ErrorCode> {
+        self.call("RequestRollback", &(id,))
+    }
+}
 
 fn subject(connection: &Connection, name: &str) -> Result<(String, String, u32), ErrorCode> {
     let bus = Proxy::new(connection, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus")
