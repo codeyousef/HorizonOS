@@ -24,6 +24,8 @@
   headless denials preserve the concrete plan ID instead of claiming consent.
 - Add model-independent `aiosctl automation list` output that truthfully reports
   no persistent definitions while scheduling remains unavailable.
+- Keep disposable desktop QMP and serial endpoints within the portable Unix
+  socket bound when qualification is launched from a nested managed workspace.
 - Ship standalone `ask` and `aiosctl ask --mode read-only` clients with human
   answer/citation output, optional typed JSON, and no shell-generation path.
 - Add human-readable `aiosctl inspect service` output while retaining complete

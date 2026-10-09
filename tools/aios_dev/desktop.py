@@ -66,6 +66,25 @@ def binding(owner, run_id):
     return config, value
 
 
+def fixture_configuration(owner, *, with_model=False):
+    values = {
+        **owner.values,
+        "guest_build_target": model_seed.TARGET if with_model else "aios-desktop-test",
+        "ssh_host": "127.0.0.1",
+        "ssh_port": acceptance.free_port(),
+        "vcpus": 8,
+        "memory_mib": 16384,
+        "disk_gib": 96,
+        # Disposable workspaces can themselves belong to a nested development
+        # workspace. Keep AF_UNIX control endpoints below the portable limit.
+        "qmp_socket": ".local/vm/q",
+        "serial_socket": ".local/vm/s",
+    }
+    for field in ("guest_uuid", "installation_uuid", "guest_role"):
+        values.pop(field, None)
+    return values
+
+
 def prepare(owner, *, with_model=False):
     if owner.values["provider"] != "qemu" or not owner.root.is_relative_to(acceptance.STORAGE_ROOT):
         raise invalid("Desktop runner requires a managed owner under /mnt/Storage")
@@ -83,10 +102,7 @@ def prepare(owner, *, with_model=False):
     provision.run(["git", "-C", str(directory), "init", "-q"])
     provision.run(["git", "-C", str(directory), "add", "."])
     provision.run(["git", "-C", str(directory), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=AIOS Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Public synthetic desktop fixture"])
-    values = {**owner.values, "guest_build_target": model_seed.TARGET if with_model else "aios-desktop-test", "ssh_host": "127.0.0.1", "ssh_port": acceptance.free_port(),
-              "vcpus": 8, "memory_mib": 16384, "disk_gib": 96}
-    for field in ("guest_uuid", "installation_uuid", "guest_role"):
-        values.pop(field, None)
+    values = fixture_configuration(owner, with_model=with_model)
     config = VMConfig.from_data(directory, values, configured=True)
     provision.private_directory(directory, ".local/vm")
     provision.write_json_new(directory / ".local/vm.json", values)

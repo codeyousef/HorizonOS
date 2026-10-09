@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
-from aios_dev import desktop, sync
+from aios_dev import desktop, sync, vm
 from aios_dev.cli import main
 from aios_dev.config import VMConfig, read_json
 from aios_dev.errors import DevctlError, ExitCode
@@ -54,6 +54,24 @@ class DesktopTests(unittest.TestCase):
                 desktop.prepare(owner)
         collect.assert_not_called()
         create.assert_not_called()
+
+    def test_nested_owner_produces_startable_fixture_control_paths(self):
+        suffix_length = 90 - len(str(self.config.root)) - 1
+        self.assertGreater(suffix_length, 0)
+        nested = self.config.root / ("a" * suffix_length)
+        nested.mkdir()
+        self.assertGreaterEqual(len(str(nested / EXAMPLE["qmp_socket"]).encode()), 104)
+        values = desktop.fixture_configuration(self.config)
+        config = VMConfig.from_data(nested, values, configured=True)
+        record = {
+            "plan": {"guest_uuid": "11111111-1111-4111-8111-111111111111"},
+            "seed_iso": nested / ".local/vm/seed.iso",
+            "firmware_code": nested / ".local/vm/firmware.fd",
+            "media": {"path": nested / ".local/vm/installer.iso"},
+        }
+        with patch("aios_dev.vm.shutil.which", return_value="/usr/bin/qemu-system-x86_64"):
+            arguments = vm.qemu_arguments(config, record, "none")
+        self.assertIn(f"unix:{config.paths['qmp_socket']},server=on,wait=off", arguments)
 
     def test_resume_uuid_cannot_escape_workspace(self):
         for value in ("../../root", "", None, "ABCDEF00-1111-4111-8111-111111111111"):
