@@ -16,7 +16,7 @@ use std::{
     fmt,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -198,6 +198,7 @@ struct Runtime {
     candidates: CandidateStore,
     owners: BTreeMap<String, Owner>,
     reads: system::ReadState,
+    pending_authorizations: BTreeMap<String, Arc<AtomicBool>>,
 }
 impl Runtime {
     fn open() -> crate::Result<Self> {
@@ -220,6 +221,7 @@ impl Runtime {
             ledger,
             candidates,
             owners: BTreeMap::new(),
+            pending_authorizations: BTreeMap::new(),
             reads: system::ReadState::default(),
         })
     }
@@ -413,22 +415,14 @@ impl Runtime {
             }
             Operation::Cancel(id) => {
                 self.owner(&id, caller)?;
+                if let Some(cancelled) = self.pending_authorizations.remove(&id) {
+                    cancelled.store(true, Ordering::Release);
+                }
                 let status = self.ledger.request_cancel(&id, caller.identity().uid)?;
                 Ok(envelope(
                     "cancellation",
                     json!({"complete":status.state==State::Cancelled,"status":status,"system_effects_performed":false}),
                 ))
-            }
-            Operation::Authorize(id, hash) => {
-                self.approval_reference(caller, &id, &hash)?;
-                let status = self.authorizer.authorize_interactive(
-                    &self.ledger, caller, &id, &hash)?;
-                Ok(envelope("authorization", json!({
-                    "plan_id": id,
-                    "plan_sha256": hash,
-                    "status": status,
-                    "system_effects_performed": false,
-                })))
             }
             Operation::Execute(id, hash) => {
                 self.approval_reference(caller, &id, &hash)?;
@@ -459,7 +453,6 @@ enum Operation {
     GetPlan(String),
     GetTransaction(String),
     Cancel(String),
-    Authorize(String, String),
     Execute(String, String),
     Rollback(String),
 }
@@ -507,6 +500,59 @@ impl Executor {
         })
         .await
     }
+    async fn authorize_call(&self, header: Header<'_>, id: String, hash: String) -> Result<String> {
+        let _admission = self.admit()?;
+        if header.message_type() != zbus::message::Type::MethodCall {
+            return Err(ErrorCode::PermissionDenied.into());
+        }
+        let sender = header.sender().ok_or(ErrorCode::PermissionDenied)?
+            .as_str().to_owned();
+        let runtime = self.runtime.clone();
+        blocking::unblock(move || {
+            let (caller, challenge, cancelled) = {
+                let mut runtime = runtime.lock().map_err(|_| ErrorCode::ResourceExhausted)?;
+                let caller = runtime.authorizer.bus().authenticate_sender(&sender)?;
+                runtime.approval_reference(&caller, &id, &hash)?;
+                if runtime.pending_authorizations.contains_key(&id) {
+                    return Err(ErrorCode::Conflict.into());
+                }
+                let challenge = runtime.authorizer.challenge(
+                    &runtime.ledger, &caller, &id, &hash)?;
+                let cancelled = Arc::new(AtomicBool::new(false));
+                runtime.pending_authorizations.insert(id.clone(), cancelled.clone());
+                (caller, challenge, cancelled)
+            };
+            let authenticated = challenge.authenticate(&caller, &cancelled);
+            let mut runtime = runtime.lock().map_err(|_| ErrorCode::ResourceExhausted)?;
+            let current = runtime.pending_authorizations.remove(&id);
+            if current.as_ref().is_none_or(|flag| !Arc::ptr_eq(flag, &cancelled))
+                || cancelled.load(Ordering::Acquire) {
+                return Err(ErrorCode::AuthRequired.into());
+            }
+            let authenticated = authenticated?;
+            let current = runtime.authorizer.bus().authenticate_sender(&sender)?;
+            if current.identity() != caller.identity() {
+                return Err(ErrorCode::TargetChanged.into());
+            }
+            runtime.owner(&id, &current)?;
+            let Runtime { authorizer, ledger, .. } = &mut *runtime;
+            let status = authorizer.finish(
+                ledger, &current, &id, &hash, authenticated)?;
+            runtime.authorizer.bus().recheck(&current)?;
+            let result = envelope("authorization", json!({
+                "plan_id": id,
+                "plan_sha256": hash,
+                "status": status,
+                "system_effects_performed": false,
+            }));
+            let encoded = serde_json::to_string(&result)
+                .map_err(|_| ErrorCode::InvalidArgument)?;
+            if encoded.len() > MAX_FRAME_BYTES {
+                return Err(ErrorCode::ResourceExhausted.into());
+            }
+            Ok(encoded)
+        }).await
+    }
 }
 #[zbus::interface(name = "org.aios.Executor1")]
 impl Executor {
@@ -529,11 +575,7 @@ impl Executor {
         plan_hash: &str,
         #[zbus(header)] header: Header<'_>,
     ) -> Result<String> {
-        self.call(
-            header,
-            Operation::Authorize(plan_id.into(), plan_hash.into()),
-        )
-        .await
+        self.authorize_call(header, plan_id.into(), plan_hash.into()).await
     }
     async fn execute(
         &self,

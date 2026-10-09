@@ -74,6 +74,12 @@ status value or log entry. A successful response only constructs the internal
 `TrustedConfirmation`; fresh native polkit administrator authentication for the
 original system-bus subject remains mandatory. AIOS UI automation has no TTY or
 polkit operation and cannot observe or activate this surface.
+The terminal and polkit waits run without the broker runtime lock. Public
+`Cancel` atomically revokes the pending authorization; terminal polling observes
+that revocation and the broker asks polkit to withdraw an active native
+challenge. The completion path reauthenticates the exact D-Bus sender and caller
+and refuses a receipt whenever cancellation won the race.
+
 
 ## Private transport
 

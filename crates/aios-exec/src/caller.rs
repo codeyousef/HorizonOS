@@ -76,6 +76,7 @@ impl VerifiedCaller {
 
 /// Fixed native endpoint, created only after full installed target verification.
 /// The zbus method adapter passes its injected header, never request data.
+#[derive(Clone)]
 pub struct SystemBus {
     connection: Connection,
     target: VerifiedTarget,

@@ -7,7 +7,8 @@ use crate::{
     Error, Result,
     caller::{ServiceIdentity, SystemBus, VerifiedCaller},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::{Arc, atomic::{AtomicBool, Ordering}},
+    thread, time::Duration};
 use zbus::{blocking::Proxy, zvariant::Value};
 
 const PATH: &str = "/org/freedesktop/PolicyKit1/Authority";
@@ -73,6 +74,7 @@ pub(crate) fn authenticate(
     caller: &VerifiedCaller,
     policy: &InstalledPolicy,
     binding: &Binding,
+    cancelled: &Arc<AtomicBool>,
 ) -> Result<NativeAuthentication> {
     bus.recheck(caller)?;
     let owner = bus.polkit_owner(&policy.authority)?;
@@ -107,6 +109,25 @@ pub(crate) fn authenticate(
         return Err(Error::AuthRequired);
     }
     let cancellation = uuid::Uuid::new_v4().to_string();
+    let completed = Arc::new(AtomicBool::new(false));
+    let watcher_completed = completed.clone();
+    let watcher_cancelled = cancelled.clone();
+    let watcher_connection = connection.clone();
+    let watcher_owner = owner.sender.clone();
+    let watcher_cancellation = cancellation.clone();
+    let watcher = thread::spawn(move || {
+        while !watcher_completed.load(Ordering::Acquire) {
+            if watcher_cancelled.load(Ordering::Acquire) {
+                if let Ok(proxy) = Proxy::new(
+                    &watcher_connection, watcher_owner.as_str(), PATH, INTERFACE) {
+                    let _: zbus::Result<()> = proxy.call(
+                        "CancelCheckAuthorization", &(watcher_cancellation.as_str(),));
+                }
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    });
     let response: std::result::Result<AuthorizationResult, _> = proxy.call(
         "CheckAuthorization",
         &(
@@ -117,6 +138,8 @@ pub(crate) fn authenticate(
             cancellation.as_str(),
         ),
     );
+    completed.store(true, Ordering::Release);
+    watcher.join().map_err(|_| Error::AuthRequired)?;
     let response = match response {
         Ok(response) => response,
         Err(_) => {
@@ -126,6 +149,7 @@ pub(crate) fn authenticate(
             return Err(Error::AuthRequired);
         }
     };
+    if cancelled.load(Ordering::Acquire) { return Err(Error::AuthRequired); }
     if !fresh_result(&response) {
         return Err(Error::AuthRequired);
     }

@@ -11,7 +11,7 @@ use crate::{
 };
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 
 /// Minting requires the broker-owned foreground TTY confirmation adapter and
 /// a separate fresh native polkit challenge. Neither model output nor a
@@ -39,6 +39,35 @@ impl VerifiedSystemAuthorization {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AuthorizationStatus {
     SystemAuthorized,
+}
+pub(crate) struct InteractiveChallenge {
+    bus: SystemBus,
+    binding: Binding,
+    policy: policy::InstalledPolicy,
+    presentation: Value,
+}
+pub(crate) struct AuthenticatedChallenge {
+    binding: Binding,
+    policy_revision: String,
+    confirmation: TrustedConfirmation,
+    native: polkit::NativeAuthentication,
+}
+impl InteractiveChallenge {
+    pub(crate) fn authenticate(self, caller: &VerifiedCaller,
+        cancelled: &Arc<AtomicBool>) -> Result<AuthenticatedChallenge> {
+        let confirmation = tty::confirm(
+            &self.bus, caller, &self.binding, &self.presentation, cancelled)?;
+        if cancelled.load(Ordering::Acquire) { return Err(Error::AuthRequired); }
+        let native = polkit::authenticate(
+            &self.bus, caller, &self.policy, &self.binding, cancelled)?;
+        if cancelled.load(Ordering::Acquire) { return Err(Error::AuthRequired); }
+        Ok(AuthenticatedChallenge {
+            binding: self.binding,
+            policy_revision: self.policy.revision,
+            confirmation,
+            native,
+        })
+    }
 }
 #[derive(Clone, PartialEq, Eq)]
 struct Binding {
@@ -279,40 +308,35 @@ impl Authorizer {
         });
         Ok((binding, policy, presentation))
     }
-    pub fn authorize(
+    pub(crate) fn challenge(
+        &self,
+        ledger: &Ledger,
+        caller: &VerifiedCaller,
+        id: &str,
+        hash: &str,
+    ) -> Result<InteractiveChallenge> {
+        let (binding, policy, presentation) = self.binding(ledger, caller, id, hash)?;
+        if self.volatile.receipts.contains_key(id) { return Err(Error::Conflict); }
+        Ok(InteractiveChallenge { bus: self.bus.clone(), binding, policy, presentation })
+    }
+    pub(crate) fn finish(
         &mut self,
         ledger: &Ledger,
         caller: &VerifiedCaller,
         id: &str,
         hash: &str,
-        confirmation: TrustedConfirmation,
+        authenticated: AuthenticatedChallenge,
     ) -> Result<AuthorizationStatus> {
-        let (binding, policy, _) = self.binding(ledger, caller, id, hash)?;
-        if confirmation.binding_sha256 != binding.confirmation_digest()? {
-            return Err(Error::Integrity);
-        }
-        if self.volatile.receipts.contains_key(id) {
-            return Err(Error::Conflict);
-        }
-        let native = polkit::authenticate(&self.bus, caller, &policy, &binding)?;
         let (current, current_policy, _) = self.binding(ledger, caller, id, hash)?;
-        if current != binding || current_policy.revision != policy.revision {
+        if current != authenticated.binding
+            || current_policy.revision != authenticated.policy_revision
+            || authenticated.confirmation.binding_sha256 != current.confirmation_digest()? {
             return Err(Error::TargetChanged);
         }
-        self.volatile
-            .issue(binding, confirmation, native, boottime_ms()?)?;
+        if self.volatile.receipts.contains_key(id) { return Err(Error::Conflict); }
+        self.volatile.issue(current, authenticated.confirmation,
+            authenticated.native, boottime_ms()?)?;
         Ok(AuthorizationStatus::SystemAuthorized)
-    }
-    pub fn authorize_interactive(
-        &mut self,
-        ledger: &Ledger,
-        caller: &VerifiedCaller,
-        id: &str,
-        hash: &str,
-    ) -> Result<AuthorizationStatus> {
-        let (binding, _, presentation) = self.binding(ledger, caller, id, hash)?;
-        let confirmation = tty::confirm(&self.bus, caller, &binding, &presentation)?;
-        self.authorize(ledger, caller, id, hash, confirmation)
     }
     pub fn consume(
         &mut self,

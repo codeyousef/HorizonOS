@@ -124,6 +124,12 @@ polkit administrator challenge must then succeed for the caller's actual
 system-bus-name subject before a volatile receipt exists. Headless or
 preliminary plans continue to return `AUTH_REQUIRED`. Fixture confirmations,
 terminal automation and polkit fixtures are not evidence of human review.
+`Authorize` never holds the broker runtime lock while waiting for either native
+gate. `Cancel` atomically revokes the pending challenge, wakes a terminal wait,
+and sends polkit `CancelCheckAuthorization` with the broker-generated internal
+cancellation ID. Completion reauthenticates the exact sender and caller before
+issuing a receipt; a cancellation race always yields `AUTH_REQUIRED`.
+
 
 Receipts and their random nonces exist only in broker memory. They bind caller
 process/session/bus/boot, exact final hash/closure/target, policy, polkit owner and

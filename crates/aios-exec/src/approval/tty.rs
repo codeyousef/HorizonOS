@@ -11,6 +11,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{IsTerminal, Read, Write},
     os::{fd::AsRawFd, unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt}},
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
 };
 
 const MAX_PRESENTATION_BYTES: usize = 64 * 1024;
@@ -65,19 +66,21 @@ fn open_terminal(caller: &VerifiedCaller) -> Result<File> {
     Ok(terminal)
 }
 
-fn read_response(terminal: &mut File, deadline_ms: u64) -> Result<Vec<u8>> {
+fn read_response(terminal: &mut File, deadline_ms: u64, cancelled: &AtomicBool) -> Result<Vec<u8>> {
     let now = boottime_ms()?;
     if now >= deadline_ms { return Err(Error::Expired); }
     let interaction_deadline = now.checked_add(MAX_INTERACTION_MS)
         .ok_or(Error::Invalid)?.min(deadline_ms);
     let mut pollfd = libc::pollfd { fd: terminal.as_raw_fd(), events: libc::POLLIN, revents: 0 };
     loop {
+        if cancelled.load(Ordering::Acquire) { return Err(Error::AuthRequired); }
         let now = boottime_ms()?;
         if now >= deadline_ms { return Err(Error::Expired); }
         if now >= interaction_deadline { return Err(Error::AuthRequired); }
-        let timeout = i32::try_from(interaction_deadline - now).map_err(|_| Error::Invalid)?;
+        let timeout = i32::try_from((interaction_deadline - now).min(100))
+            .map_err(|_| Error::Invalid)?;
         let result = unsafe { libc::poll(&mut pollfd, 1, timeout) };
-        if result == 0 { return Err(Error::AuthRequired); }
+        if result == 0 { continue; }
         if result < 0 {
             if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted { continue; }
             return Err(Error::AuthRequired);
@@ -96,7 +99,7 @@ fn read_response(terminal: &mut File, deadline_ms: u64) -> Result<Vec<u8>> {
 }
 
 pub(super) fn confirm(bus: &SystemBus, caller: &VerifiedCaller, binding: &Binding,
-    presentation: &Value) -> Result<TrustedConfirmation> {
+    presentation: &Value, cancelled: &Arc<AtomicBool>) -> Result<TrustedConfirmation> {
     bus.recheck(caller)?;
     binding.validate_time(boottime_ms()?)?;
     let canonical = canonical(presentation)?;
@@ -109,9 +112,10 @@ pub(super) fn confirm(bus: &SystemBus, caller: &VerifiedCaller, binding: &Bindin
     terminal.write_all(b"\nRecovery is limited exactly as shown above. Polkit administrator authentication follows.\n")?;
     terminal.write_all(format!("Type `{phrase}` to continue, or press Enter to cancel:\n> ").as_bytes())?;
     terminal.flush()?;
-    let mut response = read_response(&mut terminal, binding.expires_at)?;
+    let mut response = read_response(&mut terminal, binding.expires_at, cancelled)?;
     let allowed = accepted(&response, binding);
     response.fill(0);
+    if cancelled.load(Ordering::Acquire) { return Err(Error::AuthRequired); }
     bus.recheck(caller)?;
     binding.validate_time(boottime_ms()?)?;
     if !allowed { return Err(Error::AuthRequired); }

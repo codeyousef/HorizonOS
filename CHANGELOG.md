@@ -25,6 +25,8 @@
 - Add broker-owned final-plan TTY confirmation with foreground process/session
   checks, control-safe immutable impact/recovery rendering, an exact plan-bound
   phrase, and mandatory separate fresh native polkit authentication.
+- Keep broker cancellation responsive during final-plan TTY and polkit waits;
+  cancellation withdraws the native challenge and cannot race into a receipt.
 - Add model-independent `aiosctl automation list` output that truthfully reports
   no persistent definitions while scheduling remains unavailable.
 - Keep disposable desktop QMP and serial endpoints within the portable Unix
