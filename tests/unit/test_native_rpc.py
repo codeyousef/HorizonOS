@@ -36,6 +36,34 @@ class NativeRpcTests(unittest.TestCase):
         self.assertEqual(error.exception.exit_code,ExitCode.INVALID_INPUT)
         load.assert_not_called(); run.assert_not_called()
 
+    def test_installed_cli_requires_headless_plan_and_concrete_auth_denials(self):
+        args = cli.parser().parse_args(["test","--suite","integration","--provider","installed-cli","--detach"])
+        with patch.object(cli,"load_config") as load, patch.object(native_rpc,"run_cli") as run:
+            with self.assertRaises(DevctlError):
+                cli.dispatch(args)
+        load.assert_not_called();run.assert_not_called()
+        proof={"evidence_kind":"real-installed-headless-cli","uid":1000,"boot_id":IDENTITY["boot_id"],
+            "installed_executable":"/nix/store/fixture-aios-core/bin/aiosctl","headless":True,
+            "plan_id":"11111111-1111-4111-8111-111111111111","plan_sha256":"a"*64,
+            "transaction_state":"PLANNED","denials":{"authorize":"AUTH_REQUIRED","apply":"AUTH_REQUIRED"},
+            "automation_list_verified":True,"system_effects_performed":False}
+        cases=((proof,ExitCode.SUCCESS),
+            ({**proof,"headless":False},ExitCode.VERIFICATION_FAILURE),
+            ({**proof,"denials":{"authorize":"AUTH_REQUIRED"}},ExitCode.VERIFICATION_FAILURE),
+            ({**proof,"system_effects_performed":True},ExitCode.VERIFICATION_FAILURE))
+        for value,expected in cases:
+            output=b"AIOS_INSTALLED_CLI="+json.dumps(value).encode()+b"\n"
+            with patch.object(native_rpc.acceptance,"STORAGE_ROOT",self.root), \
+                 patch.object(native_rpc.guest,"enrolled_identity",return_value=({"host_key_fingerprint":"fixture-pin"},IDENTITY)), \
+                 patch.object(native_rpc.sync,"synchronize",return_value=(0,self.publication)), \
+                 patch.object(native_rpc.guest,"ssh_arguments",return_value=["ssh","pinned-fixture","identity"]), \
+                 patch.object(native_rpc.sync,"exchange",return_value=(0,output,b"")) as exchange:
+                code,result=native_rpc.run_cli(self.config)
+            self.assertEqual(code,expected)
+            self.assertTrue(exchange.call_args.args[0][-1].endswith("/tools/guest/installed_cli_smoke.py"))
+            self.assertEqual(json.loads(Path(result["artifact_path"]).read_text())["evidence_kind"],
+                "real-installed-headless-cli-live-SSH-caller")
+
     def test_journal_detach_cannot_lose_its_originating_login(self):
         args = cli.parser().parse_args(["test","--suite","integration","--provider","journal-inspection","--detach"])
         with patch.object(cli,"load_config") as load, patch.object(native_rpc,"run_journal") as run:

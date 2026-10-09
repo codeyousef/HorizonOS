@@ -12,6 +12,9 @@ from .errors import ExitCode
 def run(config):
     return _run(config, journal=False)
 
+def run_cli(config):
+    return _run(config, journal=False, cli=True)
+
 
 def run_journal(config):
     return _run(config, journal=True)
@@ -29,7 +32,7 @@ def run_bus_process_task(config):
     return _run(config, journal=False, process_task=True, bus_task=True)
 
 
-def _run(config, *, journal, process=False, process_task=False, bus_task=False):
+def _run(config, *, journal, process=False, process_task=False, bus_task=False, cli=False):
     if not config.root.is_relative_to(acceptance.STORAGE_ROOT):
         raise invalid("Installed native qualification requires storage under /mnt/Storage")
     trust, identity = guest.enrolled_identity(config)
@@ -41,7 +44,7 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False):
     expected = Path(config.values["guest_source_root"]) / publication["release_digest"]
     if source != expected or len(publication["release_digest"]) != 64:
         raise invalid("Installed native probe requires the verified immutable source")
-    script = source / ("tools/guest/installed_bus_process_task_smoke.py" if bus_task else "tools/guest/installed_process_task_smoke.py" if process_task else "tools/guest/installed_process_smoke.py" if process else "tools/guest/installed_journal_smoke.py" if journal else "tools/guest/installed_executor_smoke.py")
+    script = source / ("tools/guest/installed_cli_smoke.py" if cli else "tools/guest/installed_bus_process_task_smoke.py" if bus_task else "tools/guest/installed_process_task_smoke.py" if process_task else "tools/guest/installed_process_smoke.py" if process else "tools/guest/installed_journal_smoke.py" if journal else "tools/guest/installed_executor_smoke.py")
     command = "/run/current-system/sw/bin/python3 " + shlex.quote(str(script))
     started = datetime.now(timezone.utc).isoformat()
     # This fixed foreground operation preserves the SSH PAM/logind session.
@@ -52,14 +55,30 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False):
         raise provision.failure(ExitCode.TARGET_MISMATCH, "EXECUTOR_TARGET_CHANGED", "Target changed during installed Executor probe")
     directory = provision.private_directory(config.root, ".local/reports/" + str(uuid.uuid4()))
     log = acceptance.sanitize(output.decode(errors="replace") + errors.decode(errors="replace"))
-    prefix = b"AIOS_INSTALLED_BUS_PROCESS_TASK=" if bus_task else b"AIOS_INSTALLED_PROCESS_TASK=" if process_task else b"AIOS_INSTALLED_PROCESS=" if process else b"AIOS_INSTALLED_JOURNAL=" if journal else b"AIOS_INSTALLED_EXECUTOR "
+    prefix = b"AIOS_INSTALLED_CLI=" if cli else b"AIOS_INSTALLED_BUS_PROCESS_TASK=" if bus_task else b"AIOS_INSTALLED_PROCESS_TASK=" if process_task else b"AIOS_INSTALLED_PROCESS=" if process else b"AIOS_INSTALLED_JOURNAL=" if journal else b"AIOS_INSTALLED_EXECUTOR "
     records = [line[len(prefix):] for line in output.splitlines() if line.startswith(prefix)]
     observation = None
     journal_sandbox = None
     try:
         if len(records) == 1:
             observation = sync.contract.decode(records[0])
-        if process_task:
+        if cli:
+            valid = (isinstance(observation,dict)
+                and observation.get("evidence_kind")=="real-installed-headless-cli"
+                and observation.get("uid")==1000 and observation.get("boot_id")==identity["boot_id"]
+                and observation.get("headless") is True
+                and isinstance(observation.get("installed_executable"),str)
+                and observation["installed_executable"].startswith("/nix/store/")
+                and observation["installed_executable"].endswith("/bin/aiosctl")
+                and isinstance(observation.get("plan_id"),str)
+                and str(uuid.UUID(observation["plan_id"]))==observation["plan_id"]
+                and isinstance(observation.get("plan_sha256"),str) and len(observation["plan_sha256"])==64
+                and all(c in "0123456789abcdef" for c in observation["plan_sha256"])
+                and observation.get("transaction_state")=="PLANNED"
+                and observation.get("denials")=={"authorize":"AUTH_REQUIRED","apply":"AUTH_REQUIRED"}
+                and observation.get("automation_list_verified") is True
+                and observation.get("system_effects_performed") is False)
+        elif process_task:
             valid = (isinstance(observation, dict) and observation.get("evidence_kind") == ("real-installed-bus-process-task" if bus_task else "real-installed-process-task")
                 and observation.get("uid") == 1000 and type(observation.get("uid")) is int
                 and observation.get("boot_id") == identity["boot_id"]
@@ -170,13 +189,14 @@ def _run(config, *, journal, process=False, process_task=False, bus_task=False):
     except (ValueError, UnicodeError, TypeError, KeyError, AttributeError):
         valid = False
     code = ExitCode.SUCCESS if status == 0 and valid else ExitCode.VERIFICATION_FAILURE
-    report = {"schema_version":1,"evidence_kind":"real-installed-bus-process-task-live-SSH-caller" if bus_task else "real-installed-process-task-live-SSH-caller" if process_task else "real-installed-process-live-SSH-caller" if process else "real-installed-journal-live-SSH-caller" if journal else "real-installed-executor-live-SSH-caller",
+    report = {"schema_version":1,"evidence_kind":"real-installed-headless-cli-live-SSH-caller" if cli else "real-installed-bus-process-task-live-SSH-caller" if bus_task else "real-installed-process-task-live-SSH-caller" if process_task else "real-installed-process-live-SSH-caller" if process else "real-installed-journal-live-SSH-caller" if journal else "real-installed-executor-live-SSH-caller",
         "source":provenance,"target_identity":identity,"host_key_fingerprint":trust["host_key_fingerprint"],
         "subject":config.values["ssh_user"],"argv":["/run/current-system/sw/bin/python3",str(script)],
         "started_at":started,"finished_at":datetime.now(timezone.utc).isoformat(),"upstream_exit":status,
         "exit_status":int(code),"caller_session_held_open":True,"probe_observation_valid":valid,"probe":observation,
         "journal_sandbox":journal_sandbox,
-        "limitations":(["Actual installed original persistent bus task and CPU model; native identity/citation and active cancellation/forget.",
+        "limitations":(["Actual installed deterministic CLI and session/Executor APIs in one live headless SSH logind session.",
+            "Does not qualify a graphical polkit approval or a second user."] if cli else ["Actual installed original persistent bus task and CPU model; native identity/citation and active cancellation/forget.",
             "Does not qualify in-flight expiry/disconnection, cross-UID callers, signals or PID reuse."] if bus_task else ["Actual installed original Unix task, local CPU model, independent native process identity and cited observation.",
             "Does not qualify persistent bus tasks, in-flight expiry/revocation/disconnection, cross-UID callers, signals or PID reuse."] if process_task else ["Actual installed user broker, controlled naturally exiting child, independent native proc/pidfd identity.",
             "Does not qualify graceful termination, original model task grants, cross-UID callers or actual PID reuse."] if process else ["Controlled public messages; actual installed native journal, root service and authenticated user.",
