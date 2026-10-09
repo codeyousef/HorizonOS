@@ -3,8 +3,10 @@ use serde_json::{Value, json};
 use zbus::blocking::{Connection, Proxy};
 use std::process::Command;
 
+#[track_caller]
 fn value(proxy: &Proxy<'_>, method: &str, arguments: impl serde::Serialize + zbus::zvariant::DynamicType) -> Value {
-    let response: String = proxy.call(method, &arguments).unwrap();
+    let response: String = proxy.call(method, &arguments)
+        .unwrap_or_else(|error| panic!("{method} failed: {error:?}"));
     serde_json::from_str(&response).unwrap()
 }
 fn denied<T: std::fmt::Debug>(result: zbus::Result<T>, code: &str) {
