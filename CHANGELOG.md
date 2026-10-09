@@ -27,6 +27,9 @@
   phrase, and mandatory separate fresh native polkit authentication.
 - Add a production-excluded disposable administrator with a fixed test-only
   credential for real native polkit challenge qualification.
+- Disable polkit 127's broken socket-activated PAM helper so native
+  authorization uses the standard setuid helper until the pinned upstream is
+  fixed.
 - Keep broker cancellation responsive during final-plan TTY and polkit waits;
   cancellation withdraws the native challenge and cannot race into a receipt.
 - Connect preliminary foreground-TTY resource confirmation to the installed
