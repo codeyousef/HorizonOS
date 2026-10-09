@@ -8,7 +8,7 @@ use super::{Binding, TrustedConfirmation, boottime_ms};
 use crate::{Error, Result, caller::{SystemBus, VerifiedCaller}, canonical};
 use serde_json::Value;
 use std::{
-    fs::{File, OpenOptions},
+    fs::{File, OpenOptions, read_to_string},
     io::{IsTerminal, Read, Write},
     os::{fd::AsRawFd, unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt}},
     sync::{Arc, atomic::{AtomicBool, Ordering}},
@@ -38,30 +38,58 @@ fn accepted(response: &[u8], phrase: &str) -> bool {
     let Ok(text) = std::str::from_utf8(response) else { return false; };
     text.trim_end_matches(['\r', '\n']) == phrase
 }
+fn denied(stage: &'static str) -> Error {
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "schema_version": 1,
+            "error": "TRUSTED_TERMINAL_UNAVAILABLE",
+            "stage": stage,
+        })
+    );
+    Error::AuthRequired
+}
+
+
+fn parse_foreground_identity(stat: &str) -> Option<(i32, i32)> {
+    let (_, fields) = stat.rsplit_once(')')?;
+    let mut fields = fields.split_whitespace();
+    let process_group = fields.nth(2)?.parse::<i32>().ok()?;
+    let session = fields.next()?.parse::<i32>().ok()?;
+    let tty = fields.next()?.parse::<i64>().ok()?;
+    let foreground = fields.next()?.parse::<i32>().ok()?;
+    (process_group > 1 && session > 1 && tty > 0 && foreground > 1)
+        .then_some((process_group, foreground))
+}
+
+fn foreground_identity(pid: u32) -> Result<(i32, i32)> {
+    let stat = read_to_string(format!("/proc/{pid}/stat"))
+        .map_err(|_| denied("terminal-query"))?;
+    parse_foreground_identity(&stat).ok_or_else(|| denied("terminal-query"))
+}
 
 fn open_terminal(caller: &VerifiedCaller) -> Result<File> {
     let identity = caller.identity();
-    let session = identity.session.as_ref().ok_or(Error::AuthRequired)?;
+    let session = identity.session.as_ref().ok_or_else(|| denied("missing-session"))?;
     if identity.uid < 1000 || session.kind != "tty" || session.class != "user"
         || session.state != "active" || !session.active {
-        return Err(Error::AuthRequired);
+        return Err(denied("ineligible-session"));
     }
     let terminal = OpenOptions::new().read(true).write(true)
         .custom_flags(libc::O_CLOEXEC | libc::O_NOCTTY | libc::O_NONBLOCK)
-        .open(format!("/proc/{}/fd/0", identity.pid)).map_err(|_| Error::AuthRequired)?;
-    let metadata = terminal.metadata().map_err(|_| Error::AuthRequired)?;
+        .open(format!("/proc/{}/fd/0", identity.pid))
+        .map_err(|_| denied("terminal-open"))?;
+    let metadata = terminal.metadata().map_err(|_| denied("terminal-metadata"))?;
     if !terminal.is_terminal() || !metadata.file_type().is_char_device()
         || metadata.uid() != identity.uid {
-        return Err(Error::AuthRequired);
+        return Err(denied("terminal-identity"));
     }
-    let fd = terminal.as_raw_fd();
-    let foreground = unsafe { libc::tcgetpgrp(fd) };
-    let process_group = unsafe { libc::getpgid(identity.pid as i32) };
-    let terminal_session = unsafe { libc::tcgetsid(fd) };
-    let process_session = unsafe { libc::getsid(identity.pid as i32) };
-    if foreground <= 1 || process_group != foreground || terminal_session <= 1
-        || process_session != terminal_session {
-        return Err(Error::AuthRequired);
+    // Read the kernel's process snapshot instead of issuing TTY ioctls from
+    // the broker's unrelated session. The terminal foreground group in
+    // /proc is the same kernel value, bound atomically to the caller PID.
+    let (process_group, foreground) = foreground_identity(identity.pid)?;
+    if process_group != foreground {
+        return Err(denied("terminal-foreground"));
     }
     Ok(terminal)
 }
@@ -173,6 +201,17 @@ mod tests {
     #[test]
     fn rendering_escapes_terminal_controls_and_non_ascii_bytes() {
         assert_eq!(display(b"safe\n\x1b[31m\xe2\x80\xae"), b"safe\n\\x1b[31m\\xe2\\x80\\xae");
+    }
+
+    #[test]
+    fn foreground_identity_uses_kernel_process_snapshot() {
+        let stat = "42 (command with ) spaces) R 1 700 700 34816 700 0";
+        assert_eq!(parse_foreground_identity(stat), Some((700, 700)));
+        assert_eq!(
+            parse_foreground_identity("42 (command) R 1 700 700 34816 701 0"),
+            Some((700, 701))
+        );
+        assert_eq!(parse_foreground_identity("42 (command) R 1 700 700 0 -1 0"), None);
     }
 
 }
