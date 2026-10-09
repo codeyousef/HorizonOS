@@ -422,7 +422,7 @@ impl Catalog {
             risk: if current.digest == next.digest { Risk::R0 } else { Risk::R2 },
             user_data_deleted: false, database_data_may_remain: pg_changed,
             retained_dependency_paths: None, candidate_closure: None, download_bytes: None, build_bytes: None,
-            reboot_required: None, recovery: Recovery::RestoreExactPriorConfigurationDataMayRemain,
+            reboot_required: None, recovery: Recovery::ReversibleConfigurationDataMayRemain,
             final_authorization_ready: false, notes: vec!["User profiles and development shells are unmanaged; removing a declaration preserves user data.".into(),
                 "Closure dependencies, reboot effects and build/download costs require build evidence; unknown quantities are not zero.".into()] })
     }
@@ -588,10 +588,15 @@ pub enum Risk {
     R0,
     R2,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Recovery {
-    RestoreExactPriorConfigurationDataMayRemain,
+    ReversibleConfigurationDataMayRemain,
+    ReversibleUserSettingTargetBound,
+    CompensatableFileOperationReceiptBound,
+    DataMigrationBackupAndTestedRestoreRequired,
+    ExternallyIrreversibleFinalConfirmationRequired,
+    UnsupportedRecoveryBlocked,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

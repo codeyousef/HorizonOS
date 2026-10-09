@@ -1,6 +1,6 @@
 //! Durable preparation/plan register. Activation belongs to the independent guard.
 use crate::{Error, Result, canonical, digest, sha256, store, uuid};
-use aios_state::{Intent, Preview};
+use aios_state::{Intent, Preview, Recovery};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -162,6 +162,7 @@ impl PreparedPlan {
             || self.preview.download_bytes.is_some()
             || self.preview.reboot_required.is_some()
             || self.preview.retained_dependency_paths.is_some()
+            || self.preview.recovery != Recovery::ReversibleConfigurationDataMayRemain
             || self
                 .preparation_expires_monotonic_ms
                 .checked_sub(self.prepared_at_monotonic_ms)
@@ -275,6 +276,15 @@ impl VerifiedWorkerStop {
             candidate_sha256: plan.candidate_sha256.clone(),
         }
     }
+    pub(crate) fn from_failed_worker(
+        plan: &PreparedPlan,
+        _worker: &crate::build_worker::VerifiedWorkerFailure,
+    ) -> Self {
+        Self {
+            plan_id: plan.plan_id.clone(),
+            candidate_sha256: plan.candidate_sha256.clone(),
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -323,6 +333,10 @@ pub enum State {
     Building,
     Built,
     AwaitingApproval,
+    Authorized,
+    Committed,
+    RolledBack,
+    RecoveryRequired,
     Cancelled,
     Rejected,
     Failed,
@@ -336,13 +350,20 @@ impl State {
             Self::Building => "BUILDING",
             Self::Built => "BUILT",
             Self::AwaitingApproval => "AWAITING_APPROVAL",
+            Self::Authorized => "AUTHORIZED",
+            Self::Committed => "COMMITTED",
+            Self::RolledBack => "ROLLED_BACK",
+            Self::RecoveryRequired => "RECOVERY_REQUIRED",
             Self::Cancelled => "CANCELLED",
             Self::Rejected => "REJECTED",
             Self::Failed => "FAILED",
         }
     }
     fn terminal(self) -> bool {
-        matches!(self, Self::Cancelled | Self::Rejected | Self::Failed)
+        matches!(
+            self,
+            Self::Committed | Self::RolledBack | Self::Cancelled | Self::Rejected | Self::Failed
+        )
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -443,6 +464,14 @@ impl Ledger {
         ledger.sync()?;
         Ok(ledger)
     }
+    /// Opens the same pinned root ledger for the independently packaged guard.
+    /// The caller receives no path selector and must still use its own schema.
+    pub fn guard_database() -> Result<Connection> {
+        let ledger = Self::open()?;
+        ledger.verify_target()?;
+        ledger.sync()?;
+        Ok(ledger.connection)
+    }
     fn initialize(connection: Connection) -> Result<Self> {
         connection.busy_timeout(Duration::from_millis(100))?;
         connection.execute_batch(
@@ -463,16 +492,16 @@ impl Ledger {
                 return Err(Error::Ledger);
             }
             connection.execute_batch("BEGIN IMMEDIATE;
-                CREATE TABLE broker_schema(version INTEGER NOT NULL); INSERT INTO broker_schema VALUES(1);
+                CREATE TABLE broker_schema(version INTEGER NOT NULL); INSERT INTO broker_schema VALUES(2);
                 CREATE TABLE plans(id TEXT PRIMARY KEY,subject INTEGER NOT NULL,prepared BLOB NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL,cancel INTEGER NOT NULL DEFAULT 0,resource BLOB,result BLOB,final BLOB,final_digest TEXT);
-                CREATE UNIQUE INDEX one_active ON plans((1)) WHERE state NOT IN ('CANCELLED','REJECTED','FAILED');
+                CREATE UNIQUE INDEX one_active ON plans((1)) WHERE state NOT IN ('COMMITTED','ROLLED_BACK','CANCELLED','REJECTED','FAILED');
                 CREATE TABLE events(id TEXT NOT NULL,revision INTEGER NOT NULL,state TEXT NOT NULL,kind TEXT NOT NULL,PRIMARY KEY(id,revision)); COMMIT;")?;
         } else {
             let versions: Vec<i64> = connection
                 .prepare("SELECT version FROM broker_schema")?
                 .query_map([], |r| r.get(0))?
                 .collect::<std::result::Result<_, _>>()?;
-            if versions != [1] {
+            if !matches!(versions.as_slice(), [1] | [2]) {
                 return Err(Error::Ledger);
             }
             for name in ["plans", "events", "one_active"] {
@@ -484,6 +513,15 @@ impl Ledger {
                 if !present {
                     return Err(Error::Ledger);
                 }
+            }
+            if versions == [1] {
+                connection.execute_batch(
+                    "BEGIN IMMEDIATE;
+                     DROP INDEX one_active;
+                     CREATE UNIQUE INDEX one_active ON plans((1)) WHERE state NOT IN ('COMMITTED','ROLLED_BACK','CANCELLED','REJECTED','FAILED');
+                     UPDATE broker_schema SET version=2;
+                     COMMIT;",
+                )?;
             }
         }
         Ok(Self {
@@ -580,7 +618,11 @@ impl Ledger {
             tx.commit()?;
             return self.status(&plan.plan_id, plan.requester.uid);
         }
-        let active:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM plans WHERE state NOT IN ('CANCELLED','REJECTED','FAILED'))",[],|r|r.get(0))?;
+        let active: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM plans WHERE state NOT IN ('COMMITTED','ROLLED_BACK','CANCELLED','REJECTED','FAILED'))",
+            [],
+            |row| row.get(0),
+        )?;
         if active {
             return Err(Error::Conflict);
         }
@@ -754,6 +796,38 @@ impl Ledger {
         self.transition(id, &s, State::Cancelled, "worker-stopped-no-system-effects")?;
         self.status(id, uid)
     }
+    pub fn record_build_failure(
+        &mut self,
+        id: &str,
+        uid: u32,
+        proof: &VerifiedWorkerStop,
+    ) -> Result<Status> {
+        let plan = self.get_plan(id, uid)?;
+        self.verify_plan_target(&plan)?;
+        if proof.plan_id != id || proof.candidate_sha256 != plan.candidate_sha256 {
+            return Err(Error::Integrity);
+        }
+        let status = self.status(id, uid)?;
+        if status.state != State::Building {
+            return Err(Error::State);
+        }
+        let next = if status.cancel_requested {
+            State::Cancelled
+        } else {
+            State::Failed
+        };
+        self.transition(
+            id,
+            &status,
+            next,
+            if status.cancel_requested {
+                "worker-stopped-no-system-effects"
+            } else {
+                "worker-failed-no-system-effects"
+            },
+        )?;
+        self.status(id, uid)
+    }
     pub fn record_build(
         &mut self,
         id: &str,
@@ -896,17 +970,78 @@ impl Ledger {
         }
         Ok((prepared, final_plan, hash))
     }
-    /// This preparation core cannot mint an activation receipt or execute. The
-    /// qualified approval/guard adapter must be connected before this can succeed.
-    pub fn execute(&self, id: &str, uid: u32, hash: &str) -> Result<()> {
+    /// Called only after the native authorizer has consumed the volatile receipt.
+    pub(crate) fn authorize(&mut self, id: &str, uid: u32, hash: &str) -> Result<Status> {
         let plan = self.get_plan(id, uid)?;
         self.verify_plan_target(&plan)?;
-        let s = self.status(id, uid)?;
-        if s.state != State::AwaitingApproval || s.final_plan_sha256.as_deref() != Some(hash) {
+        let status = self.status(id, uid)?;
+        if status.state != State::AwaitingApproval
+            || status.cancel_requested
+            || status.final_plan_sha256.as_deref() != Some(hash)
+        {
             return Err(Error::State);
         }
         self.final_plan(id, uid)?;
-        Err(Error::ActivationUnavailable)
+        self.transition(
+            id,
+            &status,
+            State::Authorized,
+            "authorization-consumed-guard-handoff-durable",
+        )?;
+        self.status(id, uid)
+    }
+
+    /// The independent guard is the only product caller. Recovery-required is
+    /// deliberately nonterminal and continues to block later transactions.
+    pub(crate) fn authorized_handoffs(&self) -> Result<Vec<(String, u32, String)>> {
+        self.verify_target()?;
+        let rows = self
+            .connection
+            .prepare(
+                "SELECT id,subject,final_digest FROM plans WHERE state='AUTHORIZED' ORDER BY id",
+            )?
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u32>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<(String, u32, String)>, _>>()?;
+        for (id, uid, hash) in &rows {
+            let status = self.status(id, *uid)?;
+            if status.state != State::Authorized
+                || status.final_plan_sha256.as_deref() != Some(hash.as_str())
+            {
+                return Err(Error::Integrity);
+            }
+        }
+        Ok(rows)
+    }
+
+    pub fn guard_complete(&mut self, id: &str, uid: u32, next: State) -> Result<Status> {
+        if !matches!(
+            next,
+            State::Committed | State::RolledBack | State::RecoveryRequired | State::Rejected
+        ) {
+            return Err(Error::Invalid);
+        }
+        let plan = self.get_plan(id, uid)?;
+        self.verify_plan_target(&plan)?;
+        let status = self.status(id, uid)?;
+        if status.state != State::Authorized {
+            return Err(Error::State);
+        }
+        self.final_plan(id, uid)?;
+        let kind = match next {
+            State::Committed => "guard-verified-exact-commit",
+            State::RolledBack => "guard-verified-exact-rollback",
+            State::RecoveryRequired => "guard-recovery-required",
+            State::Rejected => "guard-precheck-rejected-no-system-effects",
+            _ => unreachable!(),
+        };
+        self.transition(id, &status, next, kind)?;
+        self.status(id, uid)
     }
     pub fn history(&self, id: &str, uid: u32) -> Result<Vec<(u64, State, String)>> {
         let status = self.status(id, uid)?;

@@ -32,6 +32,37 @@ fn native_sqlite_open_retains_nofollow_and_pinned_inodes() {
     assert!(matches!(open_pinned_database(&path, &anchor, &file, flags), Err(Error::Integrity)));
     std::fs::remove_dir_all(directory).unwrap();
 }
+#[test]
+fn schema_one_migrates_terminal_index_without_weakening_active_recovery() {
+    let connection = Connection::open_in_memory().unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE broker_schema(version INTEGER NOT NULL);
+             INSERT INTO broker_schema VALUES(1);
+             CREATE TABLE plans(id TEXT PRIMARY KEY,subject INTEGER NOT NULL,prepared BLOB NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL,cancel INTEGER NOT NULL DEFAULT 0,resource BLOB,result BLOB,final BLOB,final_digest TEXT);
+             CREATE UNIQUE INDEX one_active ON plans((1)) WHERE state NOT IN ('CANCELLED','REJECTED','FAILED');
+             CREATE TABLE events(id TEXT NOT NULL,revision INTEGER NOT NULL,state TEXT NOT NULL,kind TEXT NOT NULL,PRIMARY KEY(id,revision));",
+        )
+        .unwrap();
+    let ledger = Ledger::initialize(connection).unwrap();
+    assert_eq!(
+        ledger
+            .connection
+            .query_row("SELECT version FROM broker_schema", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    let index: String = ledger
+        .connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='one_active'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(index.contains("'COMMITTED','ROLLED_BACK','CANCELLED','REJECTED','FAILED'"));
+    assert!(!index.contains("RECOVERY_REQUIRED"));
+}
 fn closure(label: &str) -> String {
     format!("/nix/store/{}-{label}", "a".repeat(32))
 }
@@ -231,6 +262,26 @@ fn one_active_system_change_until_terminal_and_no_build_autoreplay() {
         State::Received
     );
 }
+
+#[test]
+fn verified_worker_failure_is_terminal_and_releases_active_slot() {
+    let f = fixture();
+    let (mut ledger, plan, _) = building(&f);
+    let stop = VerifiedWorkerStop {
+        plan_id: plan.plan_id.clone(),
+        candidate_sha256: plan.candidate_sha256.clone(),
+    };
+    let status = ledger
+        .record_build_failure(&plan.plan_id, 1000, &stop)
+        .unwrap();
+    assert_eq!(status.state, State::Failed);
+    assert!(!status.cancel_requested);
+    let (other, candidate) = prepare(&f);
+    assert_eq!(
+        ledger.register(&other, &candidate, &f.store).unwrap().state,
+        State::Received
+    );
+}
 #[test]
 fn resource_permission_is_separate_exact_bounded_and_expiring() {
     let f = fixture();
@@ -307,29 +358,39 @@ fn foreign_candidate_and_unverified_build_output_are_not_bound() {
     assert_eq!(l.status(&p.plan_id, 1000).unwrap().state, State::Building);
 }
 #[test]
-fn final_plan_binds_exact_build_semantics_steps_expiry_and_never_authorizes() {
+fn final_plan_binds_authorized_guard_handoff_and_terminal_commit() {
     let f = fixture();
     let (mut l, p, _) = building(&f);
     l.record_build(&p.plan_id, 1000, &built(&p), &p.target, &p.baseline)
         .unwrap();
     let final_plan = l.freeze(&p.plan_id, 1000, 400, false).unwrap();
     let status = l.status(&p.plan_id, 1000).unwrap();
+    let hash = status.final_plan_sha256.clone().unwrap();
     assert_eq!(status.state, State::AwaitingApproval);
     assert_eq!(final_plan.build.closure, closure("candidate"));
     assert_eq!(final_plan.ordered_steps, STEPS);
     assert_eq!(final_plan.approval_expires_monotonic_ms, 300400);
     assert_eq!(
-        l.execute(&p.plan_id, 1000, status.final_plan_sha256.as_ref().unwrap()),
-        Err(Error::ActivationUnavailable)
+        l.authorize(&p.plan_id, 1000, &"0".repeat(64)).err(),
+        Some(Error::State)
+    );
+    assert_eq!(
+        l.authorize(&p.plan_id, 1000, &hash).unwrap().state,
+        State::Authorized
+    );
+    let (other, candidate) = prepare(&f);
+    assert_eq!(l.register(&other, &candidate, &f.store).err(), Some(Error::Conflict));
+    assert_eq!(
+        l.guard_complete(&p.plan_id, 1000, State::Committed)
+            .unwrap()
+            .state,
+        State::Committed
     );
     assert_eq!(
         l.history(&p.plan_id, 1000).unwrap().last().unwrap().1,
-        State::AwaitingApproval
+        State::Committed
     );
-    assert_eq!(
-        canonical(&l.freeze(&p.plan_id, 1000, 500, false).unwrap()).unwrap(),
-        canonical(&final_plan).unwrap()
-    );
+    assert_eq!(l.register(&other, &candidate, &f.store).unwrap().state, State::Received);
 }
 #[test]
 fn sqlite_abort_cannot_publish_success_and_failure_preserves_record() {
@@ -437,6 +498,22 @@ fn malformed_schema_and_duplicate_fields_cannot_make_a_prepared_plan() {
     bad = p;
     bad.requester.uid = 0;
     assert_eq!(bad.validate(), Err(Error::Invalid));
+}
+#[test]
+fn system_broker_blocks_recovery_classes_it_cannot_safely_execute() {
+    let f = fixture();
+    let (plan, _) = prepare(&f);
+    for recovery in [
+        Recovery::ReversibleUserSettingTargetBound,
+        Recovery::CompensatableFileOperationReceiptBound,
+        Recovery::DataMigrationBackupAndTestedRestoreRequired,
+        Recovery::ExternallyIrreversibleFinalConfirmationRequired,
+        Recovery::UnsupportedRecoveryBlocked,
+    ] {
+        let mut unsupported = plan.clone();
+        unsupported.preview.recovery = recovery;
+        assert_eq!(unsupported.validate(), Err(Error::Invalid));
+    }
 }
 #[test]
 fn root_ledger_constructor_has_no_nonroot_or_environment_override() {
