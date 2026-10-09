@@ -84,6 +84,15 @@ exist; `RECOVERY_REQUIRED` blocks subsequent transactions. Unknown and partial
 ledger schemas fail rather than silently regenerating records. The root adapter
 must securely open and validate the ledger and its parent directory.
 
+Prepared plans carry one of the fixed recovery classes: reversible configuration,
+target-bound user setting, receipt-bound compensatable file operation, migration
+requiring an application-consistent backup and tested restore, externally
+irreversible action requiring separate final confirmation, or blocked unsupported
+recovery. The system-configuration broker accepts only reversible configuration;
+it cannot reinterpret a migration, file receipt, or external side effect as
+configuration rollback. Restoring an old closure may leave application data and
+must never run old binaries against blindly downgraded data.
+
 ## Activation and recovery order
 
 The core checks target identity before each effect. Runtime adapters must repeat
