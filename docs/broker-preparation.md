@@ -139,6 +139,16 @@ No receipt/token appears in public status, persisted plans, filenames or logs.
 an empty cache; the native target gate independently rejects boot changes.
 The independent guard must still verify preconditions and perform exact effects;
 system authorization alone never claims an activation or committed installation.
+Preliminary resource confirmation is deliberately distinct from final system
+authorization. The first `Authorize` accepts only `BUILD <plan-id>` from the
+authenticated foreground TTY and binds the prepared-plan digest, candidate,
+boot/session, approved cache, fixed build/download ceilings, recovery reserve
+and preparation expiry. It permits only an asynchronous request to the fixed
+isolated worker. The broker authenticates that worker's socket, UID, PID,
+systemd cgroup and immutable store executable, independently rechecks returned
+GC roots/candidate and re-reads target/baseline before freezing the final plan.
+No worker reply is itself activation authority.
+
 
 The template manifest lists bounded, normalized paths, modes, sizes and hashes.
 It must contain the fixed flake, lock and generated catalog. Reserved managed/

@@ -55,6 +55,17 @@ orchestration or exposed through public signal actions. Policy fixtures and Qt
 widget fixtures do not prove an installed native termination consent or effect.
 Those require source-bound installed service and native interaction qualification.
 
+## Candidate resource confirmation
+
+The first `Authorize` for a prepared system plan is a separate foreground-TTY
+resource decision. The broker renders the exact preliminary plan and candidate
+digest, semantic preview, build/download ceilings, recovery reserve, approved
+cache, no-network worker policy and explicit absence of activation authority.
+Only `BUILD <exact-plan-id>` is accepted. The resulting permission binds the
+authenticated UID/session/boot, prepared-plan digest, candidate, limits and
+five-minute preparation deadline; it is recorded before the isolated worker
+starts and never authorizes a store path supplied by the caller.
+
 ## Exact-plan TTY confirmation
 
 Final R2 system plans also have a broker-owned terminal path. The root executor

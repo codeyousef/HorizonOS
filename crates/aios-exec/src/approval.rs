@@ -6,7 +6,7 @@ use crate::{
     Error, Result,
     caller::{CallerIdentity, ServiceIdentity, SystemBus, VerifiedCaller},
     canonical,
-    ledger::{Ledger, Target},
+    ledger::{Ledger, ResourcePermission, State, Target},
     sha256,
 };
 use serde::Serialize;
@@ -51,6 +51,25 @@ pub(crate) struct AuthenticatedChallenge {
     policy_revision: String,
     confirmation: TrustedConfirmation,
     native: polkit::NativeAuthentication,
+}
+pub(crate) struct ResourceChallenge {
+    bus: SystemBus,
+    plan_id: String,
+    expires_at: u64,
+    permission: ResourcePermission,
+    presentation: Value,
+}
+impl ResourceChallenge {
+    pub(crate) fn authenticate(
+        self,
+        caller: &VerifiedCaller,
+        cancelled: &Arc<AtomicBool>,
+    ) -> Result<ResourcePermission> {
+        tty::confirm_resource(
+            &self.bus, caller, &self.plan_id, self.expires_at,
+            &self.presentation, cancelled)?;
+        Ok(self.permission)
+    }
 }
 impl InteractiveChallenge {
     pub(crate) fn authenticate(self, caller: &VerifiedCaller,
@@ -308,6 +327,93 @@ impl Authorizer {
         });
         Ok((binding, policy, presentation))
     }
+    fn resource_permission(
+        &self,
+        ledger: &Ledger,
+        caller: &VerifiedCaller,
+        id: &str,
+        hash: &str,
+    ) -> Result<(ResourcePermission, Value)> {
+        self.bus.recheck(caller)?;
+        let plan = ledger.get_plan(id, caller.identity().uid)?;
+        let status = ledger.status(id, caller.identity().uid)?;
+        if status.state != State::Planned || status.cancel_requested
+            || plan.digest()? != hash || plan.target != *self.bus.target().target()
+            || plan.requester.uid != caller.identity().uid
+            || caller.identity().session.as_ref().map(|session| session.id.as_str())
+                != Some(plan.requester.logind_session.as_str())
+        {
+            return Err(Error::TargetChanged);
+        }
+        let now = boottime_ms()?;
+        if now < plan.prepared_at_monotonic_ms || now >= plan.preparation_expires_monotonic_ms {
+            return Err(Error::Expired);
+        }
+        let permission = ResourcePermission {
+            requester_uid: plan.requester.uid,
+            boot_id: plan.target.boot_id.clone(),
+            candidate_sha256: plan.candidate_sha256.clone(),
+            plan_digest: hash.into(),
+            max_build_bytes: crate::build_worker::MAX_BUILD_BYTES,
+            max_download_bytes: crate::build_worker::MAX_DOWNLOAD_BYTES,
+            recovery_reserve_bytes: crate::build_worker::MIN_RECOVERY_RESERVE,
+            expires_monotonic_ms: plan.preparation_expires_monotonic_ms,
+            approved_cache: "https://cache.nixos.org".into(),
+        };
+        let presentation = json!({
+            "schema_version": 1,
+            "kind": "candidate_build_resources",
+            "plan_id": plan.plan_id,
+            "prepared_plan_sha256": hash,
+            "candidate_sha256": plan.candidate_sha256,
+            "target": plan.target,
+            "semantic_preview": plan.preview,
+            "limits": {
+                "max_build_bytes": permission.max_build_bytes,
+                "max_download_bytes": permission.max_download_bytes,
+                "recovery_reserve_bytes": permission.recovery_reserve_bytes,
+                "approved_cache": permission.approved_cache,
+                "network_egress": false,
+            },
+            "activation_permitted": false,
+            "expires_monotonic_ms": permission.expires_monotonic_ms,
+        });
+        Ok((permission, presentation))
+    }
+
+    pub(crate) fn resource_challenge(
+        &self,
+        ledger: &Ledger,
+        caller: &VerifiedCaller,
+        id: &str,
+        hash: &str,
+    ) -> Result<ResourceChallenge> {
+        let (permission, presentation) =
+            self.resource_permission(ledger, caller, id, hash)?;
+        Ok(ResourceChallenge {
+            bus: self.bus.clone(),
+            plan_id: id.into(),
+            expires_at: permission.expires_monotonic_ms,
+            permission,
+            presentation,
+        })
+    }
+
+    pub(crate) fn finish_resource(
+        &self,
+        ledger: &Ledger,
+        caller: &VerifiedCaller,
+        id: &str,
+        hash: &str,
+        authenticated: ResourcePermission,
+    ) -> Result<ResourcePermission> {
+        let (current, _) = self.resource_permission(ledger, caller, id, hash)?;
+        if current != authenticated {
+            return Err(Error::TargetChanged);
+        }
+        Ok(authenticated)
+    }
+
     pub(crate) fn challenge(
         &self,
         ledger: &Ledger,

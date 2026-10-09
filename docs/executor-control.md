@@ -73,12 +73,24 @@ durably and is idempotent. Lost caller authority cancels pre-effect work. Broker
 restart cancels orphaned pre-effect plans; a building transaction retains its
 slot until worker termination is independently proven.
 
-This transport does not start builds or activate systems. `GetCapabilities`
-reports these operations unavailable. `Authorize` and `Execute` reject missing
-trusted confirmation with `AUTH_REQUIRED`; an incorrect digest returns
-`PLAN_CHANGED`, expiry returns `APPROVAL_EXPIRED`, and a cancelled plan returns
-`CANCELLED`. `RequestRollback` reports `UNSUPPORTED_CAPABILITY`. A preliminary
-preview is never final authorization for an exact built closure.
+`Authorize` has two exact, broker-owned phases. For a `PLANNED` preparation it
+renders the immutable preliminary semantic preview and fixed 16 GiB build,
+4 GiB download, 8 GiB recovery-reserve and approved-cache limits on the
+authenticated caller's foreground TTY. The exact `BUILD <plan-id>` phrase creates
+only an in-memory resource permission; it cannot authorize activation. The
+broker records that permission durably before connecting asynchronously to the
+fixed installed `aios-buildd` socket.
+
+The broker authenticates the builder UID, process, systemd cgroup, store
+executable and socket both before and after the bounded request. It sends only
+the registered candidate, installed-template digest, managed digest, observed
+running closure and approved resource limits. A reply becomes a non-serializable
+capability only after the candidate and separately retained prior/candidate GC
+roots are rechecked. Native target and baseline are re-read before the ledger
+records the result and freezes the final plan. `GetPlan` then returns that final
+plan and exact hash; a second `Authorize` performs trusted exact-plan TTY plus
+fresh polkit approval. Build failure, ambiguous worker termination or baseline
+drift never yields a final plan or activation authority.
 
 Database-data and unfree acknowledgement adapters are not supplied by request
 JSON. Intents needing these facts or grants remain refused until their trusted

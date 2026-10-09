@@ -1,11 +1,11 @@
 //! Authenticated Executor1 control. Native identity is never request JSON.
 use crate::{
     Error,
-    approval::{Authorizer, boottime_ms},
+    approval::{AuthenticatedChallenge, Authorizer, ResourceChallenge, boottime_ms},
     baseline::NativeBaseline,
     caller::{CallerIdentity, VerifiedCaller},
     candidate::{CandidateStore, InstalledTemplate},
-    ledger::{Ledger, PreparationMode, PreparedPlan, Requester, State},
+    ledger::{Ledger, PreparationMode, PreparedPlan, Requester, State, VerifiedBuild, VerifiedWorkerStop},
 };
 use aios_protocol::{MAX_FRAME_BYTES, MAX_TASK_BYTES, contracts::ErrorCode};
 use aios_state::{DatabaseData, Intent, PreparationGrants};
@@ -261,13 +261,25 @@ impl Runtime {
         Ok(())
     }
     fn prepared(&self, id: &str, uid: u32) -> Result<Value> {
-        let plan = self.ledger.get_plan(id, uid)?;
+        let prepared = self.ledger.get_plan(id, uid)?;
         let owner = self.owners.get(id).ok_or(ErrorCode::PermissionDenied)?;
+        let status = self.ledger.status(id, uid)?;
+        if let Some(hash) = status.final_plan_sha256.as_deref() {
+            let plan = self.ledger.final_plan(id, uid)?;
+            return Ok(envelope(
+                "final_plan",
+                json!({"plan_id":id,"plan_sha256":hash,"plan":plan,
+                "status":status,"intended_manifest_source":owner.intended_source,
+                "build_started":true,"final_authorization_ready":true,
+                "system_effects_performed":false}),
+            ));
+        }
         Ok(envelope(
             "prepared_plan",
-            json!({"plan_id":id,"plan_sha256":plan.digest()?,"plan":plan,
-            "status":self.ledger.status(id,uid)?,"intended_manifest_source":owner.intended_source,
-            "build_started":false,"final_authorization_ready":false,"system_effects_performed":false}),
+            json!({"plan_id":id,"plan_sha256":prepared.digest()?,"plan":prepared,
+            "status":status,"intended_manifest_source":owner.intended_source,
+            "build_started":status.state==State::Building,
+            "final_authorization_ready":false,"system_effects_performed":false}),
         ))
     }
     fn prepare(&mut self, caller: &VerifiedCaller, raw: &str) -> Result<Value> {
@@ -397,7 +409,7 @@ impl Runtime {
             Operation::Capabilities => Ok(envelope(
                 "capabilities",
                 json!({"interface":NAME,"prepare":true,"private_plans":true,
-                "native_caller_verified":true,"authorize":true,"execute":false,"rollback":false,"resource_consent":false,
+                "native_caller_verified":true,"authorize":true,"execute":false,"rollback":false,"resource_consent":true,
                 "trusted_confirmation":true,"max_request_bytes":MAX_TASK_BYTES,"max_reply_bytes":MAX_FRAME_BYTES}),
             )),
             Operation::Prepare(raw) => self.prepare(caller, &raw),
@@ -501,29 +513,52 @@ impl Executor {
         .await
     }
     async fn authorize_call(&self, header: Header<'_>, id: String, hash: String) -> Result<String> {
+        enum Challenge {
+            System(crate::approval::InteractiveChallenge),
+            Resource(ResourceChallenge),
+        }
+        enum Authenticated {
+            System(AuthenticatedChallenge),
+            Resource(crate::ledger::ResourcePermission),
+        }
         let _admission = self.admit()?;
         if header.message_type() != zbus::message::Type::MethodCall {
             return Err(ErrorCode::PermissionDenied.into());
         }
         let sender = header.sender().ok_or(ErrorCode::PermissionDenied)?
             .as_str().to_owned();
-        let runtime = self.runtime.clone();
+        let runtime_shared = self.runtime.clone();
         blocking::unblock(move || {
             let (caller, challenge, cancelled) = {
-                let mut runtime = runtime.lock().map_err(|_| ErrorCode::ResourceExhausted)?;
+                let mut runtime = runtime_shared.lock()
+                    .map_err(|_| ErrorCode::ResourceExhausted)?;
                 let caller = runtime.authorizer.bus().authenticate_sender(&sender)?;
-                runtime.approval_reference(&caller, &id, &hash)?;
+                references(&id, Some(&hash))?;
+                runtime.owner(&id, &caller)?;
                 if runtime.pending_authorizations.contains_key(&id) {
                     return Err(ErrorCode::Conflict.into());
                 }
-                let challenge = runtime.authorizer.challenge(
-                    &runtime.ledger, &caller, &id, &hash)?;
+                let status = runtime.ledger.status(&id, caller.identity().uid)?;
+                let challenge = if status.final_plan_sha256.is_some() {
+                    runtime.approval_reference(&caller, &id, &hash)?;
+                    Challenge::System(runtime.authorizer.challenge(
+                        &runtime.ledger, &caller, &id, &hash)?)
+                } else {
+                    Challenge::Resource(runtime.authorizer.resource_challenge(
+                        &runtime.ledger, &caller, &id, &hash)?)
+                };
                 let cancelled = Arc::new(AtomicBool::new(false));
                 runtime.pending_authorizations.insert(id.clone(), cancelled.clone());
                 (caller, challenge, cancelled)
             };
-            let authenticated = challenge.authenticate(&caller, &cancelled);
-            let mut runtime = runtime.lock().map_err(|_| ErrorCode::ResourceExhausted)?;
+            let authenticated = match challenge {
+                Challenge::System(challenge) => challenge.authenticate(&caller, &cancelled)
+                    .map(Authenticated::System),
+                Challenge::Resource(challenge) => challenge.authenticate(&caller, &cancelled)
+                    .map(Authenticated::Resource),
+            };
+            let mut runtime = runtime_shared.lock()
+                .map_err(|_| ErrorCode::ResourceExhausted)?;
             let current = runtime.pending_authorizations.remove(&id);
             if current.as_ref().is_none_or(|flag| !Arc::ptr_eq(flag, &cancelled))
                 || cancelled.load(Ordering::Acquire) {
@@ -535,16 +570,94 @@ impl Executor {
                 return Err(ErrorCode::TargetChanged.into());
             }
             runtime.owner(&id, &current)?;
-            let Runtime { authorizer, ledger, .. } = &mut *runtime;
-            let status = authorizer.finish(
-                ledger, &current, &id, &hash, authenticated)?;
-            runtime.authorizer.bus().recheck(&current)?;
-            let result = envelope("authorization", json!({
-                "plan_id": id,
-                "plan_sha256": hash,
-                "status": status,
-                "system_effects_performed": false,
-            }));
+            let result = match authenticated {
+                Authenticated::System(authenticated) => {
+                    let Runtime { authorizer, ledger, .. } = &mut *runtime;
+                    let status = authorizer.finish(
+                        ledger, &current, &id, &hash, authenticated)?;
+                    authorizer.bus().recheck(&current)?;
+                    envelope("authorization", json!({
+                        "plan_id": id,
+                        "plan_sha256": hash,
+                        "status": status,
+                        "system_effects_performed": false,
+                    }))
+                }
+                Authenticated::Resource(authenticated) => {
+                    let permission = runtime.authorizer.finish_resource(
+                        &runtime.ledger, &current, &id, &hash, authenticated)?;
+                    let plan = runtime.ledger.get_plan(&id, current.identity().uid)?;
+                    let template = InstalledTemplate::from_installed()?;
+                    let baseline = NativeBaseline::capture(&template)?;
+                    if baseline.baseline != plan.baseline {
+                        return Err(ErrorCode::TargetChanged.into());
+                    }
+                    runtime.ledger.start_build(
+                        &id, current.identity().uid, &plan.target, &plan.baseline,
+                        &permission, boottime_ms()?)?;
+                    let worker_runtime = runtime_shared.clone();
+                    let worker_plan = plan.clone();
+                    let worker_permission = permission.clone();
+                    std::thread::spawn(move || {
+                        let result = crate::build_worker::supervise(
+                            &worker_plan, &worker_permission);
+                        let worker = match result {
+                            Ok(worker) => worker,
+                            Err(_) => {
+                                eprintln!("{}", json!({
+                                    "schema_version": 1,
+                                    "error": "BUILD_WORKER_UNVERIFIED_COMPLETION",
+                                    "state": "BUILDING",
+                                }));
+                                return;
+                            }
+                        };
+                        let Ok(mut runtime) = worker_runtime.lock() else { return; };
+                        let stop = VerifiedWorkerStop::from_completed_worker(
+                            &worker_plan, &worker);
+                        if runtime.ledger.status(
+                            &worker_plan.plan_id, worker_plan.requester.uid)
+                            .is_ok_and(|status| status.cancel_requested)
+                        {
+                            let _ = runtime.ledger.acknowledge_worker_stopped(
+                                &worker_plan.plan_id, worker_plan.requester.uid, &stop);
+                            return;
+                        }
+                        let Ok(template) = InstalledTemplate::from_installed() else { return; };
+                        let Ok(baseline) = NativeBaseline::capture(&template) else { return; };
+                        let unchanged = baseline.baseline == worker_plan.baseline
+                            && runtime.authorizer.bus().target().recheck().is_ok();
+                        let verified = VerifiedBuild::from_worker(worker, unchanged);
+                        match runtime.ledger.record_build(
+                            &worker_plan.plan_id, worker_plan.requester.uid, &verified,
+                            &worker_plan.target, &worker_plan.baseline)
+                            .and_then(|_| runtime.ledger.freeze(
+                                &worker_plan.plan_id, worker_plan.requester.uid,
+                                boottime_ms()?, false).map(|_| ()))
+                        {
+                            Ok(()) => {}
+                            Err(_) => eprintln!("{}", json!({
+                                "schema_version": 1,
+                                "error": "BUILD_RESULT_NOT_COMMITTED",
+                                "state": "BUILDING",
+                            })),
+                        }
+                    });
+                    envelope("build", json!({
+                        "plan_id": id,
+                        "prepared_plan_sha256": hash,
+                        "status": runtime.ledger.status(&id, current.identity().uid)?,
+                        "resource_permission": {
+                            "max_build_bytes": permission.max_build_bytes,
+                            "max_download_bytes": permission.max_download_bytes,
+                            "recovery_reserve_bytes": permission.recovery_reserve_bytes,
+                            "approved_cache": permission.approved_cache,
+                            "network_egress": false,
+                        },
+                        "system_effects_performed": false,
+                    }))
+                }
+            };
             let encoded = serde_json::to_string(&result)
                 .map_err(|_| ErrorCode::InvalidArgument)?;
             if encoded.len() > MAX_FRAME_BYTES {

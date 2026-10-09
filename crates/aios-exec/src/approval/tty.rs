@@ -30,13 +30,13 @@ fn display(bytes: &[u8]) -> Vec<u8> {
     output
 }
 
-fn expected(binding: &Binding) -> String {
-    format!("AUTHORIZE {}", binding.plan_id)
+fn expected(verb: &str, plan_id: &str) -> String {
+    format!("{verb} {plan_id}")
 }
 
-fn accepted(response: &[u8], binding: &Binding) -> bool {
+fn accepted(response: &[u8], phrase: &str) -> bool {
     let Ok(text) = std::str::from_utf8(response) else { return false; };
-    text.trim_end_matches(['\r', '\n']) == expected(binding)
+    text.trim_end_matches(['\r', '\n']) == phrase
 }
 
 fn open_terminal(caller: &VerifiedCaller) -> Result<File> {
@@ -106,20 +106,52 @@ pub(super) fn confirm(bus: &SystemBus, caller: &VerifiedCaller, binding: &Bindin
     if canonical.is_empty() || canonical.len() > MAX_PRESENTATION_BYTES { return Err(Error::Invalid); }
     let mut terminal = open_terminal(caller)?;
     let rendered = display(&canonical);
-    let phrase = expected(binding);
+    let phrase = expected("AUTHORIZE", &binding.plan_id);
     terminal.write_all(b"\nHorizon OS trusted system approval\n")?;
     terminal.write_all(&rendered)?;
     terminal.write_all(b"\nRecovery is limited exactly as shown above. Polkit administrator authentication follows.\n")?;
     terminal.write_all(format!("Type `{phrase}` to continue, or press Enter to cancel:\n> ").as_bytes())?;
     terminal.flush()?;
     let mut response = read_response(&mut terminal, binding.expires_at, cancelled)?;
-    let allowed = accepted(&response, binding);
+    let allowed = accepted(&response, &phrase);
     response.fill(0);
     if cancelled.load(Ordering::Acquire) { return Err(Error::AuthRequired); }
     bus.recheck(caller)?;
     binding.validate_time(boottime_ms()?)?;
     if !allowed { return Err(Error::AuthRequired); }
     Ok(TrustedConfirmation { binding_sha256: binding.confirmation_digest()? })
+}
+
+pub(super) fn confirm_resource(
+    bus: &SystemBus,
+    caller: &VerifiedCaller,
+    plan_id: &str,
+    expires_at: u64,
+    presentation: &Value,
+    cancelled: &Arc<AtomicBool>,
+) -> Result<()> {
+    bus.recheck(caller)?;
+    if boottime_ms()? >= expires_at { return Err(Error::Expired); }
+    let canonical = canonical(presentation)?;
+    if canonical.is_empty() || canonical.len() > MAX_PRESENTATION_BYTES {
+        return Err(Error::Invalid);
+    }
+    let mut terminal = open_terminal(caller)?;
+    let rendered = display(&canonical);
+    let phrase = expected("BUILD", plan_id);
+    terminal.write_all(b"\nHorizon OS candidate build approval\n")?;
+    terminal.write_all(&rendered)?;
+    terminal.write_all(b"\nThis permits only the resource limits and cache shown above; it does not permit activation.\n")?;
+    terminal.write_all(format!("Type `{phrase}` to build, or press Enter to cancel:\n> ").as_bytes())?;
+    terminal.flush()?;
+    let mut response = read_response(&mut terminal, expires_at, cancelled)?;
+    let allowed = accepted(&response, &phrase);
+    response.fill(0);
+    if cancelled.load(Ordering::Acquire) { return Err(Error::AuthRequired); }
+    bus.recheck(caller)?;
+    if boottime_ms()? >= expires_at { return Err(Error::Expired); }
+    if !allowed { return Err(Error::AuthRequired); }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -130,10 +162,12 @@ mod tests {
     #[test]
     fn response_is_exact_and_plan_bound() {
         let binding = binding();
-        assert!(accepted(format!("AUTHORIZE {}\n", binding.plan_id).as_bytes(), &binding));
+        let phrase = expected("AUTHORIZE", &binding.plan_id);
+        assert!(accepted(format!("{phrase}\n").as_bytes(), &phrase));
         for response in ["", "allow\n", "approved=true\n", "AUTHORIZE other\n"] {
-            assert!(!accepted(response.as_bytes(), &binding));
+            assert!(!accepted(response.as_bytes(), &phrase));
         }
+        assert!(accepted(b"BUILD exact-plan\n", "BUILD exact-plan"));
     }
 
     #[test]

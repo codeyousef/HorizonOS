@@ -96,7 +96,7 @@ impl ExecutorClient {
             "unix:path=/run/dbus/system_bus_socket",
         )
         .map_err(|_| ErrorCode::UnsupportedCapability)?
-        .method_timeout(Duration::from_secs(35))
+        .method_timeout(Duration::from_secs(150))
         .build()
         .map_err(|_| ErrorCode::UnsupportedCapability)?;
         let (owner, bus_id, owner_pid) = subject(&connection, EXECUTOR_NAME)?;

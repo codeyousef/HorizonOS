@@ -251,11 +251,30 @@ pub struct VerifiedBuild {
     result: BuildResult,
     baselines_unchanged: bool,
 }
+impl VerifiedBuild {
+    pub(crate) fn from_worker(
+        worker: crate::build_worker::VerifiedWorkerBuild,
+        baselines_unchanged: bool,
+    ) -> Self {
+        Self { result: worker.into_result(), baselines_unchanged }
+    }
+}
 /// Minted only by the qualified worker supervisor after PID/start/cgroup checks.
 /// Observation timeout is not proof of termination.
 pub struct VerifiedWorkerStop {
     plan_id: String,
     candidate_sha256: String,
+}
+impl VerifiedWorkerStop {
+    pub(crate) fn from_completed_worker(
+        plan: &PreparedPlan,
+        _worker: &crate::build_worker::VerifiedWorkerBuild,
+    ) -> Self {
+        Self {
+            plan_id: plan.plan_id.clone(),
+            candidate_sha256: plan.candidate_sha256.clone(),
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

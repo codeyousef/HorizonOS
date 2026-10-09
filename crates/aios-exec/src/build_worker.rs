@@ -2,11 +2,12 @@
 //! Root authenticates over the private socket; the worker can build and retain
 //! closures but has no activation or boot-selection API.
 use crate::{candidate::CandidateStore, digest, sha256, store, uuid};
+use crate::ledger::{BuildResult as LedgerBuildResult, PreparedPlan, ResourcePermission};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
-    fs,
+    fs::{self, File},
     io::{self, Read, Write},
     os::{
         fd::AsRawFd,
@@ -32,9 +33,9 @@ const MAX_REPLY: usize = 8 * 1024 * 1024;
 const MAX_PATH_INFO: usize = 8 * 1024 * 1024;
 const MAX_STDERR: usize = 64 * 1024;
 const MAX_RESOURCE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
-const MAX_BUILD_BYTES: u64 = 16 * 1024 * 1024 * 1024;
-const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-const MIN_RECOVERY_RESERVE: u64 = 8 * 1024 * 1024 * 1024;
+pub(crate) const MAX_BUILD_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+pub(crate) const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+pub(crate) const MIN_RECOVERY_RESERVE: u64 = 8 * 1024 * 1024 * 1024;
 const BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -90,7 +91,8 @@ enum Request {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct BuildResult {
     candidate_sha256: String,
     derivation: String,
@@ -104,13 +106,21 @@ struct BuildResult {
     prior_gc_root: String,
 }
 
-fn account() -> Result<u32> {
+fn builder_uid() -> Result<u32> {
     let value = unsafe { libc::getpwnam(c"aios-builder".as_ptr()) };
     if value.is_null() {
         return Err(Error::Identity);
     }
     let uid = unsafe { (*value).pw_uid };
-    if uid == 0 || unsafe { libc::getuid() } != uid || unsafe { libc::geteuid() } != uid {
+    if uid == 0 {
+        return Err(Error::Identity);
+    }
+    Ok(uid)
+}
+
+fn account() -> Result<u32> {
+    let uid = builder_uid()?;
+    if unsafe { libc::getuid() } != uid || unsafe { libc::geteuid() } != uid {
         return Err(Error::Identity);
     }
     Ok(uid)
@@ -546,6 +556,172 @@ fn serve(mut stream: UnixStream, uid: u32) -> Result<()> {
         _ => json!({"ok": false, "error": "INVALID_REQUEST"}),
     };
     frame_write(&mut stream, &reply)
+}
+
+/// Non-serializable capability returned only after the root broker has
+/// authenticated the installed worker, exact response and retained roots.
+pub(crate) struct VerifiedWorkerBuild {
+    result: LedgerBuildResult,
+}
+impl VerifiedWorkerBuild {
+    pub(crate) fn into_result(self) -> LedgerBuildResult {
+        self.result
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BuildReply {
+    ok: bool,
+    data: Option<BuildReplyData>,
+    error: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BuildReplyData {
+    schema_version: u32,
+    request_id: String,
+    build: BuildResult,
+}
+
+fn worker_identity(stream: &UnixStream, uid: u32) -> Result<libc::ucred> {
+    let metadata = fs::symlink_metadata(SOCKET)?;
+    if !metadata.file_type().is_socket()
+        || metadata.uid() != uid
+        || metadata.mode() & 0o777 != 0o600
+    {
+        return Err(Error::Identity);
+    }
+    let mut credentials = std::mem::MaybeUninit::<libc::ucred>::uninit();
+    let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    if unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED,
+            credentials.as_mut_ptr().cast(), &mut size)
+    } != 0 || size as usize != std::mem::size_of::<libc::ucred>() {
+        return Err(Error::Identity);
+    }
+    let credentials = unsafe { credentials.assume_init() };
+    if credentials.pid <= 1 || credentials.uid != uid {
+        return Err(Error::Identity);
+    }
+    let executable = fs::read_link(format!("/proc/{}/exe", credentials.pid))?;
+    let executable_metadata = fs::metadata(&executable)?;
+    if !executable.starts_with("/nix/store")
+        || !executable.ends_with("bin/aios-buildd")
+        || !executable_metadata.is_file()
+        || executable_metadata.uid() != 0
+        || executable_metadata.mode() & 0o022 != 0
+    {
+        return Err(Error::Identity);
+    }
+    let mut cgroup = vec![];
+    File::open(format!("/proc/{}/cgroup", credentials.pid))?
+        .take(64 * 1024 + 1).read_to_end(&mut cgroup)?;
+    if cgroup.len() > 64 * 1024
+        || !cgroup.split(|byte| *byte == b'\n').any(|line| {
+            line.ends_with(b"/aios-build.service")
+                || line.windows(b"/aios-build.service/".len())
+                    .any(|window| window == b"/aios-build.service/")
+        })
+    {
+        return Err(Error::Identity);
+    }
+    Ok(credentials)
+}
+
+fn retained_root(path: &str, expected: &str, uid: u32, suffix: &str) -> Result<()> {
+    if path != format!("{ROOTS}/{suffix}") {
+        return Err(Error::Integrity);
+    }
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_symlink()
+        || metadata.uid() != uid
+        || fs::read_link(path)?.to_str() != Some(expected)
+    {
+        return Err(Error::Integrity);
+    }
+    Ok(())
+}
+
+/// Invoke only the fixed installed worker protocol. The caller supplies a
+/// ledger-validated permission rather than arbitrary paths or Nix arguments.
+pub(crate) fn supervise(
+    plan: &PreparedPlan,
+    permission: &ResourcePermission,
+) -> crate::Result<VerifiedWorkerBuild> {
+    let run = || -> Result<VerifiedWorkerBuild> {
+        plan.validate().map_err(|_| Error::Invalid)?;
+        let candidate = CandidateStore::registered(&plan.candidate_sha256)
+            .map_err(|_| Error::Candidate)?;
+        if candidate.manifest().template_sha256 != plan.template_sha256 {
+            return Err(Error::Candidate);
+        }
+        let uid = builder_uid()?;
+        let mut stream = UnixStream::connect(SOCKET)?;
+        let peer = worker_identity(&stream, uid)?;
+        stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+        stream.set_read_timeout(Some(BUILD_TIMEOUT + QUERY_TIMEOUT + Duration::from_secs(30)))?;
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let request = json!({
+            "operation": "build",
+            "schema_version": 1,
+            "request_id": request_id,
+            "plan_id": plan.plan_id,
+            "candidate_sha256": plan.candidate_sha256,
+            "template_sha256": plan.template_sha256,
+            "managed_sha256": candidate.manifest().managed_sha256,
+            "baseline_closure": plan.baseline.running_closure,
+            "max_build_bytes": permission.max_build_bytes,
+            "max_download_bytes": permission.max_download_bytes,
+            "recovery_reserve_bytes": permission.recovery_reserve_bytes,
+            "approved_cache": permission.approved_cache,
+        });
+        frame_write(&mut stream, &request)?;
+        let bytes = frame_read(&mut stream, MAX_REPLY)?;
+        let reply: BuildReply = serde_json::from_slice(&bytes).map_err(|_| Error::Invalid)?;
+        let data = reply.data.ok_or(Error::Build {
+            stderr_sha256: sha256(reply.error.as_deref().unwrap_or("WORKER_FAILED").as_bytes()),
+            stderr_tail: "worker refused fixed build request".into(),
+        })?;
+        if !reply.ok || reply.error.is_some() || data.schema_version != 1
+            || data.request_id != request_id {
+            return Err(Error::Integrity);
+        }
+        if worker_identity(&stream, uid)? != peer {
+            return Err(Error::TargetChanged);
+        }
+        let rechecked = CandidateStore::registered(&plan.candidate_sha256)
+            .map_err(|_| Error::Candidate)?;
+        if rechecked.manifest() != candidate.manifest() {
+            return Err(Error::TargetChanged);
+        }
+        let result = data.build;
+        retained_root(
+            &result.prior_gc_root, &plan.baseline.running_closure, uid,
+            &format!("{}-prior", plan.plan_id))?;
+        retained_root(
+            &result.gc_root, &result.closure, uid,
+            &format!("{}-candidate", plan.plan_id))?;
+        let result = LedgerBuildResult {
+            candidate_sha256: result.candidate_sha256,
+            derivation: result.derivation,
+            closure: result.closure,
+            inventory_sha256: result.inventory_sha256,
+            added_paths: result.added_paths,
+            removed_paths: result.removed_paths,
+            nar_bytes: result.nar_bytes,
+            measured_download_bytes: result.measured_download_bytes,
+        };
+        Ok(VerifiedWorkerBuild { result })
+    };
+    run().map_err(|error| match error {
+        Error::TargetChanged | Error::Baseline => crate::Error::TargetChanged,
+        Error::Resource => crate::Error::ResourcePermissionRequired,
+        Error::Timeout => crate::Error::Expired,
+        Error::Io => crate::Error::Io,
+        _ => crate::Error::Integrity,
+    })
 }
 
 fn run_service() -> Result<()> {

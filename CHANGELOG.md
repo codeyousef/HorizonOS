@@ -27,6 +27,9 @@
   phrase, and mandatory separate fresh native polkit authentication.
 - Keep broker cancellation responsive during final-plan TTY and polkit waits;
   cancellation withdraws the native challenge and cannot race into a receipt.
+- Connect preliminary foreground-TTY resource confirmation to the installed
+  isolated build worker, independently authenticate its process/socket/output
+  and retained roots, and freeze only a rechecked exact final plan.
 - Add model-independent `aiosctl automation list` output that truthfully reports
   no persistent definitions while scheduling remains unavailable.
 - Keep disposable desktop QMP and serial endpoints within the portable Unix
