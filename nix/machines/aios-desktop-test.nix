@@ -15,10 +15,20 @@ in {
   services.displayManager.autoLogin = { enable = lib.mkForce true; user = "tester"; };
   services.displayManager.defaultSession = "plasma";
   users.users.tester.extraGroups = lib.mkForce [];
-  # Two real unprivileged subjects for IPC qualification. Only the enrolled
-  # public key enters this disposable image; production excludes both accounts.
+  # A separate test-only administrator supplies a real credential to the
+  # native polkit agent. Production excludes this account and its fixed hash.
+  users.users."approval-test" = {
+    isNormalUser = true;
+    uid = 1002;
+    extraGroups = [ "wheel" ];
+    hashedPassword = "$6$horizon-approval$umxH4YfaNTVGTrHzoeSWs5zbSmvKnGhG5iAkCbq9J9rLtqK3pf/Gr/MNyXH1xgfxCu8md/OODuxHUVH9lY0ku0";
+    openssh.authorizedKeys.keys = config.users.users.dev.openssh.authorizedKeys.keys;
+  };
+  services.aios.users = lib.mkForce [ "dev" "tester" "approval-test" ];
+  # Three real subjects exercise unprivileged IPC and native authorization.
+  # Only the enrolled public key enters this disposable image.
   users.users.tester.openssh.authorizedKeys.keys = config.users.users.dev.openssh.authorizedKeys.keys;
-  services.openssh.settings.AllowUsers = lib.mkForce [ "dev" "tester" ];
+  services.openssh.settings.AllowUsers = lib.mkForce [ "dev" "tester" "approval-test" ];
   environment.etc."aios/desktop-test-profile".text = "synthetic-disposable-plasma-wayland-v1\n";
   # Disposable storage qualification fixture. It is visible only in the test
   # image, owned by the normal development caller and deliberately filled.

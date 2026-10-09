@@ -25,6 +25,8 @@
 - Add broker-owned final-plan TTY confirmation with foreground process/session
   checks, control-safe immutable impact/recovery rendering, an exact plan-bound
   phrase, and mandatory separate fresh native polkit authentication.
+- Add a production-excluded disposable administrator with a fixed test-only
+  credential for real native polkit challenge qualification.
 - Keep broker cancellation responsive during final-plan TTY and polkit waits;
   cancellation withdraws the native challenge and cannot race into a receipt.
 - Connect preliminary foreground-TTY resource confirmation to the installed
