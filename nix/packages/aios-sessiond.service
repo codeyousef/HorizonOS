@@ -12,7 +12,6 @@ RuntimeDirectory=aios
 RuntimeDirectoryMode=0700
 UMask=0077
 NoNewPrivileges=yes
-CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX
 # Files1 must compare host UID/inode/mount identity and reopen consented paths
 # in the caller's real filesystem view. Unprivileged user-unit mount/network
