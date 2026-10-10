@@ -125,6 +125,7 @@ dependencies = [
 name = "aios-session"
 version = "0.1.0"
 dependencies = [
+ "aios-files",
  "aios-policy",
  "aios-protocol",
  "aios-system",
