@@ -717,8 +717,7 @@ def dispatch(request, *, config_reader=read_config, identity_reader=root_identit
     developer_uid = caller_reader()
     config = config_reader()
     actual = identity_reader()
-    if not state.exists():
-        verify_target(request, config, actual)
+    verify_target(request, config, actual)
     state_directory(state, owner_uid)
     with deployment_lock(state, owner_uid):
         found = registration(state, owner_uid, request["transaction_id"])

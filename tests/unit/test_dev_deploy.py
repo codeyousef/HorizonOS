@@ -113,6 +113,16 @@ class DeveloperBoundaryTests(unittest.TestCase):
                 self.call(identity_reader=lambda: actual)
             self.assertFalse(self.state.exists())
 
+    def test_preexisting_state_still_checks_target_before_lookup(self):
+        self.state.mkdir(mode=0o700)
+        status = {key: self.request[key] for key in ("schema_version", "identity", "transaction_id")}
+        status["operation"] = "status"
+        wrong = {**IDENTITY, "os_id": "cachyos"}
+        with self.assertRaises(deploy.Denial) as raised:
+            self.call(status, identity_reader=lambda: wrong)
+        self.assertEqual(raised.exception.label, "DEVELOPMENT_TARGET_MISMATCH")
+        self.assertEqual(list(self.state.iterdir()), [])
+
     def test_source_becomes_separate_immutable_verified_candidate_and_durable_receipt(self):
         receipt = self.call()
         candidate = self.state / "releases" / self.digest
