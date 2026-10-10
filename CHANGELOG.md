@@ -27,6 +27,10 @@
   system/user/API/action health, accepts transaction-bound heartbeats only
   through the authenticated SSH management session, commits exact pointers, and
   reconciles rollback or post-commit disarming after restart.
+- Bind the independent guard's target identity and prior running, profile, and
+  boot closures to the immutable prepared baseline. Activation now closes an
+  intervening Nix profile generation or target change as a terminal rejection
+  instead of adopting it as the rollback baseline or leaving authorization live.
 - By default, retain the newest three distinct verified system profiles as root-owned GC
   roots after commit or rollback, independently of active transaction roots;
   malformed retention state fails closed. System profile history remains

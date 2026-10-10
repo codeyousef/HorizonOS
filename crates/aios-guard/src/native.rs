@@ -287,13 +287,8 @@ impl NativeIntake {
         if boot_kernel != boot.kernel_sha256 || boot_initrd != boot.initrd_sha256 {
             return Err(Error::BootSelection);
         }
-        let installed_guard = Path::new("/run/current-system/sw/bin/aios-guard");
-        let guard = native(target.store_artifact(installed_guard, 64 * 1024 * 1024, true))?;
         let myself = std::env::current_exe().map_err(|_| Error::Integrity)?;
-        let current = native(target.store_artifact(&myself, 64 * 1024 * 1024, true))?;
-        if guard.path != current.path || guard.sha256 != current.sha256 {
-            return Err(Error::Integrity);
-        }
+        let guard = native(target.store_artifact(&myself, 64 * 1024 * 1024, true))?;
         // The fixed self executable alias is inspected only to match its inode;
         // it is never admitted as a general procfs configuration path.
         use std::os::unix::fs::MetadataExt;
@@ -342,12 +337,22 @@ impl NativeIntake {
     pub fn evidence(&self) -> &IntakeEvidence {
         &self.evidence
     }
+    pub(crate) fn closure_for(&self, path: &str) -> Result<Closure> {
+        closure(&self.target, path)
+    }
     /// Artifact binding is separate from root broker/developer authorization and
     /// build provenance. This method cannot arm, execute or register a plan.
     pub fn verify_plan_artifacts(&self, plan: &Plan) -> Result<()> {
         plan.validate()?;
         native(self.target.recheck())?;
-        if plan.identity != self.evidence.identity
+        let installed_guard = native(self.target.store_artifact(
+            Path::new("/run/current-system/sw/bin/aios-guard"),
+            64 * 1024 * 1024,
+            true,
+        ))?;
+        if installed_guard.path != self.evidence.guard.path
+            || installed_guard.sha256 != self.evidence.guard.sha256
+            || plan.identity != self.evidence.identity
             || plan.prior.running != self.evidence.running
             || plan.prior.profile != self.evidence.profile
             || plan.prior.boot != self.evidence.boot
@@ -362,6 +367,32 @@ impl NativeIntake {
                 }
             }
             Candidate::ModelOnly { .. } => return Err(Error::Adapter),
+        }
+        native(self.target.recheck())
+    }
+    pub(crate) fn verify_recovery_artifacts(&self, plan: &Plan) -> Result<()> {
+        plan.validate()?;
+        native(self.target.recheck())?;
+        if plan.identity != self.evidence.identity
+            || plan.retained_guard_sha256 != self.evidence.guard.sha256
+            || closure(&self.target, &plan.prior.running.path)? != plan.prior.running
+            || closure(&self.target, &plan.prior.profile.path)? != plan.prior.profile
+            || closure(&self.target, &plan.prior.boot.path)? != plan.prior.boot
+        {
+            return Err(Error::TargetMismatch);
+        }
+        let Candidate::System { closure: candidate } = &plan.candidate else {
+            return Err(Error::Adapter);
+        };
+        if closure(&self.target, &candidate.path)? != *candidate
+            || ![plan.prior.running.path.as_str(), candidate.path.as_str()]
+                .contains(&self.evidence.running.path.as_str())
+            || ![plan.prior.profile.path.as_str(), candidate.path.as_str()]
+                .contains(&self.evidence.profile.path.as_str())
+            || ![plan.prior.boot.path.as_str(), candidate.path.as_str()]
+                .contains(&self.evidence.boot.path.as_str())
+        {
+            return Err(Error::Integrity);
         }
         native(self.target.recheck())
     }

@@ -24,15 +24,20 @@ conflicting firmware default fail intake. Running state and the system profile
 are recorded independently of boot selection. This proves the selected loader
 entry; it does not promise recovery from firmware or kernel failure.
 
-`NativeIntake` is not deserializable. Its artifact-binding method compares the
-actual prior pointers, installed guard and candidate file hashes with a typed
-plan. The root-only `NativeAdapter` consumes that capability, independently
-recaptures enrolled identity and immutable pointers around every effect, probes
-only the fixed Executor1 introspection and private graph-status endpoints, and
+`NativeIntake` is not deserializable. Guard assembly derives enrolled identity
+and exact prior running/profile/boot closures from the immutable prepared
+baseline, never from a later activation-time observation. The root-only
+`NativeAdapter` resolves and verifies those prepared artifacts, then
+independently recaptures enrolled identity and immutable pointers around every
+effect. Any intervening profile-generation, boot, running-closure, managed-state
+or target-identity change closes the consumed authorization as `REJECTED` before
+candidate activation. It probes only the fixed Executor1 introspection and
+private graph-status endpoints and
 retains exact prior/candidate closures under a transaction-specific root-owned
-Nix GC-root directory. It maps typed system effects to the pinned commands below;
-managed-state publication is verification of the immutable running closure,
-not a second mutable manifest write. Model-only runtime intake is unavailable.
+Nix GC-root directory. It maps typed system effects to the pinned commands
+below; managed-state publication is verification of the immutable running
+closure, not a second mutable manifest write. Model-only runtime intake is
+unavailable.
 
 Executor1 writes a canonical root-owned handoff only after consuming the exact
 authorization receipt, then asks PID 1 to start the fixed

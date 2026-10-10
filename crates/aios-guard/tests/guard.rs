@@ -82,11 +82,17 @@ fn plan() -> Plan {
                     healthy: true,
                 },
             ],
+            baseline_user_units: vec![UserUnit {
+                uid: 1000,
+                name: "aios-sessiond.service".into(),
+                expected_executable_sha256: h('c'),
+            }],
             required_user_units: vec![UserUnit {
                 uid: 1000,
                 name: "aios-sessiond.service".into(),
                 expected_executable_sha256: h('b'),
             }],
+            action_validators: vec![],
         },
     }
 }
@@ -96,11 +102,15 @@ struct Fixture {
     fail: Option<&'static str>,
     database: PathBuf,
     txid: String,
+    baseline_user_units: Vec<UserUnit>,
+    required_user_units: Vec<UserUnit>,
+    candidate_managed_sha256: String,
     health_fails_on_test: bool,
     guard_lost_on_test: bool,
     corrupt_committed: bool,
     clock: u64,
     expire_on: Option<&'static str>,
+    advance_on: Option<&'static str>,
     drift_after_profile: bool,
     guard_lost_after_managed: bool,
     observe_failure_after_test: bool,
@@ -156,6 +166,10 @@ impl Adapter for Fixture {
             self.clock = 181000;
             self.expire_on = None;
         }
+        if self.advance_on == Some(label) {
+            self.clock = 7000;
+            self.advance_on = None;
+        }
         if self.fail == Some(label) {
             self.fail = None;
             return Err(Error::Adapter);
@@ -164,8 +178,14 @@ impl Adapter for Fixture {
             Effect::ArmGuard {
                 executable_sha256, ..
             } => self.observation.retained_guard_sha256 = Some(executable_sha256.clone()),
-            Effect::TestSystem { closure } | Effect::RecoverSystem { closure } => {
-                self.observation.running = closure.clone()
+            Effect::TestSystem { closure } => {
+                self.observation.running = closure.clone();
+                self.observation.user_units = self.required_user_units.clone();
+                self.observation.managed_sha256 = self.candidate_managed_sha256.clone();
+            }
+            Effect::RecoverSystem { closure } => {
+                self.observation.running = closure.clone();
+                self.observation.user_units = self.baseline_user_units.clone();
             }
             Effect::TestModel { artifact } | Effect::RecoverModel { artifact } => {
                 self.observation.model = Some(artifact.clone())
@@ -243,7 +263,8 @@ impl Harness {
             mounts: plan.health.required_mounts.clone(),
             units: plan.health.baseline_units.clone(),
             apis: plan.health.required_apis.clone(),
-            user_units: plan.health.required_user_units.clone(),
+            user_units: plan.health.baseline_user_units.clone(),
+            validated_actions: vec![],
             retained_guard_sha256: None,
         };
         Self {
@@ -253,11 +274,15 @@ impl Harness {
                 fail: None,
                 database: path,
                 txid: plan.transaction_id.clone(),
+                baseline_user_units: plan.health.baseline_user_units.clone(),
+                required_user_units: plan.health.required_user_units.clone(),
+                candidate_managed_sha256: plan.managed_sha256.clone(),
                 health_fails_on_test: false,
                 guard_lost_on_test: false,
                 corrupt_committed: false,
                 clock: 1000,
                 expire_on: None,
+                advance_on: None,
                 drift_after_profile: false,
                 guard_lost_after_managed: false,
                 observe_failure_after_test: false,
@@ -387,6 +412,18 @@ fn heartbeat_deadline_equality_is_expired_and_clock_reversal_is_denied() {
     );
 }
 #[test]
+fn fresh_heartbeat_gates_a_commit_that_finishes_within_the_guard_deadline() {
+    let mut f = Harness::new(plan());
+    let mut e = f.verified();
+    e.heartbeat(f.heartbeat(&e), 1002).unwrap();
+    f.fixture.advance_on = Some("profile");
+    assert_eq!(
+        e.commit(&mut f.ledger, &mut f.fixture, 1003).unwrap(),
+        State::Committed
+    );
+    assert_eq!(f.fixture.clock, 7000);
+}
+#[test]
 fn ssh_loss_timeout_restores_three_distinct_prior_pointers() {
     let mut f = Harness::new(plan());
     let mut e = f.verified();
@@ -435,6 +472,27 @@ fn crashed_controller_reconciles_without_replaying_activation_or_old_challenge()
             .iter()
             .any(|x| matches!(x, Effect::TestSystem { .. }))
     );
+}
+#[test]
+fn restart_finishes_disarm_after_durable_terminal_commit() {
+    let mut f = Harness::new(plan());
+    let mut e = f.verified();
+    e.heartbeat(f.heartbeat(&e), 1002).unwrap();
+    f.fixture.fail = Some("other");
+    assert_eq!(
+        e.commit(&mut f.ledger, &mut f.fixture, 1003),
+        Err(Error::Adapter)
+    );
+    assert_eq!(
+        f.ledger.state(&f.plan.transaction_id).unwrap(),
+        State::Committed
+    );
+    assert!(f.fixture.observation.retained_guard_sha256.is_some());
+    assert_eq!(
+        Engine::reconcile(&mut f.ledger, &f.plan.transaction_id, &mut f.fixture).unwrap(),
+        State::Committed
+    );
+    assert_eq!(f.fixture.observation.retained_guard_sha256, None);
 }
 #[test]
 fn model_failure_restores_only_model_and_manifest_without_system_profile_or_boot_mutation() {
@@ -536,6 +594,31 @@ fn bus_mount_api_and_user_activation_checks_are_independent() {
     }
 }
 #[test]
+fn baseline_and_candidate_user_executables_are_checked_in_their_own_phase() {
+    let mut f = Harness::new(plan());
+    assert_ne!(
+        f.plan.health.baseline_user_units,
+        f.plan.health.required_user_units
+    );
+    let mut e = f.engine();
+    assert_eq!(
+        e.arm(&mut f.ledger, &mut f.fixture, 1000).unwrap(),
+        State::GuardArmed
+    );
+    assert_eq!(
+        f.fixture.observation.user_units,
+        f.plan.health.baseline_user_units
+    );
+    assert_eq!(
+        e.test(&mut f.ledger, &mut f.fixture, 1001).unwrap(),
+        State::Verifying
+    );
+    assert_eq!(
+        f.fixture.observation.user_units,
+        f.plan.health.required_user_units
+    );
+}
+#[test]
 fn lost_or_changed_retained_guard_during_activation_cannot_commit() {
     let mut f = Harness::new(plan());
     let mut e = f.engine();
@@ -590,13 +673,16 @@ fn arbitrary_paths_commands_unknown_fields_duplicate_fields_and_bad_versions_are
     q = p.clone();
     q.guard_timeout_seconds = 59;
     assert!(q.validate().is_err());
-    q = p;
+    q = p.clone();
     q.health.baseline_units.push(UnitHealth {
         name: "user-supplied.service".into(),
         active: true,
         failed: false,
     });
     assert!(q.validate().is_err());
+    q = p;
+    q.health.baseline_user_units.clear();
+    assert_eq!(q.validate(), Err(Error::InvalidPlan));
 }
 #[test]
 fn canonical_digest_ignores_input_key_order_and_binds_health_and_all_pointers() {

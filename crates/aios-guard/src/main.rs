@@ -23,6 +23,25 @@ fn main() {
         }
         return;
     }
+    if args.len() == 2 && args[0] == "--run-transaction" {
+        let id = &args[1];
+        match aios_guard::service::run(id) {
+            Ok(()) => {
+                println!(
+                    "{}",
+                    serde_json::json!({"schema_version":1,"transaction_id":id,"terminal":true})
+                );
+                return;
+            }
+            Err(error) => {
+                println!(
+                    "{}",
+                    serde_json::json!({"schema_version":1,"error":"GUARD_TRANSACTION_FAILED","reason":format!("{error:?}")})
+                );
+                std::process::exit(8);
+            }
+        }
+    }
     if args == ["--check-plan"] {
         let mut bytes = vec![];
         let result = io::stdin()
@@ -45,8 +64,8 @@ fn main() {
         );
         std::process::exit(2);
     }
-    // Pure validation is available. No unqualified privileged activation path
-    // or model-invocable command fallback is exposed by this initial package.
+    // Pure validation is available without a root-owned authorized handoff.
+    // No client-selected plan, store path, command or argv can reach the runtime.
     println!(
         "{}",
         serde_json::json!({"schema_version":1,"error":"GUARD_RUNTIME_ADAPTER_UNAVAILABLE"})
