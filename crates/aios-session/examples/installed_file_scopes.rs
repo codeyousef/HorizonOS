@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 use std::{env, path::PathBuf, time::Duration};
-use zbus::blocking::{Connection, Proxy};
+use zbus::blocking::Proxy;
 
 const NAME:&str="org.aios.Session1";
 const PATH:&str="/org/aios/Files1";

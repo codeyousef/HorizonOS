@@ -377,6 +377,11 @@ macro_rules! surface {
         }
     }
 }
+// Files1 authenticates through the service's existing bus connection before
+// each blocking filesystem operation and repeats that complete peer lookup
+// afterward. Do not open a second bus connection inside the blocking closure:
+// that independently sampled user-manager endpoint can change while the
+// original authenticated call remains valid.
 pub struct Files{agent:Agent}
 #[zbus::interface(name="org.aios.Files1")]
 impl Files{
@@ -385,7 +390,7 @@ impl Files{
     }
     async fn propose_roots(&self,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
         let _admission=self.agent.admit()?;let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
-        let proposal=blocking::unblock(move||{identity::verify_peer(&original)?;let home=user_home(original.uid)?;let now=aios_policy::boottime_ms()?;
+        let proposal=blocking::unblock(move||{let home=user_home(original.uid)?;let now=aios_policy::boottime_ms()?;
             agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.propose_xdg_roots(file_owner(&original),&home,now)}).await?;
         if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
         file_json(serde_json::json!({"schema_version":1,"operation":"file_roots_proposed","data":proposal,"mutation_performed":false}))
@@ -395,14 +400,14 @@ impl Files{
         let request:EnrollRootsRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
         if request.schema_version!=1||!request.confirmed||!crate::uuid(&request.proposal_id){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
-        let roots=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+        let roots=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
             agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.enroll(&file_owner(&original),&request.proposal_id,&request.approved_root_ids,&request.allowed_access,now)}).await?;
         if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
         file_json(serde_json::json!({"schema_version":1,"operation":"file_roots_enrolled","data":{"roots":roots},"mutation_performed":true}))
     }
     async fn list_roots(&self,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
         let _admission=self.agent.admit()?;let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
-        let roots=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+        let roots=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
             Ok::<_,ErrorCode>(agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.active_roots(&file_owner(&original),now))}).await?;
         if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
         file_json(serde_json::json!({"schema_version":1,"operation":"file_roots","data":{"roots":roots},"mutation_performed":false}))
@@ -412,7 +417,7 @@ impl Files{
         let request:OpenScopedRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
         if request.schema_version!=1||!crate::uuid(&request.root_id){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
-        let metadata=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+        let metadata=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
             agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.issue_handle(&file_owner(&original),&request.root_id,PathBuf::from(request.relative_path).as_path(),request.access,now)}).await?;
         if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
         file_json(serde_json::json!({"schema_version":1,"operation":"file_handle_issued","data":metadata,"mutation_performed":false}))
@@ -422,7 +427,7 @@ impl Files{
         let request:HandleRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
         if request.schema_version!=1||!crate::uuid(&request.file_handle){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
-        let metadata=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+        let metadata=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
             agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.metadata(&file_owner(&original),&request.file_handle,now)}).await?;
         if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
         file_json(serde_json::json!({"schema_version":1,"operation":"file_metadata","data":metadata,"mutation_performed":false}))
@@ -432,7 +437,7 @@ impl Files{
         let request:ReadScopedRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
         if request.schema_version!=1||!crate::uuid(&request.file_handle)||request.max_bytes>262_144{return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();let handle=request.file_handle.clone();
-        let bytes=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+        let bytes=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
             agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.read(&file_owner(&original),&request.file_handle,request.max_bytes,now)}).await?;
         let content=String::from_utf8(bytes).map_err(|_|ErrorCode::UnsupportedCapability)?;
         if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
@@ -443,7 +448,7 @@ impl Files{
         let request:RevokeRootRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
         if request.schema_version!=1||!request.confirmed||!crate::uuid(&request.root_id){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
-        let receipt=blocking::unblock(move||{identity::verify_peer(&original)?;
+        let receipt=blocking::unblock(move||{
             agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.revoke(&file_owner(&original),&request.root_id)}).await?;
         if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
         file_json(serde_json::json!({"schema_version":1,"operation":"file_root_revoked","data":receipt,"mutation_performed":true}))
