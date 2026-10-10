@@ -252,6 +252,7 @@ class DeveloperBoundaryTests(unittest.TestCase):
 
         test_request = {**self.request, "operation": "test"}
         with patch.object(deploy, "build_candidate", return_value=built), \
+             patch.object(deploy, "guard_state", return_value=None), \
              patch.object(deploy, "write_handoff", side_effect=handoff), \
              patch.object(deploy, "complete_guard", side_effect=complete):
             tested = self.call(test_request, identity_reader=identity)
@@ -264,6 +265,7 @@ class DeveloperBoundaryTests(unittest.TestCase):
             "running": candidate, "profile": candidate, "booted": baseline["booted"]})
         commit_request = {**self.request, "operation": "commit"}
         with patch.dict(sys.modules, {"build_system": fake_build}), \
+             patch.object(deploy, "guard_state", return_value=None), \
              patch.object(deploy, "write_handoff", side_effect=handoff), \
              patch.object(deploy, "complete_guard", side_effect=complete):
             committed = self.call(commit_request, identity_reader=identity)
