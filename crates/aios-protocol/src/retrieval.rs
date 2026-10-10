@@ -203,6 +203,31 @@ fn citation(record: &EvidenceRecord) -> Value {
         "source_locator":locator,"executable_uri":false,"execution_authority":false})
 }
 
+fn numeric_claims_supported(text: &str, claims: &[StructuredClaim]) -> bool {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let signed = bytes[index] == b'-' && bytes.get(index + 1).is_some_and(u8::is_ascii_digit);
+        if !bytes[index].is_ascii_digit() && !signed { index += 1; continue; }
+        if index > 0 && bytes[index - 1].is_ascii_alphanumeric() { index += 1; continue; }
+        let start = index;
+        if signed { index += 1; }
+        while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'.') { index += 1; }
+        while index > start && bytes[index - 1] == b'.' { index -= 1; }
+        if index == start || bytes.get(index).is_some_and(u8::is_ascii_alphanumeric) { index += 1; continue; }
+        let token = &text[start..index];
+        let supported = claims.iter().filter(|claim| claim.kind == ClaimKind::Observed).any(|claim| {
+            claim.expected.as_ref().is_some_and(|expected| {
+                expected.as_str() == Some(token)
+                    || expected.as_i64().is_some_and(|value| token.parse::<i64>() == Ok(value))
+                    || expected.as_u64().is_some_and(|value| token.parse::<u64>() == Ok(value))
+            })
+        });
+        if !supported { return false; }
+    }
+    true
+}
+
 pub fn verify_answer(answer: &Answer, records: &[EvidenceRecord], authority: &RetrievalAuthority, machine_specific: bool) -> Result<VerifiedAnswer, ErrorCode> {
     if answer.kind != "answer" || answer.text.trim().is_empty() || answer.text.len() > 8192 || answer.evidence_ids.len() > MAX_EVIDENCE {
         return Err(ErrorCode::ModelOutputInvalid);
@@ -235,6 +260,7 @@ pub fn verify_answer(answer: &Answer, records: &[EvidenceRecord], authority: &Re
             ClaimKind::MissingEvidence => missing += 1,
         }
     }
+    if machine_specific && !numeric_claims_supported(&answer.text, &answer.claims) { return Err(ErrorCode::StaleEvidence); }
     Ok(VerifiedAnswer { citations, observed_claims: observed, hypotheses, missing_evidence: missing, all_cited_ids_valid: true })
 }
 
@@ -304,6 +330,8 @@ mod tests {
         assert_eq!(verified.citations[0]["executable_uri"],false);
         let mut wrong=answer;wrong.claims[0].expected=Some(json!(43));
         assert_eq!(verify_answer(&wrong,&records,&authority(),true),Err(ErrorCode::StaleEvidence));
+        let uncited_numeric=Answer{kind:"answer".into(),text:"Observed 42 bytes".into(),evidence_ids:vec!["ev-1".into()],claims:vec![]};
+        assert_eq!(verify_answer(&uncited_numeric,&records,&authority(),true),Err(ErrorCode::StaleEvidence));
     }
     #[test]
     fn unsupported_machine_answers_abstain_instead_of_using_uncited_text() {
