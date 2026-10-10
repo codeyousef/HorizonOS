@@ -35,12 +35,12 @@ struct Admission(Arc<AtomicUsize>);
 impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); } }
 
 #[derive(Clone)]
-pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,control_active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>>,processes:Arc<Mutex<HashMap<(String,String),ProcessConnection>>>,files:Arc<Mutex<aios_files::Manager>> }
+pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,control_active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>>,processes:Arc<Mutex<HashMap<(String,String),ProcessConnection>>>,files:Arc<Mutex<aios_files::Manager>>,file_enrollment:crate::file_enrollment::Controls }
 struct UiConnection { peer:Peer,expires:Instant,client:Arc<crate::graphical::Connection> }
 struct ProcessConnection { peer:Peer,expires:u64,client:crate::process_selection::Connection,control:Arc<crate::process_control::Connection> }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct EnrollRootsRequest { schema_version:u32,proposal_id:String,approved_root_ids:Vec<String>,allowed_access:Vec<aios_files::Access>,confirmed:bool }
+struct EnrollRootsRequest { schema_version:u32,proposal_id:String,approved_root_ids:Vec<String>,allowed_access:Vec<aios_files::Access>,session_handle:String }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OpenScopedRequest { schema_version:u32,root_id:String,relative_path:String,access:aios_files::Access }
@@ -52,8 +52,8 @@ struct HandleRequest { schema_version:u32,file_handle:String }
 struct ReadScopedRequest { schema_version:u32,file_handle:String,max_bytes:usize }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RevokeRootRequest { schema_version:u32,root_id:String,confirmed:bool }
-fn file_owner(peer:&Peer)->std::result::Result<aios_files::Owner,ErrorCode>{
+struct RevokeRootRequest { schema_version:u32,root_id:String }
+pub(crate) fn file_owner(peer:&Peer)->std::result::Result<aios_files::Owner,ErrorCode>{
     let subject=peer.policy_subject()?;
     Ok(aios_files::Owner{uid:peer.uid,boot_id:peer.boot_id.clone(),session_id:peer.logind_session.clone(),
         client_binding_sha256:aios_policy::digest(&subject)?})
@@ -67,7 +67,7 @@ fn user_home(uid:u32)->std::result::Result<PathBuf,ErrorCode>{
         .map(|user|user.dir).ok_or(ErrorCode::PermissionDenied)
 }
 impl Agent {
-    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),control_active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())),processes:Arc::new(Mutex::new(HashMap::new())),files:Arc::new(Mutex::new(aios_files::Manager::default())) } }
+    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),control_active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())),processes:Arc::new(Mutex::new(HashMap::new())),files:Arc::new(Mutex::new(aios_files::Manager::default())),file_enrollment:Default::default() } }
     fn admit(&self) -> Result<Admission> {
         if self.active.fetch_add(1, Ordering::AcqRel) >= 16 {
             self.active.fetch_sub(1, Ordering::AcqRel);
@@ -401,11 +401,21 @@ impl Files{
     async fn enroll_roots(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
         let _admission=self.agent.admit()?;if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
         let request:EnrollRootsRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
-        if request.schema_version!=1||!request.confirmed||!crate::uuid(&request.proposal_id){return Err(ErrorCode::InvalidArgument.into());}
+        if request.schema_version!=1||!crate::uuid(&request.proposal_id)||!crate::uuid(&request.session_handle){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
-        let roots=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
-            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.enroll(&file_owner(&original)?,&request.proposal_id,&request.approved_root_ids,&request.allowed_access,now)}).await?;
+        let roots=blocking::unblock(move||{
+            let session=crate::selected_ui_session(&agent.state,&original,&request.session_handle)?;
+            crate::file_enrollment::enroll(original,session,agent.files,agent.file_enrollment,
+                request.proposal_id,request.approved_root_ids,request.allowed_access)
+        }).await?;
         file_json(serde_json::json!({"schema_version":1,"operation":"file_roots_enrolled","data":{"roots":roots},"mutation_performed":true}))
+    }
+    async fn cancel_root_enrollment(&self,proposal_id:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        let _admission=self.agent.admit_control()?;
+        if !crate::uuid(proposal_id){return Err(ErrorCode::InvalidArgument.into());}
+        let peer=Agent::peer(connection,&header).await?;
+        self.agent.file_enrollment.cancel(&peer,proposal_id)?;
+        file_json(serde_json::json!({"schema_version":1,"operation":"file_enrollment_cancelled","cancelled":true}))
     }
     async fn list_roots(&self,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
         let _admission=self.agent.admit()?;let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
@@ -444,7 +454,7 @@ impl Files{
     async fn revoke_root(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
         let _admission=self.agent.admit()?;if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
         let request:RevokeRootRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
-        if request.schema_version!=1||!request.confirmed||!crate::uuid(&request.root_id){return Err(ErrorCode::InvalidArgument.into());}
+        if request.schema_version!=1||!crate::uuid(&request.root_id){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
         let receipt=blocking::unblock(move||{
             agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.revoke(&file_owner(&original)?,&request.root_id)}).await?;

@@ -89,6 +89,25 @@ private slots:
             changed["preview"]=p;QVERIFY(!ScopePreview::parse(wire(changed)));
         }
     }
+    void fileRootPreviewRequiresExactIdentitiesAccessAndShowsExclusions() {
+        auto o=fixture();o["kind"]="file_roots";o["mode"]="act";o.remove("apps");o.remove("actions");
+        o["roots"]=QJsonArray{QJsonObject{{"root_id","abbccdde-1234-4567-89ab-abbccddeeff0"},{"display_path","/home/tester/Documents"},{"identity_sha256",QString(64,'e')}}};
+        o["access"]=QJsonArray{"content"};o["grant_lifetime_ms"]=300000;
+        auto preview=ScopePreview::parse(wire(o));QVERIFY(preview);ScopeDialog dialog(*preview);dialog.show();
+        QVERIFY(dialog.findChild<QLabel *>("roots")->text().contains("/home/tester/Documents"));
+        QVERIFY(dialog.findChild<QLabel *>("scope")->text().contains("credentials"));
+        QVERIFY(dialog.findChild<QLabel *>("scope")->text().contains("five minutes"));
+        QCOMPARE(dialog.findChild<QPushButton *>("allow")->text(),QString("Enroll these file roots"));
+        QVERIFY(dialog.findChild<QPushButton *>("cancel")->isDefault());
+        for(int field=0;field<7;field++){
+            auto changed=o;
+            switch(field){case 0:changed["approved"]=true;break;case 1:changed["access"]=QJsonArray{"content","content"};break;
+                case 2:changed["roots"]=QJsonArray{};break;case 3:changed["grant_lifetime_ms"]=300001;break;
+                case 4:changed["mode"]="ask";break;case 5:changed["access"]=QJsonArray{"shell"};break;
+                case 6:changed["roots"]=QJsonArray{o["roots"].toArray()[0],o["roots"].toArray()[0]};break;}
+            QVERIFY(!ScopePreview::parse(wire(changed)));
+        }
+    }
     void invalidAuthorityAndExpiry() {
         QVERIFY(ScopePreview::parse(wire(fixture())));
         for (auto key : {"approved","nonce","shell","automation"}) {

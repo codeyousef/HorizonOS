@@ -17,7 +17,7 @@ fn value(proxy:&Proxy<'_>,method:&str,request:Option<&str>)->Value{
 }
 fn main(){
     let arguments=env::args().skip(1).collect::<Vec<_>>();
-    assert_eq!(arguments.len(),3,"expected Documents path, file name and link name");
+    assert_eq!(arguments.len(),4,"expected Documents path, file name, link name and selected desktop session");
     let documents=PathBuf::from(&arguments[0]);let filename=&arguments[1];let linkname=&arguments[2];
     let boot_id=std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim().to_owned();
     let owner=aios_files::Owner{uid:nix::unistd::geteuid().as_raw(),boot_id,session_id:None,client_binding_sha256:"a".repeat(64)};
@@ -32,14 +32,18 @@ fn main(){
     let root_id=selected["root_id"].as_str().unwrap();
     let open=json!({"schema_version":1,"root_id":root_id,"relative_path":filename,"access":"content"}).to_string();
     code(files.call::<_,_,String>("OpenScoped",&(open.as_str(),)).unwrap_err(),"PERMISSION_DENIED");
-    let enroll=json!({"schema_version":1,"proposal_id":proposal["data"]["proposal_id"],"approved_root_ids":[root_id],"allowed_access":["content"],"confirmed":true}).to_string();
+    let agent=Proxy::new(&connection,NAME,"/org/aios/Session1","org.aios.Agent1").unwrap();
+    let selected=value(&agent,"SelectUiSession",Some(&arguments[3]));
+    let forged=json!({"schema_version":1,"proposal_id":proposal["data"]["proposal_id"],"approved_root_ids":[root_id],"allowed_access":["content"],"confirmed":true}).to_string();
+    code(files.call::<_,_,String>("EnrollRoots",&(forged.as_str(),)).unwrap_err(),"INVALID_ARGUMENT");
+    let enroll=json!({"schema_version":1,"proposal_id":proposal["data"]["proposal_id"],"approved_root_ids":[root_id],"allowed_access":["content"],"session_handle":selected["candidate_handle"]}).to_string();
     let enrolled=value(&files,"EnrollRoots",Some(&enroll));assert_eq!(enrolled["data"]["roots"][0]["root_id"],root_id);
     let escape=json!({"schema_version":1,"root_id":root_id,"relative_path":linkname,"access":"content"}).to_string();
     code(files.call::<_,_,String>("OpenScoped",&(escape.as_str(),)).unwrap_err(),"PERMISSION_DENIED");
     let opened=value(&files,"OpenScoped",Some(&open));let handle=opened["data"]["file_handle"].as_str().unwrap();
     let read=json!({"schema_version":1,"file_handle":handle,"max_bytes":128}).to_string();let content=value(&files,"ReadScoped",Some(&read));
     assert_eq!(content["data"]["content"],"consented installed content");assert_eq!(content["data"]["bytes_read"],27);
-    let revoke=json!({"schema_version":1,"root_id":root_id,"confirmed":true}).to_string();let revoked=value(&files,"RevokeRoot",Some(&revoke));
+    let revoke=json!({"schema_version":1,"root_id":root_id}).to_string();let revoked=value(&files,"RevokeRoot",Some(&revoke));
     assert_eq!(revoked["data"]["access_blocked"],true);assert_eq!(revoked["data"]["handles_revoked"],1);
     code(files.call::<_,_,String>("ReadScoped",&(read.as_str(),)).unwrap_err(),"PERMISSION_DENIED");
     println!("AIOS_INSTALLED_FILE_SCOPES_CLIENT={{\"preconsent_denied\":true,\"symlink_denied\":true,\"content_verified\":true,\"revocation_blocked\":true}}");

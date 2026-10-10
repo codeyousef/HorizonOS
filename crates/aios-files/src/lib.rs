@@ -207,8 +207,10 @@ fn secret(relative: &Path) -> bool {
         let name = name.to_string_lossy().to_ascii_lowercase();
         matches!(name.as_str(), ".ssh"|".gnupg"|".password-store"|".aws"|".azure"|".kube"|".docker"|".mozilla"|".git-credentials"|".netrc"|".npmrc"|".pypirc"|
             "keyrings"|"kwalletd"|"google-chrome"|"chromium"|"credentials"|"secrets"|"wallet"|"wallets"|".aios"|"aios-private")
-            || name.contains("password") || name == ".env" || name.starts_with(".env.") || name.starts_with("id_rsa") || name.starts_with("id_ed25519")
-            || [".pem",".key",".p12",".pfx",".kdbx",".wallet"].iter().any(|suffix|name.ends_with(suffix))
+            || name.contains("password") || name.contains("credential") || name.contains("wallet") || name.contains("keyring")
+            || name=="login data" || name=="cookies" || name == ".env" || name.starts_with(".env.")
+            || ["id_rsa","id_ed25519","id_ecdsa","id_dsa"].iter().any(|prefix|name.starts_with(prefix))
+            || [".pem",".key",".p12",".pfx",".kdbx",".wallet",".kwl"].iter().any(|suffix|name.ends_with(suffix))
     })
 }
 
@@ -301,10 +303,34 @@ impl Manager {
         Ok(result)
     }
 
+    /// Re-resolve the exact proposed selection before displaying or consuming
+    /// native consent. This observes identities; it issues no grant.
+    pub fn review_enrollment(&self, owner: &Owner, proposal_id: &str, approved: &[String],
+        allowed_access: &[Access], now_ms: u64) -> Result<Vec<ProposedRoot>> {
+        if approved.is_empty() || approved.len()>3 || approved.iter().collect::<HashSet<_>>().len()!=approved.len()
+            || allowed_access.is_empty() || allowed_access.len()>3
+            || allowed_access.iter().copied().collect::<HashSet<_>>().len()!=allowed_access.len() {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        let proposal=self.pending.get(proposal_id).ok_or(ErrorCode::PermissionDenied)?;
+        if &proposal.owner!=owner { return Err(ErrorCode::PermissionDenied); }
+        if now_ms>=proposal.expires { return Err(ErrorCode::ApprovalExpired); }
+        approved.iter().map(|id| {
+            let candidate=proposal.roots.iter().find(|root|&root.root.root_id==id).ok_or(ErrorCode::PermissionDenied)?;
+            let (_,current)=open_root(&candidate.path)?;
+            if !same_root(&current,&candidate.identity) { return Err(ErrorCode::TargetChanged); }
+            Ok(candidate.root.clone())
+        }).collect()
+    }
+
     fn root(&self, owner:&Owner, root_id:&str, now_ms:u64)->Result<&Root>{
         let root=self.roots.get(root_id).ok_or(ErrorCode::PermissionDenied)?;
         if &root.owner!=owner{return Err(ErrorCode::PermissionDenied);}if now_ms>=root.expires{return Err(ErrorCode::ApprovalExpired);}
-        if !same_root(&identity(&root.directory)?,&root.identity){return Err(ErrorCode::TargetChanged);}Ok(root)
+        if !same_root(&identity(&root.directory)?,&root.identity){return Err(ErrorCode::TargetChanged);}
+        // A retained descriptor must not keep a disappeared/replaced named
+        // root visible to snippets merely because its old inode is still open.
+        let (_,current)=open_root(&root.path).map_err(|_|ErrorCode::TargetChanged)?;
+        if !same_root(&current,&root.identity){return Err(ErrorCode::TargetChanged);}Ok(root)
     }
 
     pub fn issue_handle(&mut self,owner:&Owner,root_id:&str,relative:&Path,access:Access,now_ms:u64)->Result<ScopedMetadata>{
@@ -339,7 +365,14 @@ impl Manager {
         let before=identity(&file)?;file.seek(SeekFrom::Start(0)).map_err(|_|ErrorCode::TargetChanged)?;
         let mut bytes=Vec::with_capacity(max_bytes.min(before.size as usize));file.take((max_bytes as u64)+1).read_to_end(&mut bytes).map_err(|_|ErrorCode::TargetChanged)?;
         if bytes.len()>max_bytes{return Err(ErrorCode::ResourceExhausted);}let file=self.reopen(owner,handle,Access::Content,now_ms)?;
-        if identity(&file)?!=before{return Err(ErrorCode::TargetChanged);}Ok(bytes)
+        if identity(&file)?!=before{return Err(ErrorCode::TargetChanged);}
+        // Selection is not permission to export recognizable raw private keys.
+        // Check before returning bytes, even when the file was renamed to a
+        // normal text filename. This complements mandatory path exclusions.
+        if bytes.windows(b"PRIVATE KEY-----".len()).any(|part|part==b"PRIVATE KEY-----") {
+            return Err(ErrorCode::SecretScopeDenied);
+        }
+        Ok(bytes)
     }
 
     pub fn revalidate_mutation(&self,owner:&Owner,handle:&str,now_ms:u64)->Result<()> { self.reopen(owner,handle,Access::Mutation,now_ms).map(drop) }
@@ -466,6 +499,43 @@ mod tests {
         let roots=manager.enroll(&owner,&proposal.proposal_id,&[id.clone()],&[Access::Content],102).unwrap();
         assert_eq!(roots[0].root_id,id);
         assert_eq!(manager.enroll(&owner,&proposal.proposal_id,&[id],&[Access::Content],103),Err(ErrorCode::PermissionDenied));
+    }
+
+    #[test]
+    fn selected_renamed_private_key_is_never_returned_as_content(){
+        let (temp,owner,mut manager,root)=enroll();
+        let synthetic=[b"-----BEGIN ".as_slice(),b"OPENSSH PRIVATE KEY-----\nsynthetic fixture only".as_slice()].concat();
+        fs::write(temp.path().join("Documents/notes.txt"),synthetic).unwrap();
+        let handle=manager.issue_handle(&owner,&root.root_id,Path::new("notes.txt"),Access::Content,102).unwrap();
+        assert_eq!(manager.read(&owner,&handle.file_handle,128,103),Err(ErrorCode::SecretScopeDenied));
+        for path in ["id_ecdsa","credentials.json","kwalletd6/anything","wallet.dat","Login Data"] {
+            assert_eq!(manager.issue_handle(&owner,&root.root_id,Path::new(path),Access::Content,103),Err(ErrorCode::PermissionDenied));
+        }
+    }
+
+    #[test]
+    fn enrollment_review_is_observation_only_and_rejects_replaced_or_expired_roots(){
+        let (temp,owner,mut manager,proposal)=setup();
+        let id=proposal.roots.iter().find(|r|r.display_path.ends_with("Documents")).unwrap().root_id.clone();
+        let reviewed=manager.review_enrollment(&owner,&proposal.proposal_id,&[id.clone()],&[Access::Content],101).unwrap();
+        assert_eq!(reviewed[0].root_id,id);
+        assert_eq!(manager.issue_handle(&owner,&id,Path::new("note.txt"),Access::Content,102),Err(ErrorCode::PermissionDenied));
+        assert_eq!(manager.review_enrollment(&owner,&proposal.proposal_id,&[id.clone()],&[Access::Content],proposal.expires_at_boottime_ms),Err(ErrorCode::ApprovalExpired));
+        fs::rename(temp.path().join("Documents"),temp.path().join("OldDocuments")).unwrap();
+        fs::create_dir(temp.path().join("Documents")).unwrap();
+        assert_eq!(manager.review_enrollment(&owner,&proposal.proposal_id,&[id],&[Access::Content],103),Err(ErrorCode::TargetChanged));
+    }
+
+    #[test]
+    fn renamed_granted_root_blocks_retained_handles_and_cached_snippets(){
+        let (temp,owner,mut manager,root)=enroll();
+        let handle=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,102).unwrap();
+        manager.cache_for_test(&handle.file_handle,"chunk","preview","snippet").unwrap();
+        fs::rename(temp.path().join("Documents"),temp.path().join("OldDocuments")).unwrap();
+        fs::create_dir(temp.path().join("Documents")).unwrap();
+        fs::write(temp.path().join("Documents/note.txt"),b"replacement content").unwrap();
+        assert_eq!(manager.read(&owner,&handle.file_handle,32,103),Err(ErrorCode::TargetChanged));
+        assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,103),Err(ErrorCode::TargetChanged));
     }
 
     #[test]

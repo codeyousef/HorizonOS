@@ -50,17 +50,19 @@ std::optional<ScopePreview> ScopePreview::parse(const QByteArray &canonical) {
     auto o = parsed.object();
     const bool termination = o["kind"] == "process_termination";
     const bool powerProfile = o["kind"] == "power_profile_change";
+    const bool fileRoots = o["kind"] == "file_roots";
     const QStringList fields = termination
         ? QStringList{"schema_version","kind","digest","uid","session_id","target","profile","mode","goal","process_id","preview","closure","actions","issued_ms","expires_ms","evidence"}
         : powerProfile ? QStringList{"schema_version","kind","digest","uid","session_id","target","profile","mode","goal","preview","actions","issued_ms","expires_ms","evidence"}
+        : fileRoots ? QStringList{"schema_version","kind","digest","uid","session_id","target","profile","mode","goal","roots","access","grant_lifetime_ms","issued_ms","expires_ms","evidence"}
         : QStringList{"schema_version","kind","digest","uid","session_id","target","profile","mode","goal","apps","actions","issued_ms","expires_ms","evidence"};
-    if (!keys(o, fields) || o["schema_version"] != 1 || (!termination && !powerProfile && o["kind"] != "read_scope")) return {};
+    if (!keys(o, fields) || o["schema_version"] != 1 || (!termination && !powerProfile && !fileRoots && o["kind"] != "read_scope")) return {};
     quint64 uid, issued, expires;
     auto now = boottimeMs();
     if (!integer(o["uid"], uid) || uid != geteuid() || uid == 0 || !integer(o["issued_ms"], issued) || !integer(o["expires_ms"], expires) || !now || issued > now || expires <= now || expires <= issued || expires-issued > 300000) return {};
     static const QRegularExpression hash("^[0-9a-f]{64}$");
     static const QRegularExpression session("^[A-Za-z0-9_-]{1,128}$");
-    if (!text(o["digest"],64) || !hash.match(o["digest"].toString()).hasMatch() || !text(o["session_id"],128) || !session.match(o["session_id"].toString()).hasMatch() || !text(o["target"],256) || !text(o["profile"],256) || !text(o["goal"],4096) || ((termination || powerProfile) ? o["mode"] != "act" : (o["mode"] != "ask" && o["mode"] != "diagnose"))) return {};
+    if (!text(o["digest"],64) || !hash.match(o["digest"].toString()).hasMatch() || !text(o["session_id"],128) || !session.match(o["session_id"].toString()).hasMatch() || !text(o["target"],256) || !text(o["profile"],256) || !text(o["goal"],4096) || ((termination || powerProfile || fileRoots) ? o["mode"] != "act" : (o["mode"] != "ask" && o["mode"] != "diagnose"))) return {};
     if (!o["evidence"].isArray() || o["evidence"].toArray().size() > 16) return {};
     for (auto e : o["evidence"].toArray()) if (!text(e,128)) return {};
     if (termination) {
@@ -95,6 +97,26 @@ std::optional<ScopePreview> ScopePreview::parse(const QByteArray &canonical) {
             profiles.insert(value.toString());
         }
         if (!profiles.contains(p["prior"].toString()) || !profiles.contains(p["requested"].toString())) return {};
+    } else if (fileRoots) {
+        quint64 lifetime;
+        if (!integer(o["grant_lifetime_ms"],lifetime) || lifetime!=300000
+            || !o["roots"].isArray() || o["roots"].toArray().isEmpty() || o["roots"].toArray().size()>3
+            || !o["access"].isArray() || o["access"].toArray().isEmpty() || o["access"].toArray().size()>3) return {};
+        static const QRegularExpression uuid("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+        QSet<QString> roots,access;
+        for(auto value:o["roots"].toArray()) {
+            if(!value.isObject()) return {};
+            auto root=value.toObject();auto id=root["root_id"].toString();auto path=root["display_path"].toString();
+            if(!keys(root,{"root_id","display_path","identity_sha256"}) || !uuid.match(id).hasMatch()
+                || id=="00000000-0000-0000-0000-000000000000" || roots.contains(id)
+                || !text(root["display_path"],4096) || !path.startsWith('/') || path=="/"
+                || !text(root["identity_sha256"],64) || !hash.match(root["identity_sha256"].toString()).hasMatch()) return {};
+            roots.insert(id);
+        }
+        for(auto value:o["access"].toArray()) {
+            if(!value.isString() || (value!="metadata" && value!="content" && value!="mutation") || access.contains(value.toString())) return {};
+            access.insert(value.toString());
+        }
     } else {
     if (!o["apps"].isArray() || o["apps"].toArray().isEmpty() || o["apps"].toArray().size() > 16 || !o["actions"].isArray() || o["actions"].toArray().isEmpty() || o["actions"].toArray().size() > 2 || !o["evidence"].isArray() || o["evidence"].toArray().size() > 16) return {};
     QSet<QString> handles, actions;
@@ -116,7 +138,8 @@ ScopeDialog::ScopeDialog(const ScopePreview &preview) : preview_(preview) {
     setObjectName("aios-protected-confirmation");
     const bool termination=preview.document["kind"]=="process_termination";
     const bool powerProfile=preview.document["kind"]=="power_profile_change";
-    setAccessibleName(termination ? tr("Minnerite process termination permission") : powerProfile ? tr("Minnerite power profile permission") : tr("Minnerite application read permission"));
+    const bool fileRoots=preview.document["kind"]=="file_roots";
+    setAccessibleName(termination ? tr("Minnerite process termination permission") : powerProfile ? tr("Minnerite power profile permission") : fileRoots ? tr("Minnerite file root permission") : tr("Minnerite application read permission"));
     setModal(true); resize(600,540);
     auto layout = new QVBoxLayout(this);
     auto content = new QWidget; auto rows = new QVBoxLayout(content);
@@ -142,6 +165,14 @@ ScopeDialog::ScopeDialog(const ScopePreview &preview) : preview_(preview) {
         auto p=o["preview"].toObject();QStringList choices;for(auto value:p["available_profiles"].toArray())choices<<value.toString();
         label("scope",tr("Action: power.profile_set — R2\nChange power profile from %1 to %2.\nAvailable profiles: %3\nThe previous profile is recorded for recovery. The change is verified by native readback.")
             .arg(p["prior"].toString(),p["requested"].toString(),choices.join(", ")));
+    } else if (fileRoots) {
+        QStringList roots,access;
+        for(auto value:o["roots"].toArray()) {
+            auto root=value.toObject();roots<<tr("%1\nRoot: %2\nIdentity: %3").arg(root["display_path"].toString(),root["root_id"].toString(),root["identity_sha256"].toString());
+        }
+        for(auto value:o["access"].toArray())access<<value.toString();
+        label("roots",tr("Selected roots:\n%1").arg(roots.join("\n\n")));
+        label("scope",tr("Access classes: %1\nApplies only to this originating client for five minutes.\nPrivate keys, credentials, wallets, environment secrets and AIOS private stores remain excluded.\nMutation access does not execute an operation or replace its required preview and approval. Revocation blocks access immediately.").arg(access.join(", ")));
     } else {
     QStringList apps;
     for (auto a : o["apps"].toArray()) {
@@ -158,11 +189,11 @@ ScopeDialog::ScopeDialog(const ScopePreview &preview) : preview_(preview) {
     auto scroll = new QScrollArea; scroll->setWidgetResizable(true); scroll->setWidget(content); layout->addWidget(scroll);
     auto buttons = new QDialogButtonBox;
     auto cancel = buttons->addButton(tr("Cancel"),QDialogButtonBox::RejectRole);
-    auto allow = buttons->addButton(termination ? tr("Terminate this process") : powerProfile ? tr("Change power profile") : tr("Allow this read scope"),QDialogButtonBox::AcceptRole);
+    auto allow = buttons->addButton(termination ? tr("Terminate this process") : powerProfile ? tr("Change power profile") : fileRoots ? tr("Enroll these file roots") : tr("Allow this read scope"),QDialogButtonBox::AcceptRole);
     cancel->setObjectName("cancel"); allow->setObjectName("allow");
     cancel->setDefault(true); allow->setDefault(false); allow->setAutoDefault(false);
     cancel->setAccessibleDescription(tr("Decline and close this permission request"));
-    allow->setAccessibleDescription(termination ? tr("Confirm one graceful termination attempt on only the displayed process") : powerProfile ? tr("Confirm only the displayed power profile change") : tr("Confirm only the displayed application read scope until its expiration"));
+    allow->setAccessibleDescription(termination ? tr("Confirm one graceful termination attempt on only the displayed process") : powerProfile ? tr("Confirm only the displayed power profile change") : fileRoots ? tr("Enroll only the displayed roots and access classes for this originating client") : tr("Confirm only the displayed application read scope until its expiration"));
     layout->addWidget(buttons); cancel->setFocus();
     connect(cancel,&QPushButton::clicked,this,[this]{finish(false);});
     connect(allow,&QPushButton::clicked,this,[this]{finish(true);});

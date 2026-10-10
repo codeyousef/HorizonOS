@@ -54,9 +54,14 @@ def main():
             os.fsync(handle.fileno())
         os.symlink("/etc/passwd", link)
         release = Path(__file__).resolve().parents[2]
+        # Native enrollment requires an explicitly selected own graphical
+        # session. A headless client cannot invent one or claim approval.
+        session = os.environ.get("XDG_SESSION_ID", "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session):
+            raise RuntimeError("installed native file-scope qualification requires an explicitly selected graphical session and native user confirmation")
         command = ["nix", "develop", "--no-update-lock-file", "--no-write-lock-file", "path:" + str(release),
             "--command", "cargo", "run", "--locked", "--quiet", "-p", "aios-session", "--example",
-            "installed_file_scopes", "--", str(documents), filename, linkname]
+            "installed_file_scopes", "--", str(documents), filename, linkname, session]
         result = subprocess.run(command, env=env, capture_output=True, timeout=300)
         marker = "AIOS_INSTALLED_FILE_SCOPES_CLIENT="
         lines = result.stdout.decode(errors="replace").splitlines()

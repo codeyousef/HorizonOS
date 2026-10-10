@@ -4,6 +4,7 @@
 //! freshly resolve resources on each poll, and drop pending consent on Stop.
 use super::*;
 pub mod power_profile;
+pub mod file_roots;
 pub mod termination;
 use std::{fs, io::{Read, Write}, net::Shutdown, os::unix::{fs::{MetadataExt, FileTypeExt}, net::UnixStream},
     path::PathBuf, process::{Child, Command, Stdio}};
@@ -154,14 +155,14 @@ impl ReadConfirmation {
         }
     }
 }
-enum PendingProposal { Read(ReadProposal), Termination(termination::TerminationProposal), PowerProfile(power_profile::PowerProfileProposal) }
+enum PendingProposal { Read(ReadProposal), Termination(termination::TerminationProposal), PowerProfile(power_profile::PowerProfileProposal), FileRoots(file_roots::FileRootsProposal) }
 impl PendingProposal {
     fn fresh(&self,policy:&Policy,subject:&Subject,current:&impl CurrentResources)->Result<()> {
-        match self {Self::Read(p)=>fresh(p,policy,subject,current,boottime_ms()?),Self::Termination(p)=>p.fresh(policy,subject,current),Self::PowerProfile(p)=>p.fresh(policy,subject,current)}
+        match self {Self::Read(p)=>fresh(p,policy,subject,current,boottime_ms()?),Self::Termination(p)=>p.fresh(policy,subject,current),Self::PowerProfile(p)=>p.fresh(policy,subject,current),Self::FileRoots(p)=>p.fresh(policy,subject,current)}
     }
-    fn desktop(&self)->&NativeDesktop {match self {Self::Read(p)=>&p.desktop,Self::Termination(p)=>&p.desktop,Self::PowerProfile(p)=>&p.desktop}}
-    fn wire(&self)->Value {match self {Self::Read(p)=>p.wire(true),Self::Termination(p)=>p.wire(true),Self::PowerProfile(p)=>p.wire(true)}}
-    fn digest(&self)->&str {match self {Self::Read(p)=>&p.digest,Self::Termination(p)=>&p.digest,Self::PowerProfile(p)=>&p.digest}}
+    fn desktop(&self)->&NativeDesktop {match self {Self::Read(p)=>&p.desktop,Self::Termination(p)=>&p.desktop,Self::PowerProfile(p)=>&p.desktop,Self::FileRoots(p)=>&p.desktop}}
+    fn wire(&self)->Value {match self {Self::Read(p)=>p.wire(true),Self::Termination(p)=>p.wire(true),Self::PowerProfile(p)=>p.wire(true),Self::FileRoots(p)=>p.wire(true)}}
+    fn digest(&self)->&str {match self {Self::Read(p)=>&p.digest,Self::Termination(p)=>&p.digest,Self::PowerProfile(p)=>&p.digest,Self::FileRoots(p)=>&p.digest}}
     /// Fresh native identities/resources must be checked before launching.
     /// No environment variable or request chooses the program or platform.
     pub fn launch(self, policy: &Policy, subject: &Subject, current: &impl CurrentResources) -> Result<NativeConfirmation> {
