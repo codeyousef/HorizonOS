@@ -80,9 +80,12 @@ accepted. The returned UUID and digest identify the immutable plan.
 plan hashes from the broker rather than accepting client-supplied hashes.
 `cancel` terminally closes a pre-effect prepared, building, or awaiting-approval
 transaction and releases its active-plan slot; an already authorized guard owns
-recovery instead. In a headless session, authorization and apply fail with
-`AUTH_REQUIRED` while retaining the concrete plan UUID in the typed error; they
-never infer consent.
+recovery instead. Broker housekeeping applies the preparation deadline only
+before a build starts and the separately frozen final-approval deadline only
+while awaiting approval. An in-flight authorized build may finish after its
+resource-consent deadline and receive the promised fresh final preview. In a
+headless session, authorization and apply fail with `AUTH_REQUIRED` while
+retaining the concrete plan UUID in the typed error; they never infer consent.
 
 ## Verification scope
 

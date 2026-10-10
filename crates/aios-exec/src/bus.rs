@@ -301,6 +301,12 @@ impl Runtime {
                     self.ledger
                         .request_cancel(id, owner.caller.identity().uid)?;
                 }
+            } else if status.state == State::AwaitingApproval {
+                let plan = self.ledger.final_plan(id, owner.caller.identity().uid)?;
+                if now >= plan.approval_expires_monotonic_ms {
+                    self.ledger
+                        .request_cancel(id, owner.caller.identity().uid)?;
+                }
             }
         }
         self.authorizer.bus().target().recheck()?;

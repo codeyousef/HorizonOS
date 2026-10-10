@@ -51,10 +51,12 @@
   foreground process-group, UID, boot and session bindings remain mandatory.
 - Add authenticated `aiosctl plan` and transaction inspection, authorization,
   apply, cancel and rollback-plan commands for bounded package intents. Cancel
-  exposes the broker's owner-bound pre-effect cancellation so an expired or
-  declined approval cannot strand the active-plan slot. Prepared plans persist
-  only for the same UID, boot, system bus and live logind session; headless
-  denials preserve the concrete plan ID instead of claiming consent.
+  exposes the broker's owner-bound pre-effect cancellation. Housekeeping closes
+  an expired prepared plan against its preparation deadline and an expired
+  awaiting-approval plan against its separate frozen final deadline, without
+  cancelling a verified build merely because resource consent expired. Prepared
+  plans persist only for the same UID, boot, system bus and live logind session;
+  headless denials preserve the concrete plan ID instead of claiming consent.
 - Add broker-owned final-plan TTY confirmation with foreground process/session
   checks, control-safe immutable impact/recovery rendering, an exact plan-bound
   phrase, and mandatory separate fresh native polkit authentication.
