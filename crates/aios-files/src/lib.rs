@@ -145,6 +145,10 @@ fn identity_sha256(value: &Identity) -> String {
         value.modified_ns.to_le_bytes().as_slice(), value.changed_ns.to_le_bytes().as_slice()] { digest.update(bytes); }
     format!("{:x}",digest.finalize())
 }
+fn same_root(left:&Identity,right:&Identity)->bool{
+    (left.mount_id,left.device,left.inode,left.mode,left.uid)==(right.mount_id,right.device,right.inode,right.mode,right.uid)
+}
+
 
 #[repr(C)]
 struct OpenHow { flags: u64, mode: u64, resolve: u64 }
@@ -226,7 +230,7 @@ impl Manager {
             if !path.starts_with(&canonical_home) || path==canonical_home || secret(path.strip_prefix(&canonical_home).map_err(|_|ErrorCode::PermissionDenied)?) {continue;}
             let Ok((file,id))=open_root(&path) else {continue};
             if id.uid!=owner.uid || id.device!=home_identity.device || id.mount_id!=home_identity.mount_id {continue;}
-            let display=path.to_string_lossy().into_owned();let digest=identity_sha256(&id);
+            let display=path.to_string_lossy().into_owned();let digest={let mut value=id.clone();value.size=0;value.modified_ns=0;value.changed_ns=0;identity_sha256(&value)};
             if !seen.insert((id.mount_id,id.device,id.inode)) {continue;}
             roots.push(Candidate{root:ProposedRoot{root_id:Uuid::new_v4().to_string(),display_path:display,identity_sha256:digest},path,identity:id});
             drop(file);
@@ -248,7 +252,7 @@ impl Manager {
         for id in approved {
             let candidate=proposal.roots.iter().find(|root|&root.root.root_id==id).ok_or(ErrorCode::PermissionDenied)?;
             let (directory,current)=open_root(&candidate.path)?;
-            if current!=candidate.identity{return Err(ErrorCode::TargetChanged);}
+            if !same_root(&current,&candidate.identity){return Err(ErrorCode::TargetChanged);}
             let grant=RootGrant{root_id:id.clone(),display_path:candidate.root.display_path.clone(),identity_sha256:candidate.root.identity_sha256.clone(),allowed_access:allowed_access.to_vec(),expires_at_boottime_ms:expires};
             let root=Root{owner:owner.clone(),path:candidate.path.clone(),identity:current,identity_sha256:grant.identity_sha256.clone(),allowed:allowed_access.iter().copied().collect(),expires,directory};
             prepared.push((id.clone(),root,grant));
@@ -261,7 +265,7 @@ impl Manager {
     fn root(&self, owner:&Owner, root_id:&str, now_ms:u64)->Result<&Root>{
         let root=self.roots.get(root_id).ok_or(ErrorCode::PermissionDenied)?;
         if &root.owner!=owner{return Err(ErrorCode::PermissionDenied);}if now_ms>=root.expires{return Err(ErrorCode::ApprovalExpired);}
-        if identity(&root.directory)?!=root.identity{return Err(ErrorCode::TargetChanged);}Ok(root)
+        if !same_root(&identity(&root.directory)?,&root.identity){return Err(ErrorCode::TargetChanged);}Ok(root)
     }
 
     pub fn issue_handle(&mut self,owner:&Owner,root_id:&str,relative:&Path,access:Access,now_ms:u64)->Result<ScopedMetadata>{
