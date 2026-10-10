@@ -178,9 +178,8 @@ fn installed_process_handles_pages_native_identity_and_refusals() {
         assert_eq!(helper.get_property::<bool>(key).unwrap(),value);
     }
     assert_eq!(helper.get_property::<(bool,Vec<String>)>("RestrictAddressFamilies").unwrap(),(true,vec!["AF_UNIX".into()]));
-    for key in ["PrivateNetwork","PrivateDevices"]{assert!(service.get_property::<bool>(key).unwrap());}
-    assert!(!service.get_property::<bool>("PrivateUsers").unwrap());
-    for (key,value) in [("ProtectHome","no"),("ProtectSystem","strict"),("ProtectProc","invisible")]{
+    for key in ["PrivateUsers","PrivateNetwork","PrivateDevices"]{assert!(!service.get_property::<bool>(key).unwrap());}
+    for (key,value) in [("ProtectHome","no"),("ProtectSystem","no"),("ProtectProc","default")]{
         assert_eq!(service.get_property::<String>(key).unwrap(),value);
     }
     let api = Proxy::new(&connection,NAME,PATH,INTERFACE).unwrap();

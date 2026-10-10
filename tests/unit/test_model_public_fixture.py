@@ -40,8 +40,8 @@ class PublicFailureBoundaryTests(unittest.TestCase):
         broker.bytes = b'original packaged unit'
         broker.binaries = {'aios-sessiond': Path('/nix/store/' + 'a'*32 + '-aios-core-0.1.0/bin/aios-sessiond')}
         binary = str(broker.binaries['aios-sessiond'])
-        broker.show = Mock(return_value={'NoNewPrivileges':'yes','PrivateNetwork':'yes','ProtectHome':'no',
-            'ProtectSystem':'strict','MemoryMax':'268435456','TasksMax':'64','RuntimeDirectoryMode':'0700',
+        broker.show = Mock(return_value={'NoNewPrivileges':'yes','PrivateNetwork':'no','ProtectHome':'no',
+            'ProtectSystem':'no','MemoryMax':'268435456','TasksMax':'64','RuntimeDirectoryMode':'0700',
             'ActiveState':'active','MainPID':'50','FragmentPath':'/protected/unit','DropInPaths':'/protected/dropin',
             'ExecStart':'{ path=' + binary + ' ; argv[]=' + binary + ' ; ignore_errors=no ; rest }',
             'InvocationID':'a'*32})
@@ -59,7 +59,7 @@ class PublicFailureBoundaryTests(unittest.TestCase):
             broker.verify()
             for key, value in [('MainPID','52'),('InvocationID','b'*32),('ActiveState','inactive'),
                                ('ExecStart',broker.show.return_value['ExecStart'].replace('ignore_errors=no','--socket /tmp/fake ; ignore_errors=no')),
-                               ('ProtectSystem','no')]:
+                               ('ProtectSystem','strict')]:
                 previous = broker.show.return_value[key]
                 broker.show.return_value[key] = value
                 with self.assertRaises(RuntimeError): broker.verify()

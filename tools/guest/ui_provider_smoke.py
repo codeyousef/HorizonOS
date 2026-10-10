@@ -107,7 +107,7 @@ def main():
                     raise RuntimeError("exact managed service did not start: "+name)
                 required={"NoNewPrivileges":"yes","MemoryMax":"268435456","TasksMax":"64","RuntimeDirectoryMode":"0700"}
                 if name=="aios-sessiond.service":
-                    required.update({"PrivateNetwork":"yes","PrivateDevices":"yes","ProtectHome":"no","ProtectSystem":"strict","ProtectProc":"invisible"})
+                    required.update({"PrivateNetwork":"no","PrivateDevices":"no","ProtectHome":"no","ProtectSystem":"no","ProtectProc":"default","PrivateTmp":"no"})
                 else:
                     required.update({"PrivateNetwork":"no","PrivateDevices":"no","ProtectHome":"no","ProtectSystem":"no","ProtectProc":"default","PrivateTmp":"no"})
                 for key,value in required.items():

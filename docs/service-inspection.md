@@ -151,16 +151,17 @@ They cannot survive a broker restart or authorize another UID/session/client.
 No grant, nonce or write approval enters model context. Native graphical consent
 is required before UI access; observing a graphical candidate creates no grant.
 
-The user broker retains the caller's user and home namespace so its
-descriptor-scoped Files1 implementation can reach explicitly consented XDG
+The user broker retains the caller's user, mount, network and home namespaces so
+its descriptor-scoped Files1 implementation can reach explicitly consented XDG
 roots and compare file ownership with authenticated D-Bus credentials.
-`openat2` beneath/no-symlink/no-mount-crossing constraints, per-UID grants and
-per-operation identity revalidation—not a broad home mount—form that file
-boundary. The service still has no network access or capabilities, a read-only
-system image, private devices, and bounded memory and process counts. A fixed
-oneshot projection supplies registered KDE settings through the private runtime
-directory. Loss of the public bus owner terminates the daemon so the service
-manager can restart it.
+Unprivileged user-unit filesystem or network isolation would implicitly create a
+child user namespace and invalidate those host identities. `openat2`
+beneath/no-symlink/no-mount-crossing constraints, per-UID grants and
+per-operation identity revalidation form the file boundary instead. The broker
+has no capabilities, permits only Unix-domain sockets, cannot create namespaces,
+and retains no shell or arbitrary-path API. A fixed oneshot projection supplies
+registered KDE settings through the private runtime directory. Loss of the
+public bus owner terminates the daemon so the service manager can restart it.
 
 `aiosctl status --json` reports the authenticated session's capabilities and
 availability. `aiosctl ask --mode read-only TEXT` and standalone `ask TEXT`

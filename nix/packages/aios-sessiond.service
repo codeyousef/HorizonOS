@@ -14,19 +14,17 @@ UMask=0077
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX
-PrivateNetwork=yes
-PrivateTmp=yes
-PrivateDevices=yes
-ProtectSystem=strict
-ProtectHome=no
-BindPaths=%t
-BindReadOnlyPaths=-%t/aios/desktop-settings
+# Files1 must compare host UID/inode/mount identity and reopen consented paths
+# in the caller's real filesystem view. Unprivileged user-unit mount/network
+# isolation creates a child user namespace, so retain the original namespace
+# and enforce file authority through descriptor-scoped openat2 grants.
 PrivateUsers=no
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
-ProtectProc=invisible
+PrivateNetwork=no
+PrivateTmp=no
+PrivateDevices=no
+ProtectSystem=no
+ProtectHome=no
+ProtectProc=default
 RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 LockPersonality=yes
