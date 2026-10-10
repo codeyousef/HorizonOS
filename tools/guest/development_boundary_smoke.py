@@ -87,7 +87,8 @@ def main():
             "users":[], "desktop":False, "visualControl":False, "index":True,
             "proactive":False, "automation":True, "recovery":False,
             "initrdDiagnostics":False, "kernelProbes":False,
-            "guardTimeoutSeconds":180, "keepKnownGoodGenerations":3}:
+            "guardTimeoutSeconds":180,"keepKnownGoodGenerations":3,
+            "policy":{"schema_version":1,"keep_known_good_generations":3}}:
         raise RuntimeError("reusable product option defaults changed: " + json.dumps(disabled, sort_keys=True))
     headless = cases["productHeadless"]
     desktop = cases["productDesktop"]
