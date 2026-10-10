@@ -4,7 +4,7 @@ import os
 import re
 import uuid
 
-from . import guest, sync
+from . import guest, sync, resources
 from .config import invalid
 from .errors import DevctlError, ExitCode
 from .provision import failure, operation_lock, private_directory, write_new
@@ -113,6 +113,8 @@ def run(config, mode, transaction=None, acknowledge=False):
     if transaction is None and mode != "register":
         raise invalid("This deployment mode requires --transaction")
     transaction = identifier(transaction) if transaction is not None else str(uuid.uuid4())
+    if mode != "status":
+        resources.require_build_headroom(config)
     with operation_lock(config.root):
         trust, identity = guest.enrolled_identity(config)
         if (config.values["ssh_user"] != "dev" or config.values["guest_source_root"] != "/home/dev/aios-releases"

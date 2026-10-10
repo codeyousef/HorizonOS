@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 import uuid
 
-from . import guest, sync
+from . import guest, sync, resources
 from .config import invalid
 from .errors import DevctlError, ExitCode
 from .provision import failure, private_directory, write_json_new, write_new
@@ -148,6 +148,7 @@ def pull(config, job=None):
 def start(config, kind, *, package=None, detach=False, wait_seconds=120):
     if kind not in {"resolve-lock", "build-packages", "build-system", "build-desktop-test", "test-unit", "system-info-smoke", "service-inspection-smoke", "journal-inspection-smoke", "public-session-smoke", "installed-session-inference-smoke", "installed-file-scopes-smoke", "terminal-job-cache-recovery-smoke", "consent-ui-smoke", "accessibility-smoke", "ui-provider-smoke", "model-compatibility-smoke", "upstream-compatibility-smoke", "host-boundary-smoke", "protocol-conformance-smoke", "model-profile-low-smoke", "model-profile-high-smoke", "model-inference-smoke", "model-service-smoke", "session-inference-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "installed-model-smoke", "installed-model-idle-smoke", "installed-model-lifecycle-smoke", "installed-service-lifecycle-smoke", "installed-builder-smoke", "supervision-probe"} or package is not None and (kind != "build-packages" or package not in PACKAGES):
         raise invalid("Unregistered build/test job")
+    resources.require_build_headroom(config)
     _, snapshot = sync.synchronize(config)
     provenance = sync.contract.decode(Path(snapshot["artifact_path"]).read_bytes())
     paths = {item["path"] for item in provenance["manifest"]["files"]}

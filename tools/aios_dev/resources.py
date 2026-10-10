@@ -1,7 +1,29 @@
-"""Conservative fresh-VM defaults from read-only host discovery."""
+"""Conservative host reserves and fresh-VM defaults from measured resources."""
+import shutil
 from .errors import DevctlError, ExitCode
 
 GIB = 1024**3
+HOST_BUILD_RESERVE_BYTES = 8 * GIB
+
+
+def require_build_headroom(config):
+    """Refuse new guest work before publication; sparse disks still use host space.
+
+    This is a measured preflight floor, not a quota or a concurrency reservation.
+    It never cleans files and does not block status/cancellation/evidence reads.
+    Guest-side build reserves remain independently required.
+    """
+    try:
+        free = shutil.disk_usage(config.root).free
+    except OSError as error:
+        raise DevctlError(ExitCode.UNMET_PREREQUISITE, "HOST_STORAGE_DISCOVERY_FAILED",
+                          "Cannot measure host storage for the guest workspace") from error
+    if type(free) is not int or free < HOST_BUILD_RESERVE_BYTES:
+        raise DevctlError(ExitCode.UNMET_PREREQUISITE, "HOST_RECOVERY_RESERVE_UNAVAILABLE",
+                          "New guest work requires at least 8 GiB free on its host storage filesystem",
+                          details={"workspace": str(config.root), "free_bytes": free,
+                                   "required_free_bytes": HOST_BUILD_RESERVE_BYTES})
+    return {"free_bytes": free, "required_free_bytes": HOST_BUILD_RESERVE_BYTES}
 
 
 def recommend(report):

@@ -5,13 +5,14 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 from aios_dev.config import VMConfig, load_config
 from aios_dev.errors import DevctlError
 from aios_dev.provision import prepare_plan, select_fresh_defaults
-from aios_dev.resources import GIB, recommend
+from aios_dev.resources import GIB, recommend, require_build_headroom
 
 
 def measured(cpu=32, memory=40, disk=200):
@@ -20,6 +21,34 @@ def measured(cpu=32, memory=40, disk=200):
 
 
 class ResourceTests(unittest.TestCase):
+    def test_build_headroom_boundary_and_unknown_storage_refuse(self):
+        config = SimpleNamespace(root=Path('/measured/workspace'))
+        for free in (0, 8 * GIB - 1, True, None):
+            with patch('aios_dev.resources.shutil.disk_usage', return_value=SimpleNamespace(free=free)):
+                with self.subTest(free=free), self.assertRaises(DevctlError) as caught:
+                    require_build_headroom(config)
+                self.assertEqual(caught.exception.code, 'HOST_RECOVERY_RESERVE_UNAVAILABLE')
+        with patch('aios_dev.resources.shutil.disk_usage', return_value=SimpleNamespace(free=8 * GIB)):
+            self.assertEqual(require_build_headroom(config)['free_bytes'], 8 * GIB)
+        with patch('aios_dev.resources.shutil.disk_usage', side_effect=OSError):
+            with self.assertRaises(DevctlError) as caught:
+                require_build_headroom(config)
+            self.assertEqual(caught.exception.code, 'HOST_STORAGE_DISCOVERY_FAILED')
+
+    def test_low_disk_precedes_guest_publication_and_transaction_mutation(self):
+        from aios_dev import deploy, jobs
+        config = SimpleNamespace(root=Path('/measured/workspace'))
+        with patch('aios_dev.resources.shutil.disk_usage', return_value=SimpleNamespace(free=0)), \
+                patch('aios_dev.sync.synchronize') as publish, \
+                patch('aios_dev.guest.enrolled_identity') as identity, \
+                patch('aios_dev.deploy.operation_lock') as lock:
+            for call in (lambda: jobs.start(config, 'test-unit'),
+                         lambda: deploy.run(config, 'test', '99999999-9999-4999-8999-999999999999', True)):
+                with self.assertRaises(DevctlError) as caught:
+                    call()
+                self.assertEqual(caught.exception.code, 'HOST_RECOVERY_RESERVE_UNAVAILABLE')
+            publish.assert_not_called(); identity.assert_not_called(); lock.assert_not_called()
+
     def test_defaults_and_reduction_preserve_host_reserves(self):
         full = recommend(measured())
         self.assertEqual((full["vcpus"], full["memory_mib"], full["disk_gib"]), (8,16384,96))

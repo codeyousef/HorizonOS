@@ -43,6 +43,9 @@ class HostDeploymentTests(unittest.TestCase):
                         "limitations": ["No activation has occurred; test and commit remain required."],
                         "candidate_closure": None, "candidate_digest": None, "build_source_digest": None,
                         "test_guard_id": None, "commit_guard_id": None, "baseline": None, "committed_identity": None}
+        headroom = patch.object(deploy.resources, "require_build_headroom")
+        self.headroom = headroom.start()
+        self.addCleanup(headroom.stop)
         for module, name, value in ((deploy.guest, "enrolled_identity", (self.trust, IDENTITY)),
                                     (deploy.guest, "ssh_arguments", ["ssh", "pinned", "identity-command"]),
                                     (deploy.sync, "synchronize", (0, self.source)),
@@ -75,6 +78,7 @@ class HostDeploymentTests(unittest.TestCase):
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.exchange.side_effect = None
         _, result = self.call("status", acknowledge=False)
+        self.assertEqual(self.headroom.call_count, 1)
         self.assertEqual(result["state"], "REGISTERED")
         self.assertFalse(result["activation_performed"])
         self.synchronize.assert_called_once()
