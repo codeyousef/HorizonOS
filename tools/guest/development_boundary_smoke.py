@@ -133,7 +133,7 @@ def main():
     print("AIOS_DEVELOPMENT_BOUNDARY " + json.dumps({"evidence_kind":"real-guest-package-and-module-evaluation","module_cases":cases,
         "rustfmt_checked":rust_sources,
         "package":package,"developer_guard_unit":{"path":str(unit_path),"exec_start":starts[0],"required_sandbox":sorted(required_unit)},
-        "nonroot_denials":attempts,"source_copy_fixture_tests":15,
+        "nonroot_denials":attempts,"source_copy_fixture_tests":17,
         "initial_image_script_syntax":{"argv":["bash","-n",str(release / "dev/seed/bootstrap.sh")],"upstream_exit":0,"fresh_installation_verified":False},
         "initial_native_preflight_nonroot_denial":{"argv":["python3",str(release / "tools/guest/initial_preflight.py")],"upstream_exit":5,"actual_uid":os.getuid()},
         "initial_finish_syntax":{"argv":["bash","-n"],"upstream_exit":0,"script_sha256":hashlib.sha256(finish).hexdigest(),"executed":False},

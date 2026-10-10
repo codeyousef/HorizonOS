@@ -41,17 +41,27 @@ struct GuardServiceIdentity {
     unit: String,
     invocation: Vec<u8>,
     pid: u32,
+    developer: bool,
 }
 
-fn guard_fragment_path(path: &Path) -> bool {
-    path.starts_with("/nix/store/")
-        && path.ends_with("lib/systemd/system/aios-guard@.service")
+fn guard_fragment_path(path: &Path, developer: bool) -> bool {
+    let unit = if developer {
+        "lib/systemd/system/aios-dev-guard@.service"
+    } else {
+        "lib/systemd/system/aios-guard@.service"
+    };
+    path.starts_with("/nix/store/") && path.ends_with(unit)
 }
 impl GuardServiceIdentity {
-    fn capture(transaction_id: &str) -> Result<Self> {
+    fn capture(transaction_id: &str, developer: bool) -> Result<Self> {
         let pid = unsafe { libc::getpid() };
         let pid = u32::try_from(pid).map_err(|_| Error::Integrity)?;
-        let unit = format!("aios-guard@{transaction_id}.service");
+        let prefix = if developer {
+            "aios-dev-guard"
+        } else {
+            "aios-guard"
+        };
+        let unit = format!("{prefix}@{transaction_id}.service");
         let cgroup = fs::read(format!("/proc/{pid}/cgroup")).map_err(|_| Error::Integrity)?;
         let suffix = format!("/{unit}");
         if cgroup.len() > 65536
@@ -126,8 +136,7 @@ impl GuardServiceIdentity {
             Some("invocation-id")
         } else if main_pid != pid {
             Some("main-pid")
-        } else if !guard_fragment_path(&fragment)
-        {
+        } else if !guard_fragment_path(&fragment, developer) {
             Some("fragment-path")
         } else if !fragment_metadata.is_file()
             || fragment_metadata.uid() != 0
@@ -151,10 +160,16 @@ impl GuardServiceIdentity {
         drop(manager);
         drop(bus);
         drop(connection);
-        Ok(Self { owner, unit, invocation, pid })
+        Ok(Self {
+            owner,
+            unit,
+            invocation,
+            pid,
+            developer,
+        })
     }
     fn verify(&self, transaction_id: &str) -> Result<()> {
-        if &Self::capture(transaction_id)? == self {
+        if &Self::capture(transaction_id, self.developer)? == self {
             Ok(())
         } else {
             Err(Error::TargetMismatch)
@@ -593,7 +608,7 @@ fn adapter_stage<T>(name: &'static str, result: Result<T>) -> Result<T> {
 }
 
 impl NativeAdapter {
-    fn construct(plan: Plan, recovery: bool) -> Result<Self> {
+    fn construct(plan: Plan, recovery: bool, developer: bool) -> Result<Self> {
         if unsafe { libc::getuid() } != 0 || unsafe { libc::geteuid() } != 0 {
             return Err(Error::Authority);
         }
@@ -644,17 +659,25 @@ impl NativeAdapter {
         }
         let guard = adapter_stage(
             "service-identity",
-            GuardServiceIdentity::capture(&plan.transaction_id),
+            GuardServiceIdentity::capture(&plan.transaction_id, developer),
         )?;
         Ok(Self { plan, nix, guard })
     }
 
     pub fn new(plan: Plan) -> Result<Self> {
-        Self::construct(plan, false)
+        Self::construct(plan, false, false)
     }
 
     pub(crate) fn recovering(plan: Plan) -> Result<Self> {
-        Self::construct(plan, true)
+        Self::construct(plan, true, false)
+    }
+
+    pub(crate) fn new_for_developer(plan: Plan) -> Result<Self> {
+        Self::construct(plan, false, true)
+    }
+
+    pub(crate) fn recovering_for_developer(plan: Plan) -> Result<Self> {
+        Self::construct(plan, true, true)
     }
 
     fn command(&self, effect: &Effect) -> Result<()> {
@@ -782,15 +805,20 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn guard_fragment_requires_store_root_and_component_relative_suffix() {
-        assert!(guard_fragment_path(Path::new(
-            "/nix/store/abc-aios-guard/lib/systemd/system/aios-guard@.service"
-        )));
-        assert!(!guard_fragment_path(Path::new(
-            "/etc/systemd/system/aios-guard@.service"
-        )));
-        assert!(!guard_fragment_path(Path::new(
-            "/nix/store/abc-aios-guard/lib/systemd/system/not-the-guard.service"
-        )));
+    fn guard_fragment_requires_exact_store_unit_kind() {
+        let product = Path::new(
+            "/nix/store/abc-aios-guard/lib/systemd/system/aios-guard@.service",
+        );
+        let developer = Path::new(
+            "/nix/store/def-aios-dev-deploy/lib/systemd/system/aios-dev-guard@.service",
+        );
+        assert!(guard_fragment_path(product, false));
+        assert!(guard_fragment_path(developer, true));
+        assert!(!guard_fragment_path(product, true));
+        assert!(!guard_fragment_path(developer, false));
+        assert!(!guard_fragment_path(
+            Path::new("/etc/systemd/system/aios-guard@.service"),
+            false,
+        ));
     }
 }

@@ -306,7 +306,7 @@ fn control(
 
 fn reconcile(guard: &mut Ledger, id: &str) -> Result<()> {
     let persisted = guard.plan(id)?;
-    let mut adapter = NativeAdapter::recovering(persisted)?;
+    let mut adapter = NativeAdapter::recovering_for_developer(persisted)?;
     match Engine::reconcile(guard, id, &mut adapter) {
         Ok(State::Committed | State::RolledBack | State::Rejected) => Ok(()),
         Ok(State::RecoveryRequired) | Err(Error::RecoveryRequired) => Err(Error::RecoveryRequired),
@@ -327,7 +327,7 @@ pub fn run(id: &str) -> Result<()> {
     }
     let intake = NativeIntake::capture()?;
     let plan = plan(&handoff, &intake)?;
-    let mut adapter = NativeAdapter::new(plan.clone())?;
+    let mut adapter = NativeAdapter::new_for_developer(plan.clone())?;
     let mut engine = Engine::register(plan.clone(), &mut guard)?;
     let now = adapter.boot_time_ms()?;
     engine.arm(&mut guard, &mut adapter, now)?;
