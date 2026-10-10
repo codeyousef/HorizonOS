@@ -40,7 +40,7 @@
 - Add consented per-user file roots and opaque scoped handles. Root proposals are
   limited to existing XDG Documents, Downloads and Desktop directories on the
   home mount; descriptor-relative `openat2` resolution denies symlink, traversal
-  and mount escapes. UID/session, root, file metadata and expiry are revalidated
+  and mount escapes. UID/boot, root, file metadata and expiry are revalidated
   for every metadata/content/mutation capability. The user broker retains the
   caller's user, mount and home namespaces so those descriptor capabilities can
   reach the selected roots; it has no capabilities and permits only Unix-domain
