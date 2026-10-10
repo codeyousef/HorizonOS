@@ -181,8 +181,16 @@ fn plan(handoff: &Handoff, intake: &NativeIntake) -> Result<Plan> {
             required_mounts,
             baseline_units,
             required_apis: vec![
-                ApiHealth { api: Api::Executor, uid: None, healthy: true },
-                ApiHealth { api: Api::Graph, uid: None, healthy: true },
+                ApiHealth {
+                    api: Api::Executor,
+                    uid: None,
+                    healthy: true,
+                },
+                ApiHealth {
+                    api: Api::Graph,
+                    uid: None,
+                    healthy: true,
+                },
             ],
             baseline_user_units,
             required_user_units,
@@ -341,8 +349,7 @@ pub fn run(id: &str) -> Result<()> {
         _ => return Err(Error::Integrity),
     }
     let listener = UnixListener::bind(&socket).map_err(|_| Error::Adapter)?;
-    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))
-        .map_err(|_| Error::Adapter)?;
+    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).map_err(|_| Error::Adapter)?;
     listener.set_nonblocking(true).map_err(|_| Error::Adapter)?;
     loop {
         match listener.accept() {

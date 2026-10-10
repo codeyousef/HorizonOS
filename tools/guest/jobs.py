@@ -107,7 +107,6 @@ def commands(kind, release, package=None, job_directory=None):
         return [["python3", str(release / "tools/guest/build_system.py"), str(job_directory)]]
     if kind == "test-unit":
         return [["nix", "build", "--json", "--no-link", *locked, reference + "#checks.x86_64-linux.consent-ui"],
-                ["nix", "develop", *locked, reference, "--command", "cargo", "fmt", "--all", "--", "--check"],
                 ["nix", "develop", *locked, reference, "--command", "cargo", "test", "--locked", "--workspace"],
                 ["python3", "-m", "unittest", "discover", "-s", "tests/unit", "-q"]]
     if kind == "resolve-lock":

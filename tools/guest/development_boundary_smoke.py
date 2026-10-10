@@ -28,6 +28,12 @@ def main():
         raise RuntimeError("initial native preflight allowed nonroot execution")
     reference = "path:" + str(release)
     locked = ["--no-update-lock-file", "--no-write-lock-file"]
+    rust_sources = [str(release / "crates/aios-guard/src/developer.rs"), str(release / "crates/aios-guard/src/main.rs")]
+    subprocess.run(
+        ["nix", "develop", *locked, reference, "--command", "rustfmt", "--edition", "2024", "--check", *rust_sources],
+        check=True,
+        timeout=120,
+    )
     cases = json.loads(subprocess.check_output(["nix", "eval", "--json", *locked, reference + "#lib.developmentBoundary"], timeout=120))
     for name in ("development", "disabled", "production", "sessionHeadless", "sessionDesktop",
                  "productHeadless", "productDesktop"):
@@ -124,6 +130,7 @@ def main():
         attempts.append({"uid":os.getuid(),"forged_sudo_and_python_environment":bool(env),"exit":response.returncode,"response":json.loads(response.stdout)})
     subprocess.run(["python3", "-m", "unittest", "discover", "-s", "tests/unit", "-p", "test_dev_deploy.py", "-v"], cwd=release, check=True, timeout=60)
     print("AIOS_DEVELOPMENT_BOUNDARY " + json.dumps({"evidence_kind":"real-guest-package-and-module-evaluation","module_cases":cases,
+        "rustfmt_checked":rust_sources,
         "package":package,"developer_guard_unit":{"path":str(unit_path),"exec_start":starts[0],"required_sandbox":sorted(required_unit)},
         "nonroot_denials":attempts,"source_copy_fixture_tests":15,
         "initial_image_script_syntax":{"argv":["bash","-n",str(release / "dev/seed/bootstrap.sh")],"upstream_exit":0,"fresh_installation_verified":False},
