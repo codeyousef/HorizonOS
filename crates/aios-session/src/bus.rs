@@ -53,7 +53,11 @@ struct ReadScopedRequest { schema_version:u32,file_handle:String,max_bytes:usize
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RevokeRootRequest { schema_version:u32,root_id:String,confirmed:bool }
-fn file_owner(peer:&Peer)->aios_files::Owner{aios_files::Owner{uid:peer.uid,boot_id:peer.boot_id.clone(),session_id:None}}
+fn file_owner(peer:&Peer)->std::result::Result<aios_files::Owner,ErrorCode>{
+    let subject=peer.policy_subject()?;
+    Ok(aios_files::Owner{uid:peer.uid,boot_id:peer.boot_id.clone(),session_id:peer.logind_session.clone(),
+        client_binding_sha256:aios_policy::digest(&subject)?})
+}
 fn file_json(value:Value)->Result<String>{
     let text=serde_json::to_string(&value).map_err(|_|ErrorCode::InvalidArgument)?;
     if text.len()>aios_protocol::MAX_FRAME_BYTES{return Err(ErrorCode::ResourceExhausted.into());}Ok(text)
@@ -294,7 +298,7 @@ impl Agent {
         let mut value=self.dispatch(connection,header.clone(),Operation::PrivacyScopes).await?;
         let peer=Self::peer(connection,&header).await?;let original=peer.clone();let agent=self.clone();
         let roots=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
-            Ok::<_,ErrorCode>(agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.active_roots(&file_owner(&original),now))}).await?;
+            Ok::<_,ErrorCode>(agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.active_roots(&file_owner(&original)?,now))}).await?;
         if Self::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
         value["data"]["file_roots"]=serde_json::to_value(roots).map_err(|_|ErrorCode::InvalidArgument)?;
         file_json(value)
@@ -391,7 +395,7 @@ impl Files{
     async fn propose_roots(&self,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
         let _admission=self.agent.admit()?;let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
         let proposal=blocking::unblock(move||{let home=user_home(original.uid)?;let now=aios_policy::boottime_ms()?;
-            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.propose_xdg_roots(file_owner(&original),&home,now)}).await?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.propose_xdg_roots(file_owner(&original)?,&home,now)}).await?;
         file_json(serde_json::json!({"schema_version":1,"operation":"file_roots_proposed","data":proposal,"mutation_performed":false}))
     }
     async fn enroll_roots(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
@@ -400,13 +404,13 @@ impl Files{
         if request.schema_version!=1||!request.confirmed||!crate::uuid(&request.proposal_id){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
         let roots=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
-            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.enroll(&file_owner(&original),&request.proposal_id,&request.approved_root_ids,&request.allowed_access,now)}).await?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.enroll(&file_owner(&original)?,&request.proposal_id,&request.approved_root_ids,&request.allowed_access,now)}).await?;
         file_json(serde_json::json!({"schema_version":1,"operation":"file_roots_enrolled","data":{"roots":roots},"mutation_performed":true}))
     }
     async fn list_roots(&self,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
         let _admission=self.agent.admit()?;let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
         let roots=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
-            Ok::<_,ErrorCode>(agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.active_roots(&file_owner(&original),now))}).await?;
+            Ok::<_,ErrorCode>(agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.active_roots(&file_owner(&original)?,now))}).await?;
         file_json(serde_json::json!({"schema_version":1,"operation":"file_roots","data":{"roots":roots},"mutation_performed":false}))
     }
     async fn open_scoped(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
@@ -415,7 +419,7 @@ impl Files{
         if request.schema_version!=1||!crate::uuid(&request.root_id){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
         let metadata=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
-            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.issue_handle(&file_owner(&original),&request.root_id,PathBuf::from(request.relative_path).as_path(),request.access,now)}).await?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.issue_handle(&file_owner(&original)?,&request.root_id,PathBuf::from(request.relative_path).as_path(),request.access,now)}).await?;
         file_json(serde_json::json!({"schema_version":1,"operation":"file_handle_issued","data":metadata,"mutation_performed":false}))
     }
     async fn scoped_metadata(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
@@ -424,7 +428,7 @@ impl Files{
         if request.schema_version!=1||!crate::uuid(&request.file_handle){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
         let metadata=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
-            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.metadata(&file_owner(&original),&request.file_handle,now)}).await?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.metadata(&file_owner(&original)?,&request.file_handle,now)}).await?;
         file_json(serde_json::json!({"schema_version":1,"operation":"file_metadata","data":metadata,"mutation_performed":false}))
     }
     async fn read_scoped(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
@@ -433,7 +437,7 @@ impl Files{
         if request.schema_version!=1||!crate::uuid(&request.file_handle)||request.max_bytes>262_144{return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();let handle=request.file_handle.clone();
         let bytes=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
-            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.read(&file_owner(&original),&request.file_handle,request.max_bytes,now)}).await?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.read(&file_owner(&original)?,&request.file_handle,request.max_bytes,now)}).await?;
         let content=String::from_utf8(bytes).map_err(|_|ErrorCode::UnsupportedCapability)?;
         file_json(serde_json::json!({"schema_version":1,"operation":"file_read","data":{"file_handle":handle,"bytes_read":content.len(),"content":content},"mutation_performed":false}))
     }
@@ -443,7 +447,7 @@ impl Files{
         if request.schema_version!=1||!request.confirmed||!crate::uuid(&request.root_id){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
         let receipt=blocking::unblock(move||{
-            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.revoke(&file_owner(&original),&request.root_id)}).await?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.revoke(&file_owner(&original)?,&request.root_id)}).await?;
         file_json(serde_json::json!({"schema_version":1,"operation":"file_root_revoked","data":receipt,"mutation_performed":true}))
     }
     async fn search(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{self.agent.action(connection,header,request_json,"files.search").await}

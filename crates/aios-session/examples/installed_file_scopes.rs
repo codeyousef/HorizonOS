@@ -20,7 +20,7 @@ fn main(){
     assert_eq!(arguments.len(),3,"expected Documents path, file name and link name");
     let documents=PathBuf::from(&arguments[0]);let filename=&arguments[1];let linkname=&arguments[2];
     let boot_id=std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim().to_owned();
-    let owner=aios_files::Owner{uid:nix::unistd::geteuid().as_raw(),boot_id,session_id:None};
+    let owner=aios_files::Owner{uid:nix::unistd::geteuid().as_raw(),boot_id,session_id:None,client_binding_sha256:"a".repeat(64)};
     let mut manager=aios_files::Manager::default();
     let local=manager.propose_xdg_roots(owner,documents.parent().unwrap(),0).expect("local descriptor root proposal failed");
     assert!(local.roots.iter().any(|root|root.display_path==documents.to_string_lossy()));

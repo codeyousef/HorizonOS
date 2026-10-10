@@ -26,6 +26,9 @@ pub struct Owner {
     pub uid: u32,
     pub boot_id: String,
     pub session_id: Option<String>,
+    /// Digest of the broker-authenticated process and transport subject. Never
+    /// accept this binding from a public file request or model output.
+    pub client_binding_sha256: String,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +115,8 @@ fn bounded(value: &str, max: usize) -> bool {
 fn owner_valid(owner: &Owner) -> bool {
     owner.uid > 0 && Uuid::parse_str(&owner.boot_id).is_ok()
         && owner.session_id.as_deref().is_none_or(|id| bounded(id, 128))
+        && owner.client_binding_sha256.len() == 64
+        && owner.client_binding_sha256.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn timespec_ns(seconds: i64, nanos: i64) -> Result<i128> {
@@ -354,7 +359,7 @@ mod tests {
     fn setup()->(tempfile::TempDir,Owner,Manager,Proposal){
         let temp=tempfile::tempdir().unwrap();let home=temp.path();fs::create_dir(home.join("Documents")).unwrap();fs::create_dir(home.join("Downloads")).unwrap();
         fs::write(home.join("Documents/note.txt"),b"safe text").unwrap();
-        let uid=nix::unistd::geteuid().as_raw();let owner=Owner{uid,boot_id:Uuid::new_v4().to_string(),session_id:Some("fixture-session".into())};
+        let uid=nix::unistd::geteuid().as_raw();let owner=Owner{uid,boot_id:Uuid::new_v4().to_string(),session_id:Some("fixture-session".into()),client_binding_sha256:"a".repeat(64)};
         let mut manager=Manager::default();let proposal=manager.propose_xdg_roots(owner.clone(),home,100).unwrap();(temp,owner,manager,proposal)
     }
     fn enroll()->(tempfile::TempDir,Owner,Manager,RootGrant){
@@ -396,6 +401,22 @@ mod tests {
         manager.cache_for_test(&handle.file_handle,"chunk","preview","snippet").unwrap();assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,103),Ok("snippet"));
         let receipt=manager.revoke(&owner,&root.root_id).unwrap();assert!(receipt.access_blocked);assert_eq!(receipt.handles_revoked,1);assert_eq!(receipt.cached_records_purged,3);
         assert_eq!(manager.read(&owner,&handle.file_handle,32,104),Err(ErrorCode::PermissionDenied));assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,104),Err(ErrorCode::PermissionDenied));
+    }
+
+    #[test]
+    fn another_same_uid_connection_or_session_cannot_reuse_authority(){
+        let (_temp,owner,mut manager,root)=enroll();
+        let handle=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,102).unwrap();
+        manager.cache_for_test(&handle.file_handle,"chunk","preview","snippet").unwrap();
+        let mut other=owner.clone();other.client_binding_sha256="b".repeat(64);
+        for foreign in [other,{let mut value=owner.clone();value.session_id=Some("another-session".into());value}] {
+            assert_eq!(manager.issue_handle(&foreign,&root.root_id,Path::new("note.txt"),Access::Content,103),Err(ErrorCode::PermissionDenied));
+            assert_eq!(manager.read(&foreign,&handle.file_handle,32,103),Err(ErrorCode::PermissionDenied));
+            assert_eq!(manager.cached_snippet(&foreign,&handle.file_handle,103),Err(ErrorCode::PermissionDenied));
+            assert_eq!(manager.revoke(&foreign,&root.root_id),Err(ErrorCode::PermissionDenied));
+            assert!(manager.active_roots(&foreign,103).is_empty());
+        }
+        assert_eq!(manager.read(&owner,&handle.file_handle,32,104).unwrap(),b"safe text");
     }
 
     #[test]
