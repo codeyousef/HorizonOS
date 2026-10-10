@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import subprocess
 import tempfile
 import time
@@ -26,6 +27,16 @@ def main():
     source = json.loads((release/'models/source-lock.json').read_text())
     store = Path(pwd.getpwuid(os.geteuid()).pw_dir)/'.aios-models'
     artifact = store/('qwen3.5-2b-'+source['revision'])
+    if not artifact.is_dir():
+        unit = subprocess.check_output(
+            ['systemctl','show','--value','--property=ExecStart','aios-model.service'],timeout=5,text=True)
+        match = re.search(r'--model-directory (/nix/store/[a-z0-9]{32}-minnerite-model-normal-[a-f0-9]{12})',unit)
+        if not match:
+            raise RuntimeError('neither qualification nor installed immutable model data is available')
+        artifact = Path(match[1])
+        if (artifact/'lock.json').read_bytes() != (release/'models/lock.json').read_bytes():
+            raise RuntimeError('installed model data does not match this source snapshot')
+    store.mkdir(mode=0o700,exist_ok=True)
     observations = {}
     with tempfile.TemporaryDirectory(prefix='session-inference-',dir=store) as temporary:
         directory = Path(temporary); model_socket=directory/'model.sock'; session_socket=directory/'session.sock'
