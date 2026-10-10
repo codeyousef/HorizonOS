@@ -284,7 +284,7 @@ impl Manager {
     fn reopen(&self,owner:&Owner,handle_id:&str,required:Access,now_ms:u64)->Result<File>{
         let handle=self.handles.get(handle_id).ok_or(ErrorCode::PermissionDenied)?;
         if &handle.owner!=owner{return Err(ErrorCode::PermissionDenied);}if now_ms>=handle.expires{return Err(ErrorCode::ApprovalExpired);}
-        if handle.access!=required && handle.access!=Access::Mutation{return Err(ErrorCode::PermissionDenied);}
+        if handle.access!=required{return Err(ErrorCode::PermissionDenied);}
         let root=self.root(owner,&handle.root_id,now_ms)?;
         let file=openat2(root.directory.as_raw_fd(),Path::new(&handle.relative),nix::libc::O_RDONLY|nix::libc::O_NOFOLLOW,
             RESOLVE_BENEATH|RESOLVE_NO_XDEV|RESOLVE_NO_MAGICLINKS|RESOLVE_NO_SYMLINKS)?;
@@ -383,5 +383,6 @@ mod tests {
         let (_temp,owner,mut manager,root)=enroll();let metadata=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Metadata,102).unwrap();
         assert!(manager.metadata(&owner,&metadata.file_handle,103).is_ok());assert_eq!(manager.read(&owner,&metadata.file_handle,32,103),Err(ErrorCode::PermissionDenied));
         let mutation=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Mutation,103).unwrap();assert_eq!(manager.revalidate_mutation(&owner,&mutation.file_handle,104),Ok(()));
+        assert_eq!(manager.read(&owner,&mutation.file_handle,32,104),Err(ErrorCode::PermissionDenied));
     }
 }
