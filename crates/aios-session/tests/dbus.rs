@@ -1,7 +1,7 @@
 //! Real standard user-bus introspection and unique-sender authorization in guest.
 use aios_session::{State, bus::{self, NAME, PATH, INTERFACE}};
 use serde_json::{Value, json};
-use std::{fs, os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt}, sync::{Arc, Mutex, mpsc}, time::Duration};
+use std::{fs, os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, symlink}, path::PathBuf, sync::{Arc, Mutex, mpsc}, time::Duration};
 use zbus::blocking::{Connection, MessageIterator, Proxy};
 
 fn connect() -> Connection {
@@ -36,6 +36,16 @@ fn stop_installed_session() -> RestoreInstalledSession {
     }
     panic!("installed session service did not release its bus name");
 }
+struct ScopedFileFixture{directory:PathBuf,file:PathBuf,link:PathBuf,created_directory:bool}
+impl ScopedFileFixture{
+    fn new()->Self{
+        let uid=nix::unistd::geteuid();let home=nix::unistd::User::from_uid(uid).unwrap().unwrap().dir;let directory=home.join("Documents");
+        let created_directory=!directory.exists();if created_directory{fs::create_dir(&directory).unwrap();}
+        let token=uuid::Uuid::new_v4();let file=directory.join(format!("aios-scope-{token}.txt"));let link=directory.join(format!("aios-scope-{token}.link"));
+        fs::write(&file,b"scoped fixture text").unwrap();symlink("/etc/passwd",&link).unwrap();Self{directory,file,link,created_directory}
+    }
+}
+impl Drop for ScopedFileFixture{fn drop(&mut self){let _=fs::remove_file(&self.file);let _=fs::remove_file(&self.link);if self.created_directory{let _=fs::remove_dir(&self.directory);}}}
 
 fn code(error: zbus::Error, expected: &str) {
     let zbus::Error::MethodError(name, _, _) = error else { panic!("unexpected error: {error}") };
@@ -48,6 +58,7 @@ fn code_one_of(error:zbus::Error,expected:&[&str]){
 
 #[test]
 fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
+    let file_fixture=ScopedFileFixture::new();
     // Different registered jobs share the real user's well-known bus name.
     let directory = std::path::PathBuf::from(format!("/run/user/{}/aios-qualification",nix::unistd::geteuid()));
     if !directory.exists() { fs::DirBuilder::new().mode(0o700).create(&directory).unwrap(); }
@@ -100,7 +111,7 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
     assert!(own_ui.contains("name=\"SelectSession\""));assert!(!own_ui.contains("<signal"));
     code(ui.call::<_,_,String>("SelectSession",&("aios-no-such-session",)).unwrap_err(),"TARGET_NOT_FOUND");
     for (path, interface, methods, expected_available) in [
-        ("/org/aios/Files1","org.aios.Files1",vec!["GetCapabilities","Search","Metadata","Read","Summarize","Copy","MoveFile","Trash","Restore"],vec![]),
+        ("/org/aios/Files1","org.aios.Files1",vec!["GetCapabilities","ProposeRoots","EnrollRoots","ListRoots","OpenScoped","ScopedMetadata","ReadScoped","RevokeRoot","Search","Metadata","Read","Summarize","Copy","MoveFile","Trash","Restore"],vec![]),
         ("/org/aios/Applications1","org.aios.Applications1",vec!["GetCapabilities","List","Launch","Actions","Invoke"],vec![]),
         ("/org/aios/Settings1","org.aios.Settings1",vec!["GetCapabilities","Get","Set"],vec!["settings.get"]),
         ("/org/aios/Audio1","org.aios.Audio1",vec!["GetCapabilities","Outputs","Inputs","DefaultGet","DefaultSet","MuteSet"],vec!["audio.outputs","audio.inputs","audio.default_get"]),
@@ -119,6 +130,28 @@ fn public_methods_authenticate_real_bus_senders_and_keep_tasks_private() {
         assert!(capabilities["contracts"].as_array().unwrap().iter().all(|c|c["availability"]==if available.contains(&c["action_id"]){"available"}else{"unavailable"}));
     }
     let files=Proxy::new(&conn,NAME,"/org/aios/Files1","org.aios.Files1").unwrap();
+    let denied_open=json!({"schema_version":1,"root_id":uuid::Uuid::new_v4().to_string(),"relative_path":file_fixture.file.file_name().unwrap().to_str().unwrap(),"access":"content"}).to_string();
+    code(files.call::<_,_,String>("OpenScoped",&(denied_open.as_str(),)).unwrap_err(),"PERMISSION_DENIED");
+    let proposed:String=files.call("ProposeRoots",&()).unwrap();let proposed:Value=serde_json::from_str(&proposed).unwrap();
+    let document=proposed["data"]["roots"].as_array().unwrap().iter().find(|root|root["display_path"]==file_fixture.directory.to_string_lossy().as_ref()).unwrap();
+    let root_id=document["root_id"].as_str().unwrap();
+    let enroll=json!({"schema_version":1,"proposal_id":proposed["data"]["proposal_id"],"approved_root_ids":[root_id],
+        "allowed_access":["metadata","content"],"confirmed":true}).to_string();
+    let enrolled:String=files.call("EnrollRoots",&(enroll.as_str(),)).unwrap();let enrolled:Value=serde_json::from_str(&enrolled).unwrap();
+    assert_eq!(enrolled["data"]["roots"][0]["allowed_access"],json!(["metadata","content"]));
+    let open=json!({"schema_version":1,"root_id":root_id,"relative_path":file_fixture.file.file_name().unwrap().to_str().unwrap(),"access":"content"}).to_string();
+    let opened:String=files.call("OpenScoped",&(open.as_str(),)).unwrap();let opened:Value=serde_json::from_str(&opened).unwrap();let handle=opened["data"]["file_handle"].as_str().unwrap();
+    let read=json!({"schema_version":1,"file_handle":handle,"max_bytes":64}).to_string();let content:String=files.call("ReadScoped",&(read.as_str(),)).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&content).unwrap()["data"]["content"],"scoped fixture text");
+    let mutation=json!({"schema_version":1,"root_id":root_id,"relative_path":file_fixture.file.file_name().unwrap().to_str().unwrap(),"access":"mutation"}).to_string();
+    code(files.call::<_,_,String>("OpenScoped",&(mutation.as_str(),)).unwrap_err(),"PERMISSION_DENIED");
+    let escape=json!({"schema_version":1,"root_id":root_id,"relative_path":file_fixture.link.file_name().unwrap().to_str().unwrap(),"access":"content"}).to_string();
+    code(files.call::<_,_,String>("OpenScoped",&(escape.as_str(),)).unwrap_err(),"PERMISSION_DENIED");
+    fs::write(&file_fixture.file,b"changed fixture").unwrap();
+    code(files.call::<_,_,String>("ReadScoped",&(read.as_str(),)).unwrap_err(),"TARGET_CHANGED");
+    let revoke=json!({"schema_version":1,"root_id":root_id,"confirmed":true}).to_string();let revoked:String=files.call("RevokeRoot",&(revoke.as_str(),)).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&revoked).unwrap()["data"]["access_blocked"],true);
+    code(files.call::<_,_,String>("ReadScoped",&(read.as_str(),)).unwrap_err(),"PERMISSION_DENIED");
     let apps=Proxy::new(&conn,NAME,"/org/aios/Applications1","org.aios.Applications1").unwrap();
     let settings=Proxy::new(&conn,NAME,"/org/aios/Settings1","org.aios.Settings1").unwrap();
     let audio=Proxy::new(&conn,NAME,"/org/aios/Audio1","org.aios.Audio1").unwrap();

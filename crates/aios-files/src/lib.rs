@@ -163,7 +163,7 @@ fn openat2(directory: i32, path: &Path, flags: i32, resolve: u64) -> Result<File
     let fd = unsafe { nix::libc::syscall(nix::libc::SYS_openat2, directory, path.as_ptr(), &how, std::mem::size_of::<OpenHow>()) };
     if fd < 0 {
         return match std::io::Error::last_os_error().raw_os_error() {
-            Some(code) if matches!(code,nix::libc::EXDEV|nix::libc::ELOOP|nix::libc::ENOTDIR) => Err(ErrorCode::PermissionDenied),
+            Some(code) if matches!(code,nix::libc::EACCES|nix::libc::EPERM|nix::libc::EXDEV|nix::libc::ELOOP|nix::libc::ENOTDIR) => Err(ErrorCode::PermissionDenied),
             Some(nix::libc::ENOENT) => Err(ErrorCode::TargetNotFound),
             _ => Err(ErrorCode::TargetChanged),
         };
