@@ -32,8 +32,8 @@ dependencies = [
  "aios-protocol",
  "aios-session",
  "aios-system",
- "serde_json",
  "serde",
+ "serde_json",
  "uuid",
  "zbus",
 ]
@@ -55,6 +55,19 @@ dependencies = [
  "time",
  "uuid",
  "zbus",
+]
+
+[[package]]
+name = "aios-files"
+version = "0.1.0"
+dependencies = [
+ "aios-protocol",
+ "nix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]
