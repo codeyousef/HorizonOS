@@ -9,6 +9,8 @@ import subprocess
 import uuid
 
 
+NAME = "org.aios.Session1"
+
 
 
 def main():
