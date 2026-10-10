@@ -3,7 +3,7 @@
 use crate::contracts::ErrorCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 const MAX_EVIDENCE: usize = 64;
@@ -119,22 +119,26 @@ fn validate_locator(record: &EvidenceRecord, authority: &RetrievalAuthority) -> 
     }
 }
 
-pub fn ordered_evidence(mut records: Vec<EvidenceRecord>, authority: &RetrievalAuthority, needs_fresh_external: bool) -> Result<Vec<EvidenceRecord>, ErrorCode> {
+fn validate_records(records: &[EvidenceRecord], authority: &RetrievalAuthority, needs_fresh_external: bool) -> Result<(), ErrorCode> {
     if records.len() > MAX_EVIDENCE || !bounded(&authority.scope, 128) || timestamp(&authority.now).is_err() {
         return Err(ErrorCode::InvalidArgument);
     }
     if needs_fresh_external && authority.external_adapter.is_none() {
         return Err(ErrorCode::NetworkRequired);
     }
-    let mut ids = HashSet::new();
-    for record in &records {
+    for (index, record) in records.iter().enumerate() {
         if !evidence_id(&record.evidence_id) || record.scope != authority.scope || !record.complete || record.data.is_null()
-            || !ids.insert(record.evidence_id.as_str()) {
+            || records[..index].iter().any(|previous| previous.evidence_id == record.evidence_id) {
             return Err(if record.scope != authority.scope { ErrorCode::PermissionDenied } else { ErrorCode::InvalidArgument });
         }
         validate_locator(record, authority)?;
     }
-    records.sort_by_key(|record| record.tier);
+    Ok(())
+}
+
+pub fn ordered_evidence(mut records: Vec<EvidenceRecord>, authority: &RetrievalAuthority, needs_fresh_external: bool) -> Result<Vec<EvidenceRecord>, ErrorCode> {
+    validate_records(&records, authority, needs_fresh_external)?;
+    records.sort_unstable_by(|left,right|left.tier.cmp(&right.tier).then_with(||left.evidence_id.cmp(&right.evidence_id)));
     Ok(records)
 }
 
@@ -234,13 +238,11 @@ pub fn verify_answer(answer: &Answer, records: &[EvidenceRecord], authority: &Re
     if answer.kind != "answer" || answer.text.trim().is_empty() || answer.text.len() > 8192 || answer.evidence_ids.len() > MAX_EVIDENCE {
         return Err(ErrorCode::ModelOutputInvalid);
     }
-    let records = ordered_evidence(records.to_vec(), authority, false)?;
-    let by_id = records.iter().map(|record| (record.evidence_id.as_str(), record)).collect::<HashMap<_, _>>();
-    let mut cited = HashSet::new();
-    let mut citations = Vec::new();
-    for id in &answer.evidence_ids {
-        if !cited.insert(id.as_str()) { return Err(ErrorCode::ModelOutputInvalid); }
-        let record = by_id.get(id.as_str()).ok_or(ErrorCode::StaleEvidence)?;
+    validate_records(records, authority, false)?;
+    let mut citations = Vec::with_capacity(answer.evidence_ids.len());
+    for (index,id) in answer.evidence_ids.iter().enumerate() {
+        if answer.evidence_ids[..index].contains(id) { return Err(ErrorCode::ModelOutputInvalid); }
+        let record = records.iter().find(|record| record.evidence_id == *id).ok_or(ErrorCode::StaleEvidence)?;
         citations.push(citation(record));
     }
     if machine_specific && citations.is_empty() { return Err(ErrorCode::StaleEvidence); }
@@ -252,8 +254,8 @@ pub fn verify_answer(answer: &Answer, records: &[EvidenceRecord], authority: &Re
         match claim.kind {
             ClaimKind::Observed => {
                 let id = claim.evidence_id.as_deref().ok_or(ErrorCode::ModelOutputInvalid)?;
-                if !cited.contains(id) { return Err(ErrorCode::StaleEvidence); }
-                let record = by_id.get(id).ok_or(ErrorCode::StaleEvidence)?;
+                if !answer.evidence_ids.iter().any(|cited| cited == id) { return Err(ErrorCode::StaleEvidence); }
+                let record = records.iter().find(|record| record.evidence_id == id).ok_or(ErrorCode::StaleEvidence)?;
                 let actual = record.data.pointer(claim.json_pointer.as_deref().ok_or(ErrorCode::ModelOutputInvalid)?).ok_or(ErrorCode::StaleEvidence)?;
                 if Some(actual) != claim.expected.as_ref() { return Err(ErrorCode::StaleEvidence); }
                 observed += 1;
