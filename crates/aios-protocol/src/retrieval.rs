@@ -107,8 +107,10 @@ fn validate_locator(record: &EvidenceRecord, authority: &RetrievalAuthority) -> 
             if authority.external_adapter.as_deref() != Some(adapter_id) {
                 return Err(ErrorCode::NetworkRequired);
             }
-            if !bounded(adapter_id, 128) || !bounded(uri, 2048) || !uri.starts_with("https://")
-                || uri[8..].split('/').next().is_none_or(|authority| authority.is_empty() || authority.contains('@')) {
+            let network_authority = uri.strip_prefix("https://").and_then(|rest| rest.split('/').next()).unwrap_or_default();
+            if !bounded(adapter_id, 128) || !bounded(uri, 2048) || network_authority.is_empty()
+                || network_authority.contains(['@', '?', '#', '\\'])
+                || !network_authority.bytes().all(|byte| byte.is_ascii_alphanumeric() || b".-:[]".contains(&byte)) {
                 return Err(ErrorCode::InvalidArgument);
             }
             timely(fetched_at, &authority.now, FRESH_EXTERNAL_NS)
@@ -317,6 +319,11 @@ mod tests {
         assert_eq!(ordered_evidence(vec![foreign],&authority(),false),Err(ErrorCode::PermissionDenied));
         let forged=record("forged",RetrievalTier::FreshProvider,SourceLocator::External{adapter_id:"x".into(),uri:"file:///etc/shadow".into(),fetched_at:NOW.into()},json!({"x":1}));
         assert_eq!(ordered_evidence(vec![forged],&authority(),false),Err(ErrorCode::InvalidArgument));
+        let mut allowed=authority();allowed.external_adapter=Some("approved-web".into());
+        for uri in ["file:///etc/shadow","https://user@example.invalid/private","https://example.invalid\\@other"] {
+            let external=record("bad-web",RetrievalTier::External,SourceLocator::External{adapter_id:"approved-web".into(),uri:uri.into(),fetched_at:NOW.into()},json!({"x":1}));
+            assert_eq!(ordered_evidence(vec![external],&allowed,false),Err(ErrorCode::InvalidArgument));
+        }
     }
     #[test]
     fn citations_and_structured_numeric_claims_resolve_exactly() {
