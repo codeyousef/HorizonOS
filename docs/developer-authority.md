@@ -6,6 +6,18 @@ change Nix modules or approve code deployment. Developer-supplied NixOS code is
 effectively guest-root authority; a typed wrapper does not make that code
 unprivileged.
 
+New host-controlled guest jobs and developer deployments require at least 8 GiB
+of measured free space on the workspace filesystem before publication or helper
+delivery. Guest storage reserves are checked independently. This host preflight
+is a minimum floor, not a quota or a concurrency reservation; status and recovery
+observations remain available at low disk.
+
+If QEMU pauses on root-disk no-space, `devctl vm resume-storage` requires restored
+host headroom, exact recorded process/peer/UUID/storage identity, and that specific
+pause reason. It resumes the existing process without restarting or changing its
+disk. Guest SSH identity must be freshly verified afterwards. Resume cannot
+convert a failed deployment or guard into a passing receipt.
+
 The reusable module defaults `services.aios.development.enable` to false. When
 explicitly enabled, it requires a development guest role, canonical
 `expectedVmUuid` and `expectedInstallationUuid`, a normal `dev` account outside

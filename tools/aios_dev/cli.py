@@ -32,6 +32,7 @@ def parser() -> Parser:
     start = vm.add_parser("start")
     start.add_argument("--bootstrap", action="store_true")
     start.add_argument("--display", choices=("gtk", "none"), default="gtk")
+    vm.add_parser("resume-storage", help="resume only an owned VM paused by disk no-space after restoring host headroom")
     console = vm.add_parser("console").add_mutually_exclusive_group()
     console.add_argument("--capture", action="store_true")
     console.add_argument("--bootstrap-run", action="store_true")
@@ -154,7 +155,7 @@ def dispatch(args) -> tuple[ExitCode, dict]:
         return jobs.control(load_config(args.workspace), args.operation, args.job)
     if args.command == "artifacts":
         return jobs.pull(load_config(args.workspace), args.job)
-    if args.command == "vm" and args.operation in ("create", "start", "console", "stop", "snapshot", "restore", "rebind-storage"):
+    if args.command == "vm" and args.operation in ("create", "start", "console", "stop", "snapshot", "restore", "rebind-storage", "resume-storage"):
         config = load_config(args.workspace)
         if config.values["provider"] != "qemu":
             raise DevctlError(ExitCode.UNSUPPORTED_CAPABILITY, "UNSUPPORTED_CAPABILITY", "External provider has no verified power/provisioning adapter")

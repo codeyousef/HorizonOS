@@ -285,6 +285,8 @@ def lifecycle(config, action, *, display="gtk", bootstrap=False):
             return console(config)
         if action == "stop":
             return stop(config)
+        if action == "resume-storage":
+            return resume_storage(config)
         raise invalid("Unknown lifecycle operation")
 
 
@@ -526,6 +528,49 @@ def verify_block(client, config):
     matches = [b for b in blocks if b.get("device") == "rootdisk"]
     if len(matches) != 1 or matches[0].get("inserted", {}).get("file") != str(config.paths["disk_image"]):
         raise failure(ExitCode.TARGET_MISMATCH, "VM_DISK_MISMATCH", "QMP root disk does not match the configured virtual disk")
+
+
+def resume_storage(config):
+    """Resume only the owned QEMU process paused by a root-disk ENOSPC.
+
+    This restores host VM execution, not guest trust or a deployment receipt.
+    No guest command runs here; SSH enrollment must be verified afterwards.
+    """
+    from .resources import require_build_headroom
+    pending = config.root / '.local/vm/restore-pending.json'
+    if pending.exists() or pending.is_symlink():
+        raise failure(ExitCode.VERIFICATION_FAILURE, 'RESTORE_INCOMPLETE',
+                      'Complete the interrupted restore before resuming the VM')
+    record = load_record(config)
+    require_build_headroom(config)
+    process = read_json(project_path(config.root, '.local/vm/process.json', '.local/vm'))
+    client = QMP(config, process, record['plan']['guest_uuid'])
+    try:
+        verify_block(client, config)
+        status = client.command('query-status')
+        blocks = client.command('query-block')
+        root = [b for b in blocks if b.get('device') == 'rootdisk']
+        if (status.get('status') != 'io-error' or status.get('running') is not False
+                or len(root) != 1 or root[0].get('io-status') != 'nospace'
+                or root[0].get('inserted', {}).get('file') != str(config.paths['disk_image'])
+                or any(b.get('io-status', 'ok') != 'ok' for b in blocks if b.get('device') != 'rootdisk')):
+            raise failure(ExitCode.VERIFICATION_FAILURE, 'VM_STORAGE_PAUSE_REQUIRED',
+                          'Resume requires an owned VM paused solely by root-disk no-space')
+        # Fresh measurement immediately before releasing stalled disk writes.
+        require_build_headroom(config)
+        verify_block(client, config)
+        client._request('cont')
+        after = client.command('query-status')
+        verify_block(client, config)
+        if after.get('status') != 'running' or after.get('running') is not True:
+            raise failure(ExitCode.VERIFICATION_FAILURE, 'VM_STORAGE_RESUME_FAILED',
+                          'VM did not resume; retain its original process and disk')
+        return ExitCode.SUCCESS, {'state': 'storage-resumed', 'pid': process['pid'],
+                                  'qemu_status': after, 'qmp_uuid_verified': True,
+                                  'guest_identity_verified': False,
+                                  'message': 'Verify enrolled guest SSH identity before guest operations; failed transactions remain failed.'}
+    finally:
+        client.close()
 
 
 def start(config, display, bootstrap, *, qualification=None):
