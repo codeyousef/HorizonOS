@@ -345,6 +345,21 @@ This is the development build route. Production still requires the Rust
 validation, semantic previews and enforced resource/download permissions. A
 successful build does not prove boot, graphical login, service isolation or
 rollback and does not authorize activation of a client-provided store path.
+Terminal development jobs retain their reports but their `cargo-target`,
+`cargo-home`, and temporary cache directories are reproducible. When the
+development recovery reserve blocks a deployment, reclaim only those
+same-UID, non-symlink caches from UUID-named jobs whose durable record is
+terminal and whose worker identity is no longer live:
+
+```fish
+python3 tools/devctl.py test --suite integration --provider terminal-job-cache-recovery --json
+```
+
+The recovery job skips active jobs, refuses unclassifiable entries, and reports
+available `/nix/store` filesystem bytes before and after cleanup. It does not
+remove source releases, reports, VM disks, Nix store paths, deployment state, or
+GC roots.
+
 
 ```fish
 cd /mnt/Storage/Projects/HorizonOS

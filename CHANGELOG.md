@@ -46,6 +46,9 @@
   reach the selected roots; it has no capabilities and permits only Unix-domain
   sockets. Revocation blocks handles before purging cached chunks, previews and
   snippets, and fixed secret paths remain excluded after enrollment.
+- Add bounded development storage recovery that removes only reproducible
+  caches from same-UID terminal jobs after durable-state and live-worker checks;
+  reports, source releases, Nix paths, deployment state and GC roots remain.
 - Bind the independent guard's target identity and prior running, profile, and
   boot closures to the immutable prepared baseline. Activation now closes an
   intervening Nix profile generation or target change as a terminal rejection
