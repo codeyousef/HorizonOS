@@ -1,6 +1,7 @@
 //! Deterministic activation/recovery protocol. No client commands or shell API.
 //! The systemd-only runtime consumes a root-owned authorized broker handoff.
 pub mod activation;
+pub mod developer;
 pub mod native;
 pub mod runtime;
 mod retention;

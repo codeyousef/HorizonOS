@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -218,13 +219,65 @@ class DeveloperBoundaryTests(unittest.TestCase):
         finally:
             database.close()
 
-    def test_test_and_commit_never_fall_through_to_unguarded_activation(self):
-        for operation in ("test", "commit"):
+    def test_test_and_commit_require_the_registered_exact_candidate_and_independent_guard(self):
+        self.call()
+        candidate = "/nix/store/" + "a" * 32 + "-nixos-system-aios-dev-test"
+        baseline = {
+            "running": IDENTITY["current_system"],
+            "profile": IDENTITY["current_system"],
+            "booted": IDENTITY["current_system"],
+        }
+        built = {
+            "schema_version": 1,
+            "snapshot_digest": self.digest,
+            "build_source_digest": "b" * 64,
+            "candidate_closure": candidate,
+            "candidate_digest": hashlib.sha256(candidate.encode()).hexdigest(),
+            "baseline": baseline,
+        }
+        operations = []
+        current = copy.deepcopy(IDENTITY)
+
+        def identity():
+            return copy.deepcopy(current)
+
+        def handoff(_state, prior, receipt, operation, _actual):
+            operations.append(("handoff", operation, receipt["candidate_closure"]))
+            return deploy.guard_id(prior["transaction_id"], operation)
+
+        def complete(_identifier, operation, _receipt):
+            operations.append(("guard", operation))
+            if operation == "commit":
+                current["current_system"] = candidate
+
+        test_request = {**self.request, "operation": "test"}
+        with patch.object(deploy, "build_candidate", return_value=built), \
+             patch.object(deploy, "write_handoff", side_effect=handoff), \
+             patch.object(deploy, "complete_guard", side_effect=complete):
+            tested = self.call(test_request, identity_reader=identity)
+        self.assertEqual(tested["state"], "TESTED")
+        self.assertTrue(tested["activation_performed"])
+        self.assertEqual(current, IDENTITY)
+        self.assertEqual(operations, [("handoff", "test", candidate), ("guard", "test")])
+
+        fake_build = types.SimpleNamespace(pointers=lambda: baseline if current["current_system"] == IDENTITY["current_system"] else {
+            "running": candidate, "profile": candidate, "booted": baseline["booted"]})
+        commit_request = {**self.request, "operation": "commit"}
+        with patch.dict(sys.modules, {"build_system": fake_build}), \
+             patch.object(deploy, "write_handoff", side_effect=handoff), \
+             patch.object(deploy, "complete_guard", side_effect=complete):
+            committed = self.call(commit_request, identity_reader=identity)
+        self.assertEqual(committed["state"], "COMMITTED")
+        self.assertEqual(committed["committed_identity"]["current_system"], candidate)
+        self.assertEqual(operations[-2:], [("handoff", "commit", candidate), ("guard", "commit")])
+
+    def test_commit_before_successful_test_is_denied_without_guard_start(self):
+        self.call()
+        with patch.object(deploy, "complete_guard") as guard:
             with self.assertRaises(deploy.Denial) as raised:
-                self.call({**self.request, "operation": operation})
-            self.assertEqual(raised.exception.code, 9)
-            self.assertEqual(raised.exception.label, "GUARDED_ACTIVATION_UNAVAILABLE")
-            self.assertFalse(self.state.exists())
+                self.call({**self.request, "operation": "commit"})
+        self.assertEqual(raised.exception.label, "DEPLOYMENT_STATE_INVALID")
+        guard.assert_not_called()
 
 
 if __name__ == "__main__":

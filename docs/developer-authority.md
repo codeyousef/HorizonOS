@@ -16,9 +16,10 @@ shell argument is accepted. The Python interpreter runs with `-I`; installed
 imports come from its immutable package. Product identities receive no sudo rule.
 
 `nixosModules.production` rejects the enabled development boundary, the named
-helper package or helper sudo rules, unrestricted passwordless sudo and extra
-Nix trusted users. These are evaluation assertions; final production image and
-service access qualification are separate requirements.
+helper package in either the executable or systemd package sets, helper sudo
+rules, unrestricted passwordless sudo and extra Nix trusted users. The developer
+guard additionally requires the enrolled `development` role, `AIOS_DEV_ROOT`
+disk and `ssh-development` management channel at runtime.
 
 ## Request contract
 
@@ -34,8 +35,9 @@ identities or deployment targets supplied by the client. Root checks the actual
 sudo caller, installed immutable configuration, QEMU/KVM virtualization,
 actual DMI, NixOS identity,
 installation UUID, current boot/closure, development role, virtio disk serial and
-SSH management channel. It rechecks target identity before persisting a new
-registration. A restored/rebooted/changed target cannot reuse the old request.
+SSH management channel. It rechecks target identity before every build, handoff,
+guard start and durable state transition. A restored, rebooted or otherwise
+changed target cannot reuse the old request.
 
 Registration consumes only the already published digest directory under
 `/home/dev/aios-releases`. It checks the canonical manifest, bounds, source hashes,
@@ -50,24 +52,48 @@ removed, without deleting another candidate.
 `/var/lib/aios/development` is mode 0700. Registration receipts live in a private
 SQLite ledger using serialized writes and FULL synchronous commits; copied files
 and publication directories are fsynced. Receipts bind transaction, source digest,
-Git HEAD/dirty provenance, target identity, authenticated developer UID and helper
-source hash. A repeated transaction ID with different intent is rejected.
+Git HEAD/dirty provenance, target identity, authenticated developer UID, helper
+source hash, exact built closure and separate test/commit guard transaction IDs.
+A repeated transaction ID with different intent is rejected.
 Immutable root-owned store configuration may use Nix's legitimate hardlink
 optimisation; developer-owned source files and the separately copied candidate
 must have a single link. See the [Nix store optimisation contract](https://nix.dev/manual/nix/2.34/command-ref/nix-store/optimise.html).
 
-## Implemented and remaining behavior
+## Guarded test and commit
 
-Registration does not evaluate, build or activate developer code. `test` and
-`commit` currently return exit 9 with `GUARDED_ACTIVATION_UNAVAILABLE`, before
-creating deployment state. They cannot fall back to unguarded `nixos-rebuild` or
-an arbitrary store path. Exact candidate building, the retained independent guard,
-fixed health checks, transaction-specific host heartbeat, recovery and exact
-closure/profile/boot commit must be implemented and qualified before these modes
-can succeed. The host deployment CLI remains unsupported until that adapter is
-available. Existing bootstrap guests do not gain this helper automatically.
+Registration alone does not evaluate, build or activate developer code.
+`deploy --mode test` first creates an installation-local, root-owned candidate
+source from the registered snapshot, adds only the administrator-owned public
+enrollment, and builds the fixed `aios-dev` system attribute. Nix runs with pure
+evaluation, import-from-derivation disabled, fixed lock files, one build job and
+only `cache.nixos.org`; the request cannot select an attribute, command, source
+path, substituter or store path.
 
-Run the registered guest qualification from the host, including fish:
+The helper writes a bounded root-owned handoff for a deterministic test guard
+UUID. `aios-dev-guard@.service` invokes the retained `aios-guard` binary through
+its dedicated developer entry point. The guard independently re-enrolls the
+target, verifies the exact system closure and guard artifacts, retains rollback
+roots, applies the candidate, checks fixed mount, unit, user-unit, Executor1 and
+Graph1 health, then waits on a root-only Unix control socket. A successful test
+deliberately rolls back the exact prior running, profile and boot selections and
+records `TESTED`. A missing completion, helper/SSH loss or guard timeout also
+rolls back.
+
+`deploy --mode commit` is legal only for that `TESTED` receipt and unchanged
+prior pointers. It does not rebuild or accept a new target. A separate guard
+transaction test-applies the same closure, receives a nonce-bound heartbeat from
+the still-running authenticated helper, commits exact running/profile/boot
+pointers, and records the resulting identity as `COMMITTED`. Both developer and
+product guards serialize through the same durable guard ledger, so two
+privileged activations cannot overlap. Guard recovery after service restart
+reconciles durable effects before another transaction can begin.
+
+The helper is intentionally guest-root development authority; none of these
+operations is reachable through the product model, Executor1 action schema or
+production module. Existing bootstrap guests gain the route only after installing
+a candidate that contains the helper and developer guard unit.
+
+Run installed denial qualification from the host:
 
 ```sh
 python3 tools/devctl.py test --suite integration --provider development-boundary --detach --json
@@ -75,9 +101,16 @@ python3 tools/devctl.py jobs status --job <returned-uuid> --json
 python3 tools/devctl.py artifacts pull --job <returned-uuid> --json
 ```
 
-It evaluates development/disabled/production and invalid role/UUID/trust/sudo
-cases with locked Nixpkgs, builds the actual helper package, and proves actual
-non-root invocation and forged sudo/Python environments return authorization
-denial. Source copy, corruption/race/replay/target checks use explicitly labeled
-filesystem fixtures as the guest dev UID. These checks do not establish installed
-root execution, activation/recovery, production boot or model isolation.
+Run the end-to-end deployment sequence only against a disposable enrolled
+development VM:
+
+```sh
+python3 tools/devctl.py deploy --mode register --acknowledge-guest-root --json
+python3 tools/devctl.py deploy --mode test --transaction <uuid> --acknowledge-guest-root --json
+python3 tools/devctl.py deploy --mode commit --transaction <uuid> --acknowledge-guest-root --json
+```
+
+The development-boundary provider evaluates enabled, disabled, production and
+invalid role/UUID/trust/sudo cases with locked Nixpkgs and exercises the actual
+installed denial surface. The deployment commands provide separate real build,
+test rollback and exact commit evidence.

@@ -27,6 +27,11 @@
   system/user/API/action health, accepts transaction-bound heartbeats only
   through the authenticated SSH management session, commits exact pointers, and
   reconciles rollback or post-commit disarming after restart.
+- Add the production-separated VM developer deployment guard. The installed
+  root helper builds only a registered immutable `aios-dev` snapshot, test-applies
+  it under the retained native guard and rolls back, then commits only that
+  tested exact closure through a distinct nonce-bound transaction. Production
+  evaluation excludes the helper, unit and sudo route.
 - Bind the independent guard's target identity and prior running, profile, and
   boot closures to the immutable prepared baseline. Activation now closes an
   intervening Nix profile generation or target change as a terminal rejection

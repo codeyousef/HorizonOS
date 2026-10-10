@@ -7,6 +7,8 @@
       message = "Production excludes VM-only developer authority."; }
     { assertion = builtins.all (package: (package.pname or "") != "aios-dev-deploy") config.environment.systemPackages;
       message = "Production excludes the development deployment helper package."; }
+    { assertion = builtins.all (package: (package.pname or "") != "aios-dev-deploy") config.systemd.packages;
+      message = "Production excludes the developer activation guard unit package."; }
     { assertion = config.nix.settings.trusted-users == [ "root" ];
       message = "Only root may be a Nix trusted-user in production."; }
     { assertion = builtins.all (rule:

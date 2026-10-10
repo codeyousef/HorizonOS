@@ -42,6 +42,25 @@ fn main() {
             }
         }
     }
+    if args.len() == 2 && args[0] == "--run-developer-transaction" {
+        let id = &args[1];
+        match aios_guard::developer::run(id) {
+            Ok(()) => {
+                println!(
+                    "{}",
+                    serde_json::json!({"schema_version":1,"transaction_id":id,"terminal":true,"authority":"developer"})
+                );
+                return;
+            }
+            Err(error) => {
+                println!(
+                    "{}",
+                    serde_json::json!({"schema_version":1,"error":"DEVELOPER_GUARD_TRANSACTION_FAILED","reason":format!("{error:?}")})
+                );
+                std::process::exit(8);
+            }
+        }
+    }
     if args == ["--check-plan"] {
         let mut bytes = vec![];
         let result = io::stdin()

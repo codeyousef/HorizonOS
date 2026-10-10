@@ -54,7 +54,7 @@ def main():
     attempts.append({"case": "unknown-registration", **attempt(root_command, request, 3, "REGISTRATION_NOT_FOUND")})
     for mode in ("test", "commit"):
         mutation = {**request, "operation": mode, "snapshot_digest": "0" * 64, "authority": "guest-root-code-deployment"}
-        attempts.append({"case": mode + "-unavailable", **attempt(root_command, mutation, 9, "GUARDED_ACTIVATION_UNAVAILABLE")})
+        attempts.append({"case": "unregistered-" + mode, **attempt(root_command, mutation, 3, "REGISTRATION_NOT_FOUND")})
     if snapshot.identity() != identity:
         raise RuntimeError("development identity changed during denial qualification")
     print("AIOS_INSTALLED_DEVELOPMENT " + json.dumps({"schema_version": 1,
@@ -63,7 +63,7 @@ def main():
         "guarded_activation_verified": False, "product_model_caller_verified": False,
         "limitations": ["Nonroot attempts use the real dev UID, not the product model account.",
                         "Wrong-target and parser denials exercise the installed root helper through its exact sudo rule.",
-                        "Successful root registration and guarded activation require separate evidence."]}, sort_keys=True))
+                        "Successful root registration and guarded activation require separate end-to-end evidence."]}, sort_keys=True))
 
 
 if __name__ == "__main__":

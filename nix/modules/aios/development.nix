@@ -1,7 +1,7 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, aiosPackages ? {}, ... }:
 let
   cfg = config.services.aios.development;
-  helper = pkgs.callPackage ../../packages/dev-deploy.nix { };
+  helper = pkgs.callPackage ../../packages/dev-deploy.nix { aiosGuard = aiosPackages.aios-guard; };
   uuid = value: value != null && builtins.match "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" value != null;
   role = (config.environment.etc."aios/guest-role" or { text = ""; }).text;
   dev = config.users.users.dev or { isNormalUser = false; extraGroups = []; };
@@ -35,6 +35,7 @@ in {
     ];
     nix.settings.trusted-users = lib.mkDefault [ "root" ];
     environment.systemPackages = [ helper ];
+    systemd.packages = [ helper ];
     environment.etc."aios/development.json".text = builtins.toJSON {
       schema_version = 1;
       enabled = true;

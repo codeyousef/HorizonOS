@@ -284,30 +284,40 @@ the pinned host transport:
 
 ```sh
 python3 tools/devctl.py deploy --mode register --acknowledge-guest-root --json
+python3 tools/devctl.py deploy --mode test --transaction <returned-uuid> --acknowledge-guest-root --json
+python3 tools/devctl.py deploy --mode commit --transaction <returned-uuid> --acknowledge-guest-root --json
 python3 tools/devctl.py deploy --mode status --transaction <returned-uuid> --json
 ```
 
 Developer-supplied Nix code is guest-root authority. The explicit acknowledgement
-applies to registration and to test/commit requests. This route accepts typed
+applies to registration and test/commit requests. This route accepts typed
 operations and UUIDs only; it invokes the fixed installed helper through its
 development-only sudo rule without a password prompt. It never transfers a
 private key or runs a caller-provided command. The host saves transaction intent
-before calling the helper, validates the root receipt against the published
-manifest and installed helper source hash, and rechecks identity after the call.
-Retry registration with the same UUID or inspect status after a disconnect;
-changed boot, closure, configuration or target requires a fresh transaction.
-Registration retains a separate root-owned readonly source copy and a durable
-receipt. It does not build or activate that source. `deploy --mode test` and
-`deploy --mode commit` with the transaction UUID and acknowledgement currently
-return `GUARDED_ACTIVATION_UNAVAILABLE` until independent recovery is qualified.
+before calling the helper, validates every root receipt against the published
+manifest and installed helper source hash, and rechecks the enrolled identity
+after the call. Retry the same operation after a disconnect; the guest ledger
+reconciles its durable state. A changed boot, configuration or target is denied.
+
+Registration retains a separate root-owned readonly source copy and durable
+receipt without evaluating or activating it. Test adds the installed public
+enrollment to that frozen source, builds only the fixed `aios-dev` attribute,
+test-applies the exact realized closure through an independent retained guard,
+checks fixed native health, and rolls back the original running/profile/boot
+pointers. Commit requires the resulting `TESTED` receipt and unchanged pointers;
+it reuses the exact closure without rebuilding, then a separate guard transaction
+commits all three pointers after a nonce-bound heartbeat from the live helper.
+Loss of the host/helper connection cannot produce that heartbeat, so the guard
+times out and rolls back. Product and developer activations share the durable
+single-active-guard invariant but have separate authorization and handoff routes.
 
 `nixosConfigurations.aios-dev` uses the administrator-owned development machine
 module. It describes the enrolled Btrfs subvolumes/EFI layout, key-only SSH,
 non-wheel developer account, root-only Nix trust, Plasma 6 on Wayland and the
-packaged CLI/session/model/guard executables. The VM-only developer helper is
-enabled with the exact installation and DMI identities. Its guarded test/commit
-operations remain unavailable until the activation adapter is qualified. The
-incomplete product control plane and model services remain disabled.
+packaged CLI/session/model/guard executables. The VM-only helper and developer
+guard unit are enabled with exact installation and DMI identities. Production
+evaluation excludes the helper package, unit package, sudo route and development
+accounts.
 
 The registered system-build job captures the already enrolled guest identity and
 administrator-owned public SSH enrollment key. It copies the verified source

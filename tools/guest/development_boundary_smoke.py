@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import base64
+import re
 import hashlib
 import sys
 
@@ -58,7 +59,7 @@ def main():
         if reason not in cases[name]["failedAssertions"]:
             raise RuntimeError("invalid module case missing the required denial: " + name)
     for name in ("disabled", "production"):
-        if cases[name]["helperPresent"] or cases[name]["developerRules"] or cases[name]["developmentEnabled"]:
+        if cases[name]["helperPresent"] or cases[name]["helperUnitPresent"] or cases[name]["developerRules"] or cases[name]["developmentEnabled"]:
             raise RuntimeError("developer authority leaked to nondevelopment case")
         if cases[name]["sessionEnabled"] or cases[name]["sessionWantedBy"] or cases[name]["processWantedBy"]:
             raise RuntimeError("disabled broker was registered for startup")
@@ -90,12 +91,30 @@ def main():
         raise RuntimeError("product headless/desktop composition changed")
     dev = cases["development"]
     expected = [{"users":["dev"],"groups":[],"host":"ALL","runAs":"root:root","commands":[{"command":"/run/current-system/sw/bin/aios-dev-deploy --request-stdin","options":["NOPASSWD","NOSETENV"]}]}]
-    if not dev["helperPresent"] or dev["trustedUsers"] != ["root"] or dev["developerRules"] != expected:
-        raise RuntimeError("development authority is not the exact dedicated rule")
+    if (not dev["helperPresent"] or not dev["helperUnitPresent"] or dev["trustedUsers"] != ["root"]
+            or dev["developerRules"] != expected):
+        raise RuntimeError("development authority is not the exact dedicated rule and guard unit")
     outputs = json.loads(subprocess.check_output(["nix", "build", "--json", "--no-link", *locked, reference + "#aios-dev-deploy"], timeout=300))
     if len(outputs) != 1:
         raise RuntimeError("unexpected helper output count")
     package = outputs[0]["outputs"]["out"]
+    unit_path = Path(package) / "lib/systemd/system/aios-dev-guard@.service"
+    unit = unit_path.read_text()
+    required_unit = {
+        "Type=exec",
+        "User=root",
+        "Group=root",
+        "PrivateNetwork=true",
+        "RestrictAddressFamilies=AF_UNIX",
+        "RuntimeDirectory=aios-dev-guard/%i",
+        "RuntimeDirectoryMode=0700",
+    }
+    lines = set(unit.splitlines())
+    starts = [line for line in lines if line.startswith("ExecStart=")]
+    if (not required_unit <= lines or len(starts) != 1
+            or not re.fullmatch(r"ExecStart=/nix/store/[a-z0-9]{32}-aios-guard-0\\.1\\.0/bin/aios-guard --run-developer-transaction %i", starts[0])
+            or any(token in starts[0] for token in (" sh ", "bash", "$(", ";"))):
+        raise RuntimeError("developer guard unit is missing its fixed retained authority")
     executable = str(Path(package) / "bin/aios-dev-deploy")
     attempts = []
     for env in ({}, {"SUDO_USER":"dev","SUDO_UID":str(os.getuid()),"SUDO_GID":str(os.getgid()),"PYTHONPATH":"/tmp","PYTHONHOME":"/tmp"}):
@@ -105,7 +124,8 @@ def main():
         attempts.append({"uid":os.getuid(),"forged_sudo_and_python_environment":bool(env),"exit":response.returncode,"response":json.loads(response.stdout)})
     subprocess.run(["python3", "-m", "unittest", "discover", "-s", "tests/unit", "-p", "test_dev_deploy.py", "-v"], cwd=release, check=True, timeout=60)
     print("AIOS_DEVELOPMENT_BOUNDARY " + json.dumps({"evidence_kind":"real-guest-package-and-module-evaluation","module_cases":cases,
-        "package":package,"nonroot_denials":attempts,"source_copy_fixture_tests":14,
+        "package":package,"developer_guard_unit":{"path":str(unit_path),"exec_start":starts[0],"required_sandbox":sorted(required_unit)},
+        "nonroot_denials":attempts,"source_copy_fixture_tests":15,
         "initial_image_script_syntax":{"argv":["bash","-n",str(release / "dev/seed/bootstrap.sh")],"upstream_exit":0,"fresh_installation_verified":False},
         "initial_native_preflight_nonroot_denial":{"argv":["python3",str(release / "tools/guest/initial_preflight.py")],"upstream_exit":5,"actual_uid":os.getuid()},
         "initial_finish_syntax":{"argv":["bash","-n"],"upstream_exit":0,"script_sha256":hashlib.sha256(finish).hexdigest(),"executed":False},

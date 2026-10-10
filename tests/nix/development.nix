@@ -1,5 +1,5 @@
 # Pure module evaluation fixtures. These do not activate any guest configuration.
-{ nixpkgs, aiosCore }:
+{ nixpkgs, aiosCore, aiosGuard }:
 let
   lib = nixpkgs.lib;
   uuid = "12345678-1234-4234-8234-123456789abc";
@@ -21,6 +21,7 @@ let
     in {
       failedAssertions = map (entry: entry.message) (builtins.filter (entry: !entry.assertion) config.assertions);
       helperPresent = builtins.any (package: (package.pname or "") == "aios-dev-deploy") config.environment.systemPackages;
+      helperUnitPresent = builtins.any (package: (package.pname or "") == "aios-dev-deploy") config.systemd.packages;
       trustedUsers = config.nix.settings.trusted-users;
       developerRules = builtins.filter (rule: builtins.elem "dev" rule.users) config.security.sudo.extraRules;
       developmentEnabled = config.services.aios.development.enable;
@@ -53,7 +54,7 @@ let
         policy = builtins.fromJSON config.environment.etc."aios/transaction-policy.json".text;
       };
     };
-  evaluate = evaluateWith { inherit aiosCore; };
+  evaluate = evaluateWith { inherit aiosCore; aiosPackages.aios-guard = aiosGuard; };
   session = { services.aios.session.enable = true; nix.settings.trusted-users = [ "root" ]; users.users.alice.isNormalUser = true; };
   development = ../../nix/modules/aios/default.nix;
   production = ../../nix/modules/aios/production.nix;
@@ -73,7 +74,7 @@ in {
   disabled = evaluate [ development ];
   sessionHeadless = evaluate [ development session ];
   sessionDesktop = evaluate [ development session { services.desktopManager.plasma6.enable = true; services.displayManager.sddm.enable = true; } ];
-  sessionMissingPackage = evaluateWith {} [ development session ];
+  sessionMissingPackage = evaluateWith { aiosPackages.aios-guard = aiosGuard; } [ development session ];
   productHeadless = evaluate [ development product ];
   productDesktop = evaluate [ development product { services.aios.desktop.enable = true; } ];
   visualWithoutDesktop = evaluate [ development { services.aios.desktop.visualControl.enable = true; } ];

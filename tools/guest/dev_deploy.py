@@ -2,10 +2,11 @@
 """Installed VM-only developer authority. Registration never activates code.
 
 Developer Nix deployment is guest-root authority, not a product capability.
-The guard adapter is deliberately unavailable until independently qualified.
+Test and commit use an independently retained guard with timeout rollback.
 """
 import contextlib
 import hashlib
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -15,8 +16,10 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import socket
 import sys
 import tempfile
+import time
 import uuid
 
 # Installed code is immutable; Python is invoked with -I by its Nix wrapper.
@@ -122,9 +125,11 @@ def root_identity():
     return value
 
 
-def verify_target(request, config, actual):
+def verify_target(request, config, actual, expected_system=None):
     validate_identity(actual)
-    if actual != request["identity"] or actual["os_id"] != "nixos" or actual["guest_role"] != "development" or actual["dmi_uuid"] != config["expected_vm_uuid"] or actual["installation_uuid"] != config["expected_installation_uuid"] or actual["disk_serial"] != config["disk_serial"] or actual["management_channel"] != config["management_channel"]:
+    expected = dict(request["identity"])
+    expected["current_system"] = expected_system or expected["current_system"]
+    if actual != expected or actual["os_id"] != "nixos" or actual["guest_role"] != "development" or actual["dmi_uuid"] != config["expected_vm_uuid"] or actual["installation_uuid"] != config["expected_installation_uuid"] or actual["disk_serial"] != config["disk_serial"] or actual["management_channel"] != config["management_channel"]:
         raise Denial(4, "DEVELOPMENT_TARGET_MISMATCH")
 
 
@@ -353,6 +358,358 @@ def ledger(state, owner_uid):
     finally:
         connection.close()
 
+RECEIPT_KEYS = {
+    "schema_version", "transaction_id", "state", "snapshot_digest", "identity",
+    "developer_uid", "authority", "source_head", "source_dirty", "file_count",
+    "activation_performed", "helper_sha256", "limitations", "candidate_closure",
+    "candidate_digest", "build_source_digest", "test_guard_id", "commit_guard_id",
+    "baseline", "committed_identity",
+}
+
+
+@contextlib.contextmanager
+def deployment_lock(state, owner_uid):
+    path = state / "deploy.lock"
+    if not path.exists():
+        descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    else:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600:
+            raise ValueError("unsafe deployment lock")
+        descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def atomic_file(path, value, mode=0o600):
+    data = snapshot.canonical(value)
+    temporary = path.with_name("." + path.name + "." + uuid.uuid4().hex)
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
+    try:
+        with os.fdopen(descriptor, "wb", closefd=False) as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+    finally:
+        os.close(descriptor)
+    temporary.rename(path)
+    fsync_directory(path.parent)
+
+
+def initial_receipt(request, manifest, developer_uid):
+    return {
+        "schema_version": 1,
+        "transaction_id": request["transaction_id"],
+        "state": "REGISTERED",
+        "snapshot_digest": request["snapshot_digest"],
+        "identity": request["identity"],
+        "developer_uid": developer_uid,
+        "authority": AUTHORITY,
+        "source_head": manifest["git_head"],
+        "source_dirty": manifest["dirty"],
+        "file_count": len(manifest["files"]),
+        "activation_performed": False,
+        "helper_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "limitations": ["No activation has occurred; test and commit remain required."],
+        "candidate_closure": None,
+        "candidate_digest": None,
+        "build_source_digest": None,
+        "test_guard_id": None,
+        "commit_guard_id": None,
+        "baseline": None,
+        "committed_identity": None,
+    }
+
+
+def validate_receipt(receipt, prior):
+    if (not isinstance(receipt, dict) or set(receipt) != RECEIPT_KEYS
+            or type(receipt["schema_version"]) is not int or receipt["schema_version"] != 1
+            or receipt["transaction_id"] != prior["transaction_id"]
+            or receipt["snapshot_digest"] != prior["snapshot_digest"]
+            or receipt["identity"] != prior["identity"]
+            or receipt["authority"] != AUTHORITY
+            or type(receipt["developer_uid"]) is not int or receipt["developer_uid"] <= 0
+            or type(receipt["source_dirty"]) is not bool
+            or type(receipt["file_count"]) is not int or receipt["file_count"] <= 0
+            or type(receipt["activation_performed"]) is not bool
+            or not isinstance(receipt["limitations"], list)
+            or receipt["state"] not in {"REGISTERED", "TESTING", "TESTED", "COMMITTING", "COMMITTED"}):
+        raise ValueError("invalid registration receipt")
+    empty_candidate = receipt["candidate_closure"] is None and receipt["candidate_digest"] is None and receipt["build_source_digest"] is None and receipt["baseline"] is None
+    if receipt["state"] == "REGISTERED":
+        if not empty_candidate or receipt["test_guard_id"] is not None or receipt["commit_guard_id"] is not None or receipt["activation_performed"] or receipt["committed_identity"] is not None:
+            raise ValueError("invalid registered receipt")
+    else:
+        if (not isinstance(receipt["candidate_closure"], str) or not STORE.fullmatch(receipt["candidate_closure"])
+                or not isinstance(receipt["candidate_digest"], str) or not HASH.fullmatch(receipt["candidate_digest"])
+                or not isinstance(receipt["build_source_digest"], str) or not HASH.fullmatch(receipt["build_source_digest"])
+                or not isinstance(receipt["baseline"], dict)
+                or set(receipt["baseline"]) != {"running", "profile", "booted"}
+                or not all(isinstance(value, str) and STORE.fullmatch(value) for value in receipt["baseline"].values())):
+            raise ValueError("invalid built receipt")
+    for field in ("test_guard_id", "commit_guard_id"):
+        if receipt[field] is not None:
+            canonical_uuid(receipt[field])
+    if receipt["state"] in {"TESTING", "TESTED", "COMMITTING", "COMMITTED"} and receipt["test_guard_id"] is None:
+        raise ValueError("missing test guard")
+    if receipt["state"] in {"COMMITTING", "COMMITTED"} and receipt["commit_guard_id"] is None:
+        raise ValueError("missing commit guard")
+    if receipt["state"] in {"TESTED", "COMMITTING", "COMMITTED"} and not receipt["activation_performed"]:
+        raise ValueError("completed guard activation evidence missing")
+    if receipt["state"] == "COMMITTED":
+        validate_identity(receipt["committed_identity"])
+        if not receipt["activation_performed"] or receipt["committed_identity"]["current_system"] != receipt["candidate_closure"]:
+            raise ValueError("invalid committed receipt")
+    elif receipt["committed_identity"] is not None:
+        raise ValueError("unexpected committed identity")
+    return receipt
+
+
+def registration(state, owner_uid, transaction_id):
+    with ledger(state, owner_uid) as connection:
+        row = connection.execute("SELECT request, receipt FROM registrations WHERE id = ?", (transaction_id,)).fetchone()
+    if row is None:
+        return None
+    if len(row[0]) > MAX_REQUEST or len(row[1]) > MAX_REQUEST:
+        raise ValueError("registration record exceeds limit")
+    prior, receipt = snapshot.decode(row[0]), snapshot.decode(row[1])
+    validate_request(prior)
+    if prior["operation"] != "register":
+        raise ValueError("invalid registration request")
+    return prior, validate_receipt(receipt, prior)
+
+
+def save_receipt(state, owner_uid, prior, receipt):
+    validate_receipt(receipt, prior)
+    with ledger(state, owner_uid) as connection:
+        changed = connection.execute(
+            "UPDATE registrations SET receipt = ? WHERE id = ? AND request = ?",
+            (snapshot.canonical(receipt), prior["transaction_id"], snapshot.canonical(prior)),
+        ).rowcount
+        if changed != 1:
+            raise ValueError("registration changed")
+
+
+def safe_remove_tree(path):
+    if not path.exists():
+        return
+    if path.is_symlink():
+        raise ValueError("unsafe build directory")
+    for directory, directories, _ in os.walk(path):
+        Path(directory).chmod(0o700)
+        for name in directories:
+            child = Path(directory) / name
+            if not child.is_symlink():
+                child.chmod(0o700)
+    shutil.rmtree(path)
+
+
+def fixed_environment():
+    return {
+        "HOME": "/root",
+        "LANG": "C.UTF-8",
+        "NIX_REMOTE": "daemon",
+        "NIX_USER_CONF_FILES": "/dev/null",
+        "PATH": "/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin",
+    }
+
+
+def build_candidate(state, prior, actual):
+    import build_system
+    builds = state / "builds"
+    builds.mkdir(mode=0o700, exist_ok=True)
+    build_root = builds / prior["transaction_id"]
+    report_path = build_root / "build.json"
+    if report_path.exists():
+        info = report_path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > MAX_REQUEST:
+            raise ValueError("unsafe build receipt")
+        report = snapshot.decode(report_path.read_bytes())
+        if (not isinstance(report, dict) or set(report) != {"schema_version", "snapshot_digest", "build_source_digest", "candidate_closure", "candidate_digest", "baseline"}
+                or report["schema_version"] != 1 or report["snapshot_digest"] != prior["snapshot_digest"]
+                or not STORE.fullmatch(report["candidate_closure"]) or not Path(report["candidate_closure"]).is_dir()
+                or not HASH.fullmatch(report["candidate_digest"]) or not HASH.fullmatch(report["build_source_digest"])):
+            raise ValueError("invalid build receipt")
+        return report
+    if build_root.exists() or build_root.is_symlink():
+        safe_remove_tree(build_root)
+    stage = Path(tempfile.mkdtemp(prefix=".build-", dir=builds))
+    try:
+        release = state / "releases" / prior["snapshot_digest"]
+        descriptor = open_directory(release, 0, 0o555)
+        try:
+            manifest, digest = inspect_source(descriptor, 0)
+        finally:
+            os.close(descriptor)
+        if digest != prior["snapshot_digest"]:
+            raise ValueError("registered source digest changed")
+        enrolled = build_system.enrollment(actual, build_system.read_enrolled_key())
+        _, build_source_digest = build_system.prepare(release, stage / "source", manifest, enrolled)
+        space = os.statvfs("/nix/store")
+        if space.f_bavail * space.f_frsize < build_system.RESERVE_BYTES:
+            raise Denial(3, "DEVELOPMENT_RECOVERY_RESERVE_UNAVAILABLE")
+        arguments = build_system.build_arguments(stage / "source", stage / "candidate-root", "aios-dev")
+        arguments[0] = "/run/current-system/sw/bin/nix"
+        result = subprocess.run(arguments, capture_output=True, timeout=3600, check=False, env=fixed_environment())
+        if result.returncode:
+            raise Denial(8, "DEVELOPER_BUILD_FAILED")
+        outputs = snapshot.decode(result.stdout)
+        if len(outputs) != 1 or set(outputs[0].get("outputs", {})) != {"out"}:
+            raise ValueError("unexpected developer build output")
+        candidate = build_system.store_path(outputs[0]["outputs"]["out"])
+        for name, expected in (("installation-uuid", actual["installation_uuid"]), ("expected-dmi-uuid", actual["dmi_uuid"]), ("guest-role", "development")):
+            if (Path(candidate) / "etc/aios" / name).read_text().strip() != expected:
+                raise ValueError("built candidate enrollment differs")
+        report = {
+            "schema_version": 1,
+            "snapshot_digest": prior["snapshot_digest"],
+            "build_source_digest": build_source_digest,
+            "candidate_closure": candidate,
+            "candidate_digest": hashlib.sha256(candidate.encode()).hexdigest(),
+            "baseline": build_system.pointers(),
+        }
+        atomic_file(stage / "build.json", report)
+        stage.rename(build_root)
+        stage = None
+        fsync_directory(builds)
+        return report
+    finally:
+        if stage is not None:
+            safe_remove_tree(stage)
+
+
+def guard_identity(identity):
+    return {
+        "installation_uuid": identity["installation_uuid"],
+        "dmi_uuid": identity["dmi_uuid"],
+        "machine_id": identity["machine_id"],
+        "boot_id": identity["boot_id"],
+        "role": identity["guest_role"],
+        "disk_serial": identity["disk_serial"],
+        "management_channel": identity["management_channel"],
+    }
+
+
+def guard_id(registration_id, operation):
+    return str(uuid.uuid5(uuid.UUID(registration_id), "aios-dev-guard:" + operation))
+
+
+def write_handoff(state, prior, receipt, operation, actual):
+    identifier = guard_id(prior["transaction_id"], operation)
+    handoffs = state / "handoffs"
+    handoffs.mkdir(mode=0o700, exist_ok=True)
+    descriptor = open_directory(handoffs, 0, 0o700)
+    os.close(descriptor)
+    path = handoffs / (identifier + ".json")
+    value = {
+        "schema_version": 1,
+        "transaction_id": identifier,
+        "registration_id": prior["transaction_id"],
+        "developer_uid": receipt["developer_uid"],
+        "operation": operation,
+        "identity": guard_identity(actual),
+        "source_digest": prior["snapshot_digest"],
+        "candidate_digest": receipt["candidate_digest"],
+        "candidate_closure": receipt["candidate_closure"],
+    }
+    if path.exists():
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600 or snapshot.decode(path.read_bytes()) != value:
+            raise ValueError("developer guard handoff changed")
+    else:
+        atomic_file(path, value)
+    return identifier
+
+
+def guard_state(identifier):
+    path = Path("/var/lib/aios/transactions/ledger.sqlite")
+    if not path.exists():
+        return None
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600:
+        raise ValueError("unsafe guard ledger")
+    connection = sqlite3.connect("file:" + str(path) + "?mode=ro", uri=True, timeout=0.1)
+    try:
+        row = connection.execute("SELECT state FROM guard_transactions WHERE id = ?", (identifier,)).fetchone()
+        return row[0] if row else None
+    finally:
+        connection.close()
+
+
+def receive_exact(connection, length):
+    data = bytearray()
+    while len(data) < length:
+        part = connection.recv(length - len(data))
+        if not part:
+            raise OSError("guard control closed")
+        data.extend(part)
+    return bytes(data)
+
+
+def guard_exchange(identifier, value):
+    path = "/run/aios-dev-guard/" + identifier + "/control.sock"
+    data = snapshot.canonical(value)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(2)
+        connection.connect(path)
+        connection.sendall(len(data).to_bytes(4, "big") + data)
+        size = int.from_bytes(receive_exact(connection, 4), "big")
+        if not 0 < size <= MAX_REQUEST:
+            raise ValueError("invalid guard response length")
+        return snapshot.decode(receive_exact(connection, size))
+
+
+def complete_guard(identifier, operation, receipt):
+    terminal = guard_state(identifier)
+    expected = "ROLLED_BACK" if operation == "test" else "COMMITTED"
+    if terminal == expected:
+        return terminal
+    if terminal in {"REJECTED", "RECOVERY_REQUIRED"}:
+        raise Denial(8, "DEVELOPER_GUARD_FAILED")
+    unit = "aios-dev-guard@" + identifier + ".service"
+    subprocess.run(
+        ["/run/current-system/sw/bin/systemctl", "start", "--no-block", unit],
+        check=True, timeout=20, env=fixed_environment(), stdout=subprocess.DEVNULL,
+    )
+    deadline = time.monotonic() + 300
+    while time.monotonic() < deadline:
+        state = guard_state(identifier)
+        if state == expected:
+            return state
+        if state in {"REJECTED", "RECOVERY_REQUIRED"}:
+            raise Denial(8, "DEVELOPER_GUARD_FAILED")
+        try:
+            status = guard_exchange(identifier, {"operation": "status", "transaction_id": identifier})
+        except (FileNotFoundError, ConnectionRefusedError, socket.timeout, OSError):
+            time.sleep(0.1)
+            continue
+        if (not isinstance(status, dict) or status.get("schema_version") != 1
+                or status.get("transaction_id") != identifier
+                or status.get("state") != "VERIFYING"
+                or status.get("candidate_digest") != receipt["candidate_digest"]
+                or status.get("identity") != guard_identity(receipt["identity"])
+                or not isinstance(status.get("plan_digest"), str) or not HASH.fullmatch(status["plan_digest"])
+                or not isinstance(status.get("nonce"), str) or not re.fullmatch(r"[0-9a-f]{64}", status["nonce"])):
+            raise ValueError("developer guard status differs")
+        if operation == "test":
+            response = guard_exchange(identifier, {"operation": "complete_test", "transaction_id": identifier})
+        else:
+            response = guard_exchange(identifier, {"operation": "heartbeat", "heartbeat": {
+                "schema_version": 1,
+                "transaction_id": identifier,
+                "identity": status["identity"],
+                "plan_digest": status["plan_digest"],
+                "candidate_digest": status["candidate_digest"],
+                "nonce": status["nonce"],
+            }})
+        if not isinstance(response, dict) or response.get("schema_version") != 1 or response.get("state") != expected:
+            raise ValueError("developer guard terminal response differs")
+        return expected
+    raise Denial(9, "DEVELOPER_GUARD_TIMEOUT")
+
 
 def dispatch(request, *, config_reader=read_config, identity_reader=root_identity, caller_reader=caller_uid,
              releases=RELEASES, state=STATE, owner_uid=0):
@@ -360,50 +717,163 @@ def dispatch(request, *, config_reader=read_config, identity_reader=root_identit
     developer_uid = caller_reader()
     config = config_reader()
     actual = identity_reader()
-    verify_target(request, config, actual)
-    if request["operation"] in {"test", "commit"}:
-        # No unguarded deployment shortcut. The qualified independent activation
-        # adapter must replace this denial before the public modes can succeed.
-        raise Denial(9, "GUARDED_ACTIVATION_UNAVAILABLE")
+    if not state.exists():
+        verify_target(request, config, actual)
     state_directory(state, owner_uid)
-    with ledger(state, owner_uid) as connection:
-        row = connection.execute("SELECT request, receipt FROM registrations WHERE id = ?", (request["transaction_id"],)).fetchone()
-        if row:
-            if len(row[0]) > MAX_REQUEST or len(row[1]) > MAX_REQUEST:
-                raise ValueError("registration record exceeds limit")
-            prior, receipt = snapshot.decode(row[0]), snapshot.decode(row[1])
-            validate_request(prior)
-            if not isinstance(receipt, dict) or prior["operation"] != "register" or receipt.get("state") != "REGISTERED" or receipt.get("transaction_id") != request["transaction_id"] or receipt.get("snapshot_digest") != prior["snapshot_digest"] or receipt.get("activation_performed") is not False or receipt.get("identity") != prior["identity"]:
-                raise ValueError("invalid registration receipt")
-            if prior["identity"] != actual or receipt["developer_uid"] != developer_uid:
-                raise Denial(4, "REGISTRATION_TARGET_CHANGED")
-            if request["operation"] != "status" and prior != request:
-                raise Denial(8, "REGISTRATION_REQUEST_CHANGED")
-            candidate = state / "releases" / prior["snapshot_digest"]
-            candidate_fd = open_directory(candidate, owner_uid, 0o555)
-            try:
-                manifest, digest = inspect_source(candidate_fd, owner_uid)
-                if digest != prior["snapshot_digest"] or manifest["git_head"] != receipt.get("source_head") or manifest["dirty"] != receipt.get("source_dirty") or len(manifest["files"]) != receipt.get("file_count"):
-                    raise ValueError("registered candidate changed")
-            finally:
-                os.close(candidate_fd)
+    with deployment_lock(state, owner_uid):
+        found = registration(state, owner_uid, request["transaction_id"])
+        if found is None:
+            if request["operation"] != "register":
+                raise Denial(3, "REGISTRATION_NOT_FOUND")
+            verify_target(request, config, actual)
+            candidates = state / "releases"
+            candidates.mkdir(mode=0o700, exist_ok=True)
+            descriptor = open_directory(candidates, owner_uid, 0o700)
+            os.close(descriptor)
+            manifest = import_release(
+                releases,
+                candidates / request["snapshot_digest"],
+                request["snapshot_digest"],
+                developer_uid,
+                owner_uid,
+            )
+            verify_target(request, config_reader(), identity_reader())
+            receipt = initial_receipt(request, manifest, developer_uid)
+            with ledger(state, owner_uid) as connection:
+                connection.execute(
+                    "INSERT INTO registrations VALUES (?, ?, ?)",
+                    (request["transaction_id"], snapshot.canonical(request), snapshot.canonical(receipt)),
+                )
             return receipt
+
+        prior, receipt = found
+        if receipt["developer_uid"] != developer_uid:
+            raise Denial(4, "REGISTRATION_TARGET_CHANGED")
         if request["operation"] == "status":
-            raise Denial(3, "REGISTRATION_NOT_FOUND")
-        candidates = state / "releases"
-        candidates.mkdir(mode=0o700, exist_ok=True)
-        fd = open_directory(candidates, owner_uid, 0o700)
-        os.close(fd)
-        manifest = import_release(releases, candidates / request["snapshot_digest"], request["snapshot_digest"], developer_uid, owner_uid)
-        # Re-observe immediately before the durable registration mutation too.
-        verify_target(request, config_reader(), identity_reader())
-        receipt = {"schema_version": 1, "transaction_id": request["transaction_id"], "state": "REGISTERED",
-                   "snapshot_digest": request["snapshot_digest"], "identity": actual, "developer_uid": developer_uid,
-                   "authority": AUTHORITY, "source_head": manifest["git_head"], "source_dirty": manifest["dirty"],
-                   "file_count": len(manifest["files"]), "activation_performed": False,
-                   "helper_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                   "limitations": ["Guarded test activation and exact-closure commit are unavailable.", "Registration is not build, activation, production isolation or final OS acceptance."]}
-        connection.execute("INSERT INTO registrations VALUES (?, ?, ?)", (request["transaction_id"], snapshot.canonical(request), snapshot.canonical(receipt)))
+            if request["identity"] != prior["identity"]:
+                raise Denial(8, "REGISTRATION_REQUEST_CHANGED")
+        else:
+            expected = dict(prior)
+            expected["operation"] = request["operation"]
+            if request != expected:
+                raise Denial(8, "REGISTRATION_REQUEST_CHANGED")
+        durable_guard = None
+        if receipt["state"] == "TESTING":
+            durable_guard = guard_state(receipt["test_guard_id"])
+        elif receipt["state"] == "COMMITTING":
+            durable_guard = guard_state(receipt["commit_guard_id"])
+        candidate_active = durable_guard in {"VERIFYING", "COMMITTED"}
+        expected_system = receipt["candidate_closure"] if receipt["state"] == "COMMITTED" or candidate_active else prior["identity"]["current_system"]
+        verify_target(prior, config, actual, expected_system)
+        candidate = state / "releases" / prior["snapshot_digest"]
+        descriptor = open_directory(candidate, owner_uid, 0o555)
+        try:
+            manifest, digest = inspect_source(descriptor, owner_uid)
+            if (digest != prior["snapshot_digest"]
+                    or manifest["git_head"] != receipt["source_head"]
+                    or manifest["dirty"] != receipt["source_dirty"]
+                    or len(manifest["files"]) != receipt["file_count"]):
+                raise ValueError("registered candidate changed")
+        finally:
+            os.close(descriptor)
+        if receipt["state"] == "TESTING" and durable_guard == "ROLLED_BACK":
+            receipt.update(
+                state="TESTED",
+                activation_performed=True,
+                limitations=["Candidate test activation passed and rolled back; commit remains required."],
+            )
+            save_receipt(state, owner_uid, prior, receipt)
+        elif receipt["state"] == "COMMITTING" and durable_guard == "COMMITTED":
+            import build_system
+            pointers = build_system.pointers()
+            if (pointers["running"] != receipt["candidate_closure"]
+                    or pointers["profile"] != receipt["candidate_closure"]
+                    or pointers["booted"] != receipt["baseline"]["booted"]):
+                raise ValueError("reconciled committed system pointers differ")
+            receipt.update(
+                state="COMMITTED",
+                activation_performed=True,
+                committed_identity=actual,
+                limitations=[],
+            )
+            save_receipt(state, owner_uid, prior, receipt)
+
+
+        if request["operation"] in {"status", "register"}:
+            return receipt
+        if request["operation"] == "test":
+            if receipt["state"] == "TESTED":
+                return receipt
+            if receipt["state"] not in {"REGISTERED", "TESTING"}:
+                raise Denial(3, "DEPLOYMENT_STATE_INVALID")
+            if receipt["state"] == "REGISTERED":
+                verify_target(prior, config_reader(), identity_reader())
+                built = build_candidate(state, prior, actual)
+                verify_target(prior, config_reader(), identity_reader())
+                receipt.update(
+                    state="TESTING",
+                    candidate_closure=built["candidate_closure"],
+                    candidate_digest=built["candidate_digest"],
+                    build_source_digest=built["build_source_digest"],
+                    baseline=built["baseline"],
+                    test_guard_id=guard_id(prior["transaction_id"], "test"),
+                    limitations=["Guarded test activation is in progress; retry the transaction for durable status."],
+                )
+                save_receipt(state, owner_uid, prior, receipt)
+            actual = identity_reader()
+            active = guard_state(receipt["test_guard_id"]) == "VERIFYING"
+            verify_target(prior, config_reader(), actual, receipt["candidate_closure"] if active else None)
+            identifier = write_handoff(state, prior, receipt, "test", actual)
+            if identifier != receipt["test_guard_id"]:
+                raise ValueError("test guard identity differs")
+            verify_target(prior, config_reader(), identity_reader(), receipt["candidate_closure"] if active else None)
+            complete_guard(identifier, "test", receipt)
+            verify_target(prior, config_reader(), identity_reader())
+            receipt.update(
+                state="TESTED",
+                activation_performed=True,
+                limitations=["Candidate test activation passed and rolled back; commit remains required."],
+            )
+            save_receipt(state, owner_uid, prior, receipt)
+            return receipt
+
+        if receipt["state"] == "COMMITTED":
+            return receipt
+        if receipt["state"] not in {"TESTED", "COMMITTING"}:
+            raise Denial(3, "DEPLOYMENT_STATE_INVALID")
+        import build_system
+        pointers = build_system.pointers()
+        active = receipt["state"] == "COMMITTING" and guard_state(receipt["commit_guard_id"]) == "VERIFYING"
+        if not active and pointers != receipt["baseline"]:
+            raise Denial(4, "REGISTRATION_TARGET_CHANGED")
+        if receipt["state"] == "TESTED":
+            receipt.update(
+                state="COMMITTING",
+                commit_guard_id=guard_id(prior["transaction_id"], "commit"),
+                limitations=["Guarded exact-closure commit is in progress; retry the transaction for durable status."],
+            )
+            save_receipt(state, owner_uid, prior, receipt)
+        actual = identity_reader()
+        verify_target(prior, config_reader(), actual, receipt["candidate_closure"] if active else None)
+        identifier = write_handoff(state, prior, receipt, "commit", actual)
+        if identifier != receipt["commit_guard_id"]:
+            raise ValueError("commit guard identity differs")
+        verify_target(prior, config_reader(), identity_reader(), receipt["candidate_closure"] if active else None)
+        complete_guard(identifier, "commit", receipt)
+        after = identity_reader()
+        verify_target(prior, config_reader(), after, receipt["candidate_closure"])
+        pointers = build_system.pointers()
+        if (pointers["running"] != receipt["candidate_closure"]
+                or pointers["profile"] != receipt["candidate_closure"]
+                or pointers["booted"] != receipt["baseline"]["booted"]):
+            raise ValueError("committed system pointers differ")
+        receipt.update(
+            state="COMMITTED",
+            activation_performed=True,
+            committed_identity=after,
+            limitations=[],
+        )
+        save_receipt(state, owner_uid, prior, receipt)
         return receipt
 
 

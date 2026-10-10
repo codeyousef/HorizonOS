@@ -40,8 +40,9 @@ class HostDeploymentTests(unittest.TestCase):
                         "snapshot_digest": self.digest, "identity": IDENTITY, "developer_uid": 1000,
                         "authority": deploy.AUTHORITY, "source_head": self.manifest["git_head"], "source_dirty": True,
                         "file_count": 1, "activation_performed": False, "helper_sha256": hashlib.sha256(self.helper).hexdigest(),
-                        "limitations": ["Guarded test activation and exact-closure commit are unavailable.",
-                                        "Registration is not build, activation, production isolation or final OS acceptance."]}
+                        "limitations": ["No activation has occurred; test and commit remain required."],
+                        "candidate_closure": None, "candidate_digest": None, "build_source_digest": None,
+                        "test_guard_id": None, "commit_guard_id": None, "baseline": None, "committed_identity": None}
         for module, name, value in ((deploy.guest, "enrolled_identity", (self.trust, IDENTITY)),
                                     (deploy.guest, "ssh_arguments", ["ssh", "pinned", "identity-command"]),
                                     (deploy.sync, "synchronize", (0, self.source)),
@@ -115,7 +116,8 @@ class HostDeploymentTests(unittest.TestCase):
             with self.assertRaises(DevctlError) as caught:
                 self.call()
             self.assertEqual(caught.exception.code, "DEPLOYMENT_RECEIPT_MISMATCH")
-        self.assertFalse((self.root / ".local/deployments" / TRANSACTION / "receipt.json").exists())
+        receipts = self.root / ".local/deployments" / TRANSACTION / "receipts"
+        self.assertFalse(receipts.exists() and any(receipts.iterdir()))
 
     def test_post_operation_identity_change_invalidates_receipt(self):
         changed = {**IDENTITY, "current_system": "/nix/store/" + "b" * 32 + "-nixos-system-aios-dev-26.05"}
@@ -124,18 +126,47 @@ class HostDeploymentTests(unittest.TestCase):
             self.call()
         self.assertEqual(caught.exception.code, "DEPLOYMENT_TARGET_CHANGED")
 
-    def test_test_and_commit_preserve_guard_denial_and_reject_unqualified_success(self):
+    def test_test_and_commit_accept_only_qualified_guard_receipts(self):
+        self.call()
+        candidate = "/nix/store/" + "b" * 32 + "-nixos-system-aios-dev-26.05"
+        built = {
+            **self.receipt,
+            "state": "TESTED",
+            "activation_performed": True,
+            "candidate_closure": candidate,
+            "candidate_digest": "c" * 64,
+            "build_source_digest": "d" * 64,
+            "test_guard_id": "11111111-1111-4111-8111-111111111111",
+            "baseline": {"running": IDENTITY["current_system"], "profile": IDENTITY["current_system"], "booted": IDENTITY["current_system"]},
+            "limitations": ["Candidate test activation passed and rolled back; commit remains required."],
+        }
+        self.exchange.return_value = (0, sync.contract.canonical(built), b"")
+        _, tested = self.call("test")
+        self.assertEqual(tested["state"], "TESTED")
+        self.assertTrue(Path(tested["artifact_path"]).name == "test-tested.json")
+
+        committed_identity = {**IDENTITY, "current_system": candidate}
+        committed = {
+            **built,
+            "state": "COMMITTED",
+            "commit_guard_id": "22222222-2222-4222-8222-222222222222",
+            "committed_identity": committed_identity,
+            "limitations": [],
+        }
+        self.exchange.return_value = (0, sync.contract.canonical(committed), b"")
+        self.enrolled_identity.side_effect = [(self.trust, IDENTITY), (self.trust, committed_identity)]
+        _, result = self.call("commit")
+        self.assertEqual(result["state"], "COMMITTED")
+        self.assertEqual(result["committed_identity"], committed_identity)
+
+    def test_test_or_commit_cannot_claim_success_without_guard_identity(self):
         self.call()
         for mode in ("test", "commit"):
-            self.exchange.return_value = (9, b'{"schema_version":1,"error":"GUARDED_ACTIVATION_UNAVAILABLE"}', b"")
+            forged = {**self.receipt, "state": "TESTED", "activation_performed": True}
+            self.exchange.return_value = (0, sync.contract.canonical(forged), b"")
             with self.assertRaises(DevctlError) as caught:
                 self.call(mode)
-            self.assertEqual(caught.exception.code, "GUARDED_ACTIVATION_UNAVAILABLE")
-            self.assertEqual(caught.exception.details["upstream_exit"], 9)
-            self.exchange.return_value = (0, sync.contract.canonical(self.receipt), b"")
-            with self.assertRaises(DevctlError) as caught:
-                self.call(mode)
-            self.assertEqual(caught.exception.code, "UNEXPECTED_DEPLOYMENT_SUCCESS")
+            self.assertEqual(caught.exception.code, "DEPLOYMENT_RECEIPT_MISMATCH")
 
     def test_parser_exposes_typed_modes_without_shell_or_targets(self):
         args = parser().parse_args(["deploy", "--mode", "register", "--acknowledge-guest-root"])

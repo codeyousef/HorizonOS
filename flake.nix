@@ -141,7 +141,7 @@
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios;
       nixosModules.production = import ./nix/modules/aios/production.nix;
-      packages.${system} = { aios-consent-ui = consentUi; aios-model-artifact = modelArtifact; aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
+      packages.${system} = { aios-consent-ui = consentUi; aios-model-artifact = modelArtifact; aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { aiosGuard = guard; }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system} = { host-unit = devTools; consent-ui = consentUiTests; };
       lib.stateContract = stateContract;
       lib.catalogPackages = builtins.listToAttrs (map (entry: {
@@ -149,7 +149,7 @@
         value = pkgs.lib.getAttrFromPath entry.attribute pkgs;
       }) stateContract.catalog.content.packages);
       lib.managedState = import ./tests/nix/managed.nix { inherit nixpkgs stateContract; };
-      lib.developmentBoundary = import ./tests/nix/development.nix { inherit nixpkgs; aiosCore = core; };
+      lib.developmentBoundary = import ./tests/nix/development.nix { inherit nixpkgs; aiosCore = core; aiosGuard = guard; };
       lib.modelModule = import ./tests/nix/model.nix { inherit nixpkgs; aiosModel = model; aiosModelArtifact = modelArtifact; };
       lib.modelOptionsDocumentation = (pkgs.nixosOptionsDoc {
         options.services.aios = (nixpkgs.lib.nixosSystem { inherit system; modules = [ ./nix/modules/aios ]; }).options.services.aios;

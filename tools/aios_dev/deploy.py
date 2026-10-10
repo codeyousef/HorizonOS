@@ -12,11 +12,14 @@ from .provision import failure, operation_lock, private_directory, write_new
 AUTHORITY = "guest-root-code-deployment"
 COMMAND = "/run/wrappers/bin/sudo -n /run/current-system/sw/bin/aios-dev-deploy --request-stdin"
 FIELDS = {"schema_version", "transaction_id", "state", "snapshot_digest", "identity", "developer_uid",
-          "authority", "source_head", "source_dirty", "file_count", "activation_performed", "helper_sha256", "limitations"}
+          "authority", "source_head", "source_dirty", "file_count", "activation_performed",
+          "helper_sha256", "limitations", "candidate_closure", "candidate_digest",
+          "build_source_digest", "test_guard_id", "commit_guard_id", "baseline", "committed_identity"}
 DENIALS = {"INVALID_DEVELOPER_REQUEST", "DEVELOPER_AUTHORITY_REQUIRED", "DEVELOPMENT_VM_REQUIRED",
            "DEVELOPMENT_TARGET_MISMATCH", "REGISTRATION_TARGET_CHANGED", "REGISTRATION_REQUEST_CHANGED",
            "REGISTRATION_NOT_FOUND", "DEVELOPER_VERIFICATION_FAILED", "DEVELOPER_REGISTRATION_FAILED",
-           "GUARDED_ACTIVATION_UNAVAILABLE"}
+           "DEVELOPMENT_RECOVERY_RESERVE_UNAVAILABLE", "DEVELOPER_BUILD_FAILED",
+           "DEPLOYMENT_STATE_INVALID", "DEVELOPER_GUARD_FAILED", "DEVELOPER_GUARD_TIMEOUT"}
 
 
 def identifier(value):
@@ -56,17 +59,49 @@ def remember(path, value):
 def validate_receipt(value, intent):
     request = intent["request"]
     if (not isinstance(value, dict) or set(value) != FIELDS or type(value["schema_version"]) is not int
-            or value["schema_version"] != 1 or value["state"] != "REGISTERED"
+            or value["schema_version"] != 1
+            or value["state"] not in {"REGISTERED", "TESTING", "TESTED", "COMMITTING", "COMMITTED"}
             or any(value[key] != request[key] for key in ("transaction_id", "snapshot_digest", "identity", "authority"))
             or value["source_head"] != intent["source_head"] or type(value["source_dirty"]) is not bool
             or value["source_dirty"] != intent["source_dirty"] or type(value["file_count"]) is not int
             or value["file_count"] != intent["file_count"] or type(value["developer_uid"]) is not int
-            or value["developer_uid"] <= 0 or value["activation_performed"] is not False
-            or value["helper_sha256"] != intent["helper_sha256"]
-            or value["limitations"] != ["Guarded test activation and exact-closure commit are unavailable.",
-                                        "Registration is not build, activation, production isolation or final OS acceptance."]):
+            or value["developer_uid"] <= 0 or type(value["activation_performed"]) is not bool
+            or value["helper_sha256"] != intent["helper_sha256"] or not isinstance(value["limitations"], list)):
         raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Installed helper receipt differs from the frozen transaction")
+    built = value["state"] != "REGISTERED"
+    if built:
+        if (not isinstance(value["candidate_closure"], str) or not re.fullmatch(r"/nix/store/[a-z0-9]{32}-[A-Za-z0-9._+-]+", value["candidate_closure"])
+                or not isinstance(value["candidate_digest"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["candidate_digest"])
+                or not isinstance(value["build_source_digest"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["build_source_digest"])
+                or not isinstance(value["baseline"], dict) or set(value["baseline"]) != {"running", "profile", "booted"}
+                or not all(isinstance(path, str) and re.fullmatch(r"/nix/store/[a-z0-9]{32}-[A-Za-z0-9._+-]+", path) for path in value["baseline"].values())):
+            raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Built deployment evidence is invalid")
+    elif any(value[field] is not None for field in ("candidate_closure", "candidate_digest", "build_source_digest", "test_guard_id", "commit_guard_id", "baseline", "committed_identity")) or value["activation_performed"]:
+        raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Registration unexpectedly reports activation")
+    for field in ("test_guard_id", "commit_guard_id"):
+        if value[field] is not None:
+            identifier(value[field])
+    if value["state"] in {"TESTING", "TESTED", "COMMITTING", "COMMITTED"} and value["test_guard_id"] is None:
+        raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Test guard evidence is missing")
+    if value["state"] in {"COMMITTING", "COMMITTED"} and value["commit_guard_id"] is None:
+        raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Commit guard evidence is missing")
+    if value["state"] in {"TESTED", "COMMITTING", "COMMITTED"} and value["activation_performed"] is not True:
+        raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Completed guard activation evidence is missing")
+    if value["state"] == "COMMITTED":
+        if (not isinstance(value["committed_identity"], dict)
+                or not same_target(value["committed_identity"], value["identity"])
+                or value["committed_identity"].get("current_system") != value["candidate_closure"]
+                or value["activation_performed"] is not True):
+            raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Committed identity differs from the exact candidate")
+    elif value["committed_identity"] is not None:
+        raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Unexpected committed identity")
     return value
+
+def same_target(left, right):
+    if not isinstance(left, dict) or not isinstance(right, dict) or set(left) != set(right):
+        return False
+    return all(left[key] == right[key] for key in left if key != "current_system")
+
 
 
 def run(config, mode, transaction=None, acknowledge=False):
@@ -117,7 +152,7 @@ def run(config, mode, transaction=None, acknowledge=False):
                 or not isinstance(intent["request"], dict) or set(intent["request"]) != {"schema_version", "operation", "transaction_id", "identity", "snapshot_digest", "authority"}
                 or intent["request"]["schema_version"] != 1 or type(intent["request"]["schema_version"]) is not int
                 or intent["request"]["operation"] != "register" or intent["request"]["authority"] != AUTHORITY
-                or intent["request"]["transaction_id"] != transaction or intent["request"]["identity"] != identity
+                or intent["request"]["transaction_id"] != transaction or not same_target(intent["request"]["identity"], identity)
                 or not isinstance(intent["request"]["snapshot_digest"], str) or not re.fullmatch(r"[0-9a-f]{64}", intent["request"]["snapshot_digest"])):
             raise failure(ExitCode.TARGET_MISMATCH, "DEPLOYMENT_TARGET_CHANGED", "Frozen deployment intent no longer matches this target/boot/configuration")
         request = {**intent["request"], "operation": mode}
@@ -125,16 +160,15 @@ def run(config, mode, transaction=None, acknowledge=False):
             request = {key: request[key] for key in ("schema_version", "operation", "identity", "transaction_id")}
         evidence = {"transaction_id": transaction, "intent_path": str(path)}
         try:
+            timeout = 3700 if mode == "test" else 600 if mode == "commit" else 120
             status, output, errors = sync.exchange([*guest.ssh_arguments(config)[:-1], COMMAND],
-                                                   [sync.contract.canonical(request)], response_limit=65536, timeout=120)
+                                                   [sync.contract.canonical(request)], response_limit=65536, timeout=timeout)
             _, after = guest.enrolled_identity(config)
         except DevctlError as error:
             error.details.update(evidence)
             raise
         except TimeoutError as error:
             raise DevctlError(ExitCode.TIMEOUT, "DEVELOPER_TRANSPORT_TIMEOUT", "Developer operation timed out; inspect its durable transaction", details=evidence) from error
-        if after != identity:
-            raise failure(ExitCode.TARGET_MISMATCH, "DEPLOYMENT_TARGET_CHANGED", "Development target changed during helper operation")
         try:
             response = sync.contract.decode(output)
         except (ValueError, UnicodeError):
@@ -147,9 +181,12 @@ def run(config, mode, transaction=None, acknowledge=False):
                 code = ExitCode.TARGET_MISMATCH
             raise DevctlError(code, label, "Installed developer helper refused the operation",
                               details={"upstream_exit": status, **evidence})
-        if mode in {"test", "commit"}:
-            raise failure(ExitCode.VERIFICATION_FAILURE, "UNEXPECTED_DEPLOYMENT_SUCCESS", "Guarded activation adapter is not qualified")
         receipt = validate_receipt(response, intent)
-        remember(directory / "receipt.json", receipt)
+        expected_after = receipt["committed_identity"] if receipt["state"] == "COMMITTED" else receipt["identity"]
+        if after != expected_after:
+            raise failure(ExitCode.TARGET_MISMATCH, "DEPLOYMENT_TARGET_CHANGED", "Development target changed during helper operation")
+        receipts = private_directory(config.root, ".local/deployments/" + transaction + "/receipts")
+        artifact = receipts / (mode + "-" + receipt["state"].lower() + ".json")
+        remember(artifact, receipt)
         return ExitCode.SUCCESS, {**receipt, "identity_verified": True, "host_key_fingerprint": trust["host_key_fingerprint"],
-                                  "release_digest": receipt["snapshot_digest"], "artifact_path": str(directory / "receipt.json")}
+                                  "release_digest": receipt["snapshot_digest"], "artifact_path": str(artifact)}
