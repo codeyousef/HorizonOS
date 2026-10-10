@@ -624,15 +624,19 @@ def write_handoff(state, prior, receipt, operation, actual):
     return identifier
 
 
-def guard_state(identifier):
-    path = Path("/var/lib/aios/transactions/ledger.sqlite")
+def guard_state(identifier, path=Path("/var/lib/aios/transactions/ledger.sqlite"), owner_uid=0):
     if not path.exists():
         return None
     info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600:
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600:
         raise ValueError("unsafe guard ledger")
     connection = sqlite3.connect("file:" + str(path) + "?mode=ro", uri=True, timeout=0.1)
     try:
+        table = connection.execute(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='guard_transactions')"
+        ).fetchone()
+        if table != (1,):
+            return None
         row = connection.execute("SELECT state FROM guard_transactions WHERE id = ?", (identifier,)).fetchone()
         return row[0] if row else None
     finally:

@@ -123,6 +123,15 @@ class DeveloperBoundaryTests(unittest.TestCase):
         self.assertEqual(raised.exception.label, "DEVELOPMENT_TARGET_MISMATCH")
         self.assertEqual(list(self.state.iterdir()), [])
 
+    def test_broker_only_shared_ledger_has_no_guard_state(self):
+        path = self.root / "ledger.sqlite"
+        connection = deploy.sqlite3.connect(path)
+        connection.execute("CREATE TABLE broker_schema(version INTEGER NOT NULL)")
+        connection.commit()
+        connection.close()
+        path.chmod(0o600)
+        self.assertIsNone(deploy.guard_state(TRANSACTION, path, os.getuid()))
+
     def test_source_becomes_separate_immutable_verified_candidate_and_durable_receipt(self):
         receipt = self.call()
         candidate = self.state / "releases" / self.digest
