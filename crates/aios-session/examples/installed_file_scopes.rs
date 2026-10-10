@@ -11,13 +11,19 @@ fn code(error:zbus::Error,expected:&str){
     assert_eq!(name.as_str(),format!("org.aios.Error.{expected}"));
 }
 fn value(proxy:&Proxy<'_>,method:&str,request:Option<&str>)->Value{
-    let text:String=match request{Some(request)=>proxy.call(method,&(request,)).unwrap(),None=>proxy.call(method,&()).unwrap()};
+    let result:Result<String,zbus::Error>=match request{Some(request)=>proxy.call(method,&(request,)),None=>proxy.call(method,&())};
+    let text=result.unwrap_or_else(|error|panic!("{method} failed: {error}"));
     serde_json::from_str(&text).unwrap()
 }
 fn main(){
     let arguments=env::args().skip(1).collect::<Vec<_>>();
     assert_eq!(arguments.len(),3,"expected Documents path, file name and link name");
     let documents=PathBuf::from(&arguments[0]);let filename=&arguments[1];let linkname=&arguments[2];
+    let boot_id=std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim().to_owned();
+    let owner=aios_files::Owner{uid:nix::unistd::geteuid().as_raw(),boot_id,session_id:None};
+    let mut manager=aios_files::Manager::default();
+    let local=manager.propose_xdg_roots(owner,documents.parent().unwrap(),0).expect("local descriptor root proposal failed");
+    assert!(local.roots.iter().any(|root|root.display_path==documents.to_string_lossy()));
     let address=format!("unix:path=/run/user/{}/bus",nix::unistd::geteuid());
     let connection=zbus::blocking::connection::Builder::address(address.as_str()).unwrap().method_timeout(Duration::from_secs(5)).build().unwrap();
     let files=Proxy::new(&connection,NAME,PATH,INTERFACE).unwrap();
