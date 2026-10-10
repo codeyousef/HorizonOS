@@ -107,12 +107,12 @@ def main():
                     raise RuntimeError("exact managed service did not start: "+name)
                 required={"NoNewPrivileges":"yes","MemoryMax":"268435456","TasksMax":"64","RuntimeDirectoryMode":"0700"}
                 if name=="aios-sessiond.service":
-                    required.update({"PrivateNetwork":"yes","PrivateDevices":"yes","ProtectHome":"tmpfs","ProtectSystem":"strict","ProtectProc":"invisible"})
+                    required.update({"PrivateNetwork":"yes","PrivateDevices":"yes","ProtectHome":"no","ProtectSystem":"strict","ProtectProc":"invisible"})
                 else:
                     required.update({"PrivateNetwork":"no","PrivateDevices":"no","ProtectHome":"no","ProtectSystem":"no","ProtectProc":"default","PrivateTmp":"no"})
                 for key,value in required.items():
                     if props[key]!=value:raise RuntimeError("actual hardening mismatch: "+name+" "+key)
-            if effective["aios-sessiond.service"]["PrivateUsers"] not in ("yes","self") or any(effective[name]["PrivateUsers"]!="no" for name in ("aios-ui-agent.service","aios-processd.service")):
+            if effective["aios-sessiond.service"]["PrivateUsers"]!="no" or any(effective[name]["PrivateUsers"]!="no" for name in ("aios-ui-agent.service","aios-processd.service")):
                 raise RuntimeError("namespace plan mismatch")
             if "graphical-session.target" not in effective["aios-ui-agent.service"]["PartOf"].split() or "graphical-session.target" not in effective["aios-ui-agent.service"]["Requisite"].split():
                 raise RuntimeError("provider graphical lifetime mismatch")

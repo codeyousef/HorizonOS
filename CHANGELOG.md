@@ -41,9 +41,11 @@
   limited to existing XDG Documents, Downloads and Desktop directories on the
   home mount; descriptor-relative `openat2` resolution denies symlink, traversal
   and mount escapes. UID/session, root, file metadata and expiry are revalidated
-  for every metadata/content/mutation capability. Revocation blocks handles
-  before purging cached chunks, previews and snippets, and fixed secret paths
-  remain excluded after enrollment.
+  for every metadata/content/mutation capability. The user broker retains the
+  caller's user/home namespace so those descriptor capabilities can reach the
+  selected roots; it retains no capabilities or network access. Revocation
+  blocks handles before purging cached chunks, previews and snippets, and fixed
+  secret paths remain excluded after enrollment.
 - Bind the independent guard's target identity and prior running, profile, and
   boot closures to the immutable prepared baseline. Activation now closes an
   intervening Nix profile generation or target change as a terminal rejection

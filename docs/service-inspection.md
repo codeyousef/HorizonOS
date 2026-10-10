@@ -151,14 +151,16 @@ They cannot survive a broker restart or authorize another UID/session/client.
 No grant, nonce or write approval enters model context. Native graphical consent
 is required before UI access; observing a graphical candidate creates no grant.
 
-The user unit hides home directories with `ProtectHome=tmpfs` and exposes only
-its own user runtime directory, including the standard session bus and private
-socket. A separate fixed oneshot projection reads only the registered KDE
-settings files and copies them mode-0600 into that runtime directory when they
-appear or change; the broker cannot read the rest of the home directory. It runs
-without network access or added capabilities, with a read-only system image,
-private devices, and bounded memory and process counts. Loss of the
-public bus owner terminates the daemon so the service manager can restart it.
+The user broker retains the caller's user and home namespace so its
+descriptor-scoped Files1 implementation can reach explicitly consented XDG
+roots and compare file ownership with authenticated D-Bus credentials.
+`openat2` beneath/no-symlink/no-mount-crossing constraints, per-UID grants and
+per-operation identity revalidation—not a broad home mount—form that file
+boundary. The service still has no network access or capabilities, a read-only
+system image, private devices, and bounded memory and process counts. A fixed
+oneshot projection supplies registered KDE settings through the private runtime
+directory. Loss of the public bus owner terminates the daemon so the service
+manager can restart it.
 
 `aiosctl status --json` reports the authenticated session's capabilities and
 availability. `aiosctl ask --mode read-only TEXT` and standalone `ask TEXT`

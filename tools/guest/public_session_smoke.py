@@ -126,7 +126,7 @@ def main():
         properties = show()
         if not owns_fragment(properties) or properties["ActiveState"] != "active" or int(properties["MainPID"]) <= 1:
             raise RuntimeError("packaged user service did not become active")
-        for key, value in {"NoNewPrivileges":"yes", "PrivateNetwork":"yes", "ProtectHome":"tmpfs", "ProtectSystem":"strict", "MemoryMax":"268435456", "TasksMax":"64", "RuntimeDirectoryMode":"0700"}.items():
+        for key, value in {"NoNewPrivileges":"yes", "PrivateNetwork":"yes", "ProtectHome":"no", "ProtectSystem":"strict", "MemoryMax":"268435456", "TasksMax":"64", "RuntimeDirectoryMode":"0700"}.items():
             if properties[key] != value:
                 raise RuntimeError("effective unit hardening mismatch: " + key)
         socket = runtime / "aios/session.sock"

@@ -58,7 +58,7 @@ class Broker:
 
     def verify(self):
         current = self.show()
-        expected = {'NoNewPrivileges': 'yes', 'PrivateNetwork': 'yes', 'ProtectHome': 'tmpfs', 'ProtectSystem': 'strict',
+        expected = {'NoNewPrivileges': 'yes', 'PrivateNetwork': 'yes', 'ProtectHome': 'no', 'ProtectSystem': 'strict',
                     'MemoryMax': '268435456', 'TasksMax': '64', 'RuntimeDirectoryMode': '0700', 'ActiveState': 'active'}
         if any(current.get(k) != v for k, v in expected.items()):
             raise RuntimeError('original installed broker hardening failed')
