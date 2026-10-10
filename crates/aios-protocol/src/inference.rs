@@ -73,7 +73,16 @@ impl Generation {
             // are escaped by serde; client text is never grammar source.
             serde_json::to_string(&serde_json::to_string(id).unwrap()).unwrap()
         }).collect::<Vec<_>>().join(" | ");
-        root.push_str(r#"answer ::= "{" ws "\"kind\"" ws ":" ws "\"answer\"" ws "," ws "\"text\"" ws ":" ws string ws "," ws "\"evidence_ids\"" ws ":" ws "[" ws references ws "]" ws "}"
+        root.push_str(r#"answer ::= answer-basic | answer-claims
+answer-basic ::= "{" ws "\"kind\"" ws ":" ws "\"answer\"" ws "," ws "\"text\"" ws ":" ws string ws "," ws "\"evidence_ids\"" ws ":" ws "[" ws references ws "]" ws "}"
+answer-claims ::= "{" ws "\"kind\"" ws ":" ws "\"answer\"" ws "," ws "\"text\"" ws ":" ws string ws "," ws "\"evidence_ids\"" ws ":" ws "[" ws references ws "]" ws "," ws "\"claims\"" ws ":" ws "[" ws claims ws "]" ws "}"
+claims ::= (claim (ws "," ws claim)*)?
+claim ::= observed-claim | hypothesis-claim | missing-claim
+observed-claim ::= "{" ws "\"kind\"" ws ":" ws "\"observed\"" ws "," ws "\"evidence_id\"" ws ":" ws string ws "," ws "\"json_pointer\"" ws ":" ws string ws "," ws "\"expected\"" ws ":" ws scalar ws "," ws "\"statement\"" ws ":" ws string ws "}"
+hypothesis-claim ::= "{" ws "\"kind\"" ws ":" ws "\"hypothesis\"" ws "," ws "\"statement\"" ws ":" ws string ws "}"
+missing-claim ::= "{" ws "\"kind\"" ws ":" ws "\"missing_evidence\"" ws "," ws "\"statement\"" ws ":" ws string ws "}"
+scalar ::= string | integer | "true" | "false" | "null"
+integer ::= "-"? ("0" | [1-9] [0-9]*)
 clarification ::= "{" ws "\"kind\"" ws ":" ws "\"clarification\"" ws "," ws "\"question\"" ws ":" ws string ws "}"
 abstain ::= "{" ws "\"kind\"" ws ":" ws "\"abstain\"" ws "," ws "\"reason\"" ws ":" ws string ws "}"
 system-info ::= "{" ws "\"kind\"" ws ":" ws "\"tool_call\"" ws "," ws "\"action_id\"" ws ":" ws "\"system.info\"" ws "," ws "\"arguments\"" ws ":" ws "{" ws "}" ws "}"
@@ -94,15 +103,15 @@ ws ::= [ \t\n\r]*
         match kind.kind.as_str() {
             "answer" => {
                 if self.response_mode==ResponseMode::ReadDecision{return Err(ErrorCode::PermissionDenied);}
-                #[derive(Deserialize)] #[serde(deny_unknown_fields)]
-                struct Answer { kind: String, text: String, evidence_ids: Vec<String> }
-                let answer: Answer = serde_json::from_str(output).map_err(|_| ErrorCode::ModelOutputInvalid)?;
+                let answer: crate::retrieval::Answer = serde_json::from_str(output).map_err(|_| ErrorCode::ModelOutputInvalid)?;
                 let mut seen = HashSet::new();
                 if answer.kind != "answer" || answer.text.trim().is_empty() || answer.text.len() > 8192 ||
-                    answer.evidence_ids.len() > 64 || answer.evidence_ids.iter().any(|id| !seen.insert(id)) {
+                    answer.evidence_ids.len() > 64 || answer.claims.len() > 64 ||
+                    answer.evidence_ids.iter().any(|id| !seen.insert(id)) {
                     return Err(ErrorCode::ModelOutputInvalid);
                 }
                 if answer.evidence_ids.iter().any(|id| !self.evidence_ids.contains(id)){return Err(ErrorCode::StaleEvidence);}
+                for claim in &answer.claims { claim.validate_shape()?; }
             },
             "clarification" | "abstain" => {
                 #[derive(Deserialize)] #[serde(deny_unknown_fields)] struct Clarification { kind: String, question: String }

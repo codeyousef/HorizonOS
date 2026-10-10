@@ -87,3 +87,5 @@ pub mod validation;
 pub mod registry;
 
 pub mod inference;
+
+pub mod retrieval;
