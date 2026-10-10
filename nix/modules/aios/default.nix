@@ -2,14 +2,14 @@
 let
   cfg = config.services.aios;
 in {
-  imports = [ ./development.nix ./model.nix ./session.nix ./graph.nix ];
+  imports = [ ./development.nix ./model.nix ./session.nix ./graph.nix ./retention.nix ];
   options.services.aios = {
-    enable = lib.mkEnableOption "the Horizon OS control plane";
+    enable = lib.mkEnableOption "the Minnerite control plane";
     desktop = {
       enable = lib.mkOption {
         type = lib.types.bool;
         default = false;
-        description = "Enable graphical Horizon OS clients; headless configurations leave this false.";
+        description = "Enable graphical Minnerite clients; headless configurations leave this false.";
       };
       visualControl.enable = lib.mkOption {
         type = lib.types.bool;
@@ -36,7 +36,7 @@ in {
       enable = lib.mkOption {
         type = lib.types.bool;
         default = false;
-        description = "Enable installed recovery integration; AIOS image configurations opt in explicitly.";
+        description = "Enable installed recovery integration; Minnerite image configurations opt in explicitly.";
       };
       initrdDiagnostics.enable = lib.mkOption {
         type = lib.types.bool;
@@ -56,20 +56,20 @@ in {
         description = "Deadline for independent guarded activation verification.";
       };
       keepKnownGoodGenerations = lib.mkOption {
-        type = lib.types.ints.between 2 100;
+        type = lib.types.ints.between 3 100;
         default = 3;
-        description = "Minimum known-good generations retained outside active transaction roots.";
+        description = "Distinct recent known-good generations retained outside active transaction roots.";
       };
     };
   };
   config.assertions = [
     {
       assertion = !cfg.desktop.visualControl.enable || cfg.desktop.enable;
-      message = "Horizon OS visual control requires desktop.enable.";
+      message = "Minnerite visual control requires desktop.enable.";
     }
     {
       assertion = !cfg.recovery.initrdDiagnostics.enable || cfg.recovery.enable;
-      message = "Horizon OS initrd diagnostics require recovery.enable.";
+      message = "Minnerite initrd diagnostics require recovery.enable.";
     }
   ];
 }

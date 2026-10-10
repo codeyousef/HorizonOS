@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Rename the legacy product and user-visible branding to Minnerite
+  while retaining the PRD-mandated `aios-*` executable, service, protocol,
+  schema, and configuration interfaces.
 - Define the complete typed `services.aios` module option surface with safe
   defaults, cross-option assertions, generated documentation coverage, and
   explicit model-independent desktop-image composition.
@@ -18,11 +21,24 @@
   baselines and resource bounds, builds only the fixed reviewed system target,
   inventories closure deltas, and retains verified prior/candidate indirect GC
   roots without activation or boot-selection authority.
-- Add a root-only native guard adapter that revalidates enrolled target and
-  immutable closure artifacts, probes fixed executor/graph health endpoints,
-  retains exact recovery closures, and maps only typed guard effects to the
-  pinned activation commands. It remains unreachable from the public CLI until
-  authenticated broker/independent-service orchestration is connected.
+- Connect the root-only native guard adapter to a durable Executor1 handoff and
+  independently supervised template service. It revalidates enrolled target and
+  immutable closure artifacts, retains exact recovery roots, probes fixed
+  system/user/API/action health, accepts transaction-bound heartbeats only
+  through the authenticated SSH management session, commits exact pointers, and
+  reconciles rollback or post-commit disarming after restart.
+- By default, retain the newest three distinct verified system profiles as root-owned GC
+  roots after commit or rollback, independently of active transaction roots;
+  malformed retention state fails closed. System profile history remains
+  explicitly unmanaged until transaction provenance is independently joined.
+- Protect the active guard with NixOS non-stop/non-restart/non-removal switch
+  metadata instead of `RefuseManualStop`; the latter rejected the entire
+  candidate and recovery switch transaction rather than preserving it.
+- Let the root-only guard's fixed immutable activation commands use the
+  filesystem, kernel and user-runtime activation paths that NixOS requires;
+  broad `ProtectSystem`, `ProtectKernelTunables`, and `ProtectHome` mounts made
+  candidate and recovery activation fail read-only while command, identity and
+  artifact gates remain.
 - Add authenticated `aiosctl plan` and transaction inspection, authorization,
   apply and rollback-plan commands for bounded package intents. Prepared plans
   persist only for the same UID, boot, system bus and live logind session;
@@ -30,6 +46,24 @@
 - Add broker-owned final-plan TTY confirmation with foreground process/session
   checks, control-safe immutable impact/recovery rendering, an exact plan-bound
   phrase, and mandatory separate fresh native polkit authentication.
+- Keep final native approval and guarded activation on the same authenticated
+  `aiosctl transaction apply` process and system-bus connection, so exact
+  process-bound receipts are usable without weakening their caller binding.
+- Permit the typed guard status and heartbeat D-Bus members through the
+  Executor1 bus policy; runtime management-session, owner, transaction, nonce,
+  target, and digest checks remain mandatory.
+- Accept the ledger's immutable build closure at guard handoff while requiring
+  the prepared semantic preview to remain pre-build; the guard no longer
+  compares that intentionally empty preview field to the realized closure.
+- Resolve immutable Nix store links before hashing managed manifests, while
+  rejecting targets outside `/nix/store` and retaining no-follow, ownership,
+  mode, size, and race checks on the resolved file. Retained Nix invocation
+  accepts the immutable `nix-env` alias resolving to the package's `nix`
+  executable instead of rejecting that standard Nix layout. Guard service
+  identity likewise resolves NixOS's `/etc/systemd/system` fragment link before
+  enforcing its component-relative immutable store suffix, root ownership, and
+  mode. Guard failures identify their fixed startup stage without logging
+  mutable paths or request content.
 - Add a production-excluded disposable administrator with a fixed test-only
   credential for real native polkit challenge qualification.
 - Disable polkit 127's broken socket-activated PAM helper so native
@@ -40,6 +74,9 @@
 - Connect preliminary foreground-TTY resource confirmation to the installed
   isolated build worker, independently authenticate its process/socket/output
   and retained roots, and freeze only a rechecked exact final plan.
+- Terminalize a failed candidate build only after the authenticated single-flight
+  worker returns a request-bound completion response, releasing the active-plan
+  slot without treating a timeout or disconnected worker as stopped.
 - Add model-independent `aiosctl automation list` output that truthfully reports
   no persistent definitions while scheduling remains unavailable.
 - Keep disposable desktop QMP and serial endpoints within the portable Unix

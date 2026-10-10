@@ -1,10 +1,11 @@
-# Horizon OS activation guard
+# Minnerite activation guard
 
-`aios-guard` defines the deterministic transaction protocol for Horizon OS test
+`aios-guard` defines the deterministic transaction protocol for Minnerite test
 activation, exact-pointer commit and recovery. The library uses SQLite for the
 immutable plan and effect journal. Its executable exposes the pure
-`--check-plan` stdin interface and fixed root-only preflight below. Other invocations return exit 9 with
-`GUARD_RUNTIME_ADAPTER_UNAVAILABLE`.
+`--check-plan` stdin interface, the fixed root-only preflight, and the
+systemd-only `--run-transaction <uuid>` entrypoint. Other invocations return
+exit 9 with `GUARD_RUNTIME_ADAPTER_UNAVAILABLE`.
 
 The fixed root-only `--native-preflight` mode captures installed target identity,
 running and profile closures, the selected systemd-boot generation and its EFI
@@ -12,7 +13,8 @@ payloads, the installed guard, Nix and systemd executables, and `CLOCK_BOOTTIME`
 Native target checks are reused as a library; this does not depend on the broker
 daemon or the model. Store fingerprints use bounded streaming reads, protected
 traversal, root ownership, readonly files and before/after inode/content metadata.
-The running executable must match the installed guard by path, digest and inode.
+At initial transaction intake, the running executable must match the installed
+guard by path, digest and inode.
 
 The boot reader supports the locked development image's UEFI/systemd-boot layout.
 It requires one exact generation, one immutable system init, and one kernel and
@@ -23,7 +25,7 @@ are recorded independently of boot selection. This proves the selected loader
 entry; it does not promise recovery from firmware or kernel failure.
 
 `NativeIntake` is not deserializable. Its artifact-binding method compares the
-actual prior pointers, retained guard and candidate file hashes with a typed
+actual prior pointers, installed guard and candidate file hashes with a typed
 plan. The root-only `NativeAdapter` consumes that capability, independently
 recaptures enrolled identity and immutable pointers around every effect, probes
 only the fixed Executor1 introspection and private graph-status endpoints, and
@@ -31,9 +33,18 @@ retains exact prior/candidate closures under a transaction-specific root-owned
 Nix GC-root directory. It maps typed system effects to the pinned commands below;
 managed-state publication is verification of the immutable running closure,
 not a second mutable manifest write. Model-only runtime intake is unavailable.
-The adapter has no CLI constructor: authenticated broker handoff, independent
-template-service supervision and host heartbeat transport must still be
-connected before activation can be invoked.
+
+Executor1 writes a canonical root-owned handoff only after consuming the exact
+authorization receipt, then asks PID 1 to start the fixed
+`aios-guard@<transaction>.service`. NixOS switch metadata forbids stopping,
+restarting or removing that active instance during candidate test activation.
+The retained process verifies its unit, invocation, PID, executable digest and
+root-owned immutable unit fragment. Its private root-only socket accepts status
+and heartbeat frames only from the broker. The broker exposes those calls only
+to the same requester through an active remote user session on the enrolled
+`ssh-development` management channel. Restart reconciliation resumes recovery
+from the durable guard ledger;
+it never replays activation or an old challenge.
 
 Fresh development image instrumentation records the actual installed root guard
 preflight in a protected RAM file. The registered `installed-guard` observer
@@ -57,10 +68,13 @@ starts the model to make a health observation pass.
 The opaque native health capability compares previously active and failed units
 separately: a pre-existing failure can remain, but a new failure or disappearance
 of a previously active protected unit fails. Fresh comparisons expire after one
-second. Core bus/mount/SSH availability does not prove product API, user-service,
-action postcondition or authenticated host heartbeat health; those remain
-explicitly unverified and cannot authorize activation. The reader is based on
-the pinned [systemd D-Bus interface](https://github.com/systemd/systemd/blob/v260/man/org.freedesktop.systemd1.xml)
+second. The runtime adapter additionally requires live Executor1 and private
+graph-status responses, exact hashes for every baseline and candidate user
+service selected at intake, and typed action postconditions. A fresh
+transaction-specific heartbeat must pass the broker's independently rechecked
+remote-session and enrolled-management-channel authority gate before commit.
+Missing, malformed or indeterminate runtime evidence fails closed.
+The system evidence reader is based on the pinned [systemd D-Bus interface](https://github.com/systemd/systemd/blob/v260/man/org.freedesktop.systemd1.xml)
 and NixOS [system closure layout](https://github.com/NixOS/nixpkgs/blob/774debe7a0d1b496e35677ad955a1011c6ff74f3/nixos/modules/system/activation/top-level.nix).
 
 ## Plan and ledger contract
@@ -117,6 +131,16 @@ identity, authority and artifact checks at the privileged operation boundary.
    `RECOVERY_REQUIRED`. A restarted controller recovers rather than replaying an
    uncertain activation or restoring a lost challenge.
 
+After a system transaction reaches its durable terminal state, disarming the
+guard records the active system profile as a root-owned GC root. A
+successful commit retains the verified candidate; rollback retains the exact
+prior profile instead. Repeated retention of the same closure refreshes one
+entry rather than consuming the bounded history. The configured
+`services.aios.transactions.keepKnownGoodGenerations` limit keeps the newest
+distinct profiles and rejects malformed or foreign entries instead of deleting
+them. Active transaction roots remain separate and are removed only after this
+known-good root is durable.
+
 Kernel, initrd or boot adapter changes enter `AWAITING_REBOOT` without activation;
 they require a separate explicit reboot workflow. This userspace protocol cannot
 recover a hung kernel, failed disk or firmware fault.
@@ -128,10 +152,18 @@ adapter. It selects the exact approved closure's wrapped
 `switch-to-configuration test`, the retained Nix package's
 `nix-env --profile /nix/var/nix/profiles/system --set` with the approved closure,
 and that closure's `switch-to-configuration boot`. Recovery selects the
-separately recorded prior closures. The environment is cleared, including
-upstream activation bypass variables. Standard input and output are closed.
-No rebuild, mutable configuration path, arbitrary Nix expression or
-client-provided argv is accepted.
+separately recorded prior closures. After test or recovery activation, the
+adapter selects that closure's immutable `systemctl`, drops to each exact
+requester UID/primary GID with no supplementary groups, reloads the fixed user
+manager bus and restarts only the user units frozen in the plan. Candidate and
+baseline executable hashes are then observed independently. Every environment
+is cleared, including upstream activation bypass variables; standard input and
+output are closed. No rebuild, mutable configuration path, arbitrary Nix
+expression or client-provided argv is accepted.
+Each effect runs in a separate process group with a 60-second boot-clock bound.
+On timeout or clock failure the guard terminates the whole effect group before
+starting deterministic recovery; a blocked child cannot consume the guard's
+entire 180-second rollback deadline.
 
 The adapter targets Nixpkgs revision
 `774debe7a0d1b496e35677ad955a1011c6ff74f3`. Its interface is grounded in the pinned
@@ -143,8 +175,9 @@ and [activation implementation](https://github.com/NixOS/nixpkgs/blob/774debe7a0
 Rust tests use real SQLite files and a separate connection to witness durable
 intent, with simulated effects, clocks, identities and health observations. They
 cover commit order, controller crash, target drift, deadline/heartbeat failures,
-separate prior pointers, model-only recovery, schema corruption and effect
-failures. These tests establish library behavior, not live rollback.
+separate prior pointers, candidate-phase user executable hashes, model-only
+recovery, schema corruption, effect failures and restart completion of post-
+commit disarming. These tests establish library behavior, not live rollback.
 
 The registered guest smoke builds the Nix package and exercises the actual
 executable with explicitly labelled fixture plans. The following run through
@@ -156,10 +189,10 @@ python3 tools/devctl.py test --suite unit --detach --json
 python3 tools/devctl.py test --suite integration --provider guard-state --detach --json
 ```
 
-Live privileged activation remains unavailable. It requires secure frozen-plan
-intake and authorization, retained artifacts/GC roots, the root effect adapter,
-an independent retained guard process with real boot-time deadlines, authenticated
-management heartbeats, real system/user/API/action observations, boot-default
-proof and disposable activation/SSH-loss/guard-survival qualification. Production
-or developer deployment must not enable live activation on the strength of
-fixture success.
+The native path is wired end to end, but fixture success is not live activation
+qualification. Release evidence must exercise a disposable installed candidate:
+real test activation and exact profile/boot/managed commit; timeout or SSH-loss
+rollback to all prior pointers; retained-guard survival across candidate unit
+replacement; target identity, nonce and transaction binding; and the required
+failure injections. Production or developer deployment must not enable live
+activation without that evidence.

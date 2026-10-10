@@ -1,8 +1,10 @@
 //! Deterministic activation/recovery protocol. No client commands or shell API.
-//! The real root activation/health adapter is not yet qualified or enabled.
+//! The systemd-only runtime consumes a root-owned authorized broker handoff.
 pub mod activation;
 pub mod native;
 pub mod runtime;
+mod retention;
+pub mod service;
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -187,13 +189,30 @@ pub struct ApiHealth {
     pub uid: Option<u32>,
     pub healthy: bool,
 }
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ActionValidator {
+    DesktopCapability {
+        package_id: String,
+        binaries: Vec<String>,
+        desktop_ids: Vec<String>,
+    },
+    PostgresqlUnixReadiness,
+    PostgresqlStopped,
+    PowerProfileSupportedAndApplied {
+        profile_on_ac: String,
+        profile_on_battery: String,
+    },
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HealthPolicy {
     pub required_mounts: Vec<String>,
     pub baseline_units: Vec<UnitHealth>,
     pub required_apis: Vec<ApiHealth>,
+    pub baseline_user_units: Vec<UserUnit>,
     pub required_user_units: Vec<UserUnit>,
+    pub action_validators: Vec<ActionValidator>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -210,7 +229,30 @@ impl HealthPolicy {
         let mut mounts = BTreeSet::new();
         let mut units = BTreeSet::new();
         let mut apis = BTreeSet::new();
-        let mut users = BTreeSet::new();
+        let mut validators = BTreeSet::new();
+        let safe = |value: &str| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"._+-".contains(&byte))
+        };
+        let valid_user_units = |values: &[UserUnit]| {
+            let mut users = BTreeSet::new();
+            values.len() <= 16
+                && values.iter().all(|s| {
+                    s.uid > 0
+                        && matches!(
+                            s.name.as_str(),
+                            "aios-sessiond.service"
+                                | "aios-processd.service"
+                                | "aios-indexd.service"
+                                | "aios-ui-agent.service"
+                        )
+                        && valid_hash(&s.expected_executable_sha256)
+                        && users.insert((s.uid, s.name.as_str()))
+                })
+        };
         if self.required_mounts.len() > 6
             || !self.required_mounts.iter().all(|s| {
                 matches!(s.as_str(), "/" | "/nix" | "/var" | "/home" | "/boot") && mounts.insert(s)
@@ -227,15 +269,42 @@ impl HealthPolicy {
                     && (s.uid.is_some() == (s.api == Api::UserSession))
                     && apis.insert(format!("{:?}:{:?}", s.api, s.uid))
             })
-            || self.required_user_units.len() > 16
-            || !self.required_user_units.iter().all(|s| {
-                s.uid > 0
-                    && matches!(
-                        s.name.as_str(),
-                        "aios-sessiond.service" | "aios-indexd.service" | "aios-ui-agent.service"
-                    )
-                    && valid_hash(&s.expected_executable_sha256)
-                    && users.insert((s.uid, &s.name))
+            || !valid_user_units(&self.baseline_user_units)
+            || !valid_user_units(&self.required_user_units)
+            || self.baseline_user_units.len() != self.required_user_units.len()
+            || !self.baseline_user_units.iter().all(|baseline| {
+                self.required_user_units
+                    .iter()
+                    .any(|required| required.uid == baseline.uid && required.name == baseline.name)
+            })
+            || self.action_validators.len() > 32
+            || !self.action_validators.iter().all(|validator| {
+                let valid = match validator {
+                    ActionValidator::DesktopCapability {
+                        package_id,
+                        binaries,
+                        desktop_ids,
+                    } => {
+                        safe(package_id)
+                            && binaries.len() <= 32
+                            && desktop_ids.len() <= 32
+                            && binaries.iter().all(|value| safe(value) && !value.contains('/'))
+                            && desktop_ids.iter().all(|value| {
+                                safe(value) && value.ends_with(".desktop") && !value.contains('/')
+                            })
+                    }
+                    ActionValidator::PostgresqlUnixReadiness
+                    | ActionValidator::PostgresqlStopped => true,
+                    ActionValidator::PowerProfileSupportedAndApplied {
+                        profile_on_ac,
+                        profile_on_battery,
+                    } => [profile_on_ac.as_str(), profile_on_battery.as_str()]
+                        .iter()
+                        .all(|profile| {
+                            matches!(*profile, "balanced" | "power-saver" | "performance")
+                        }),
+                };
+                valid && validators.insert(validator)
             })
         {
             return Err(Error::InvalidPlan);
@@ -351,6 +420,7 @@ pub struct Observation {
     pub units: Vec<UnitHealth>,
     pub apis: Vec<ApiHealth>,
     pub user_units: Vec<UserUnit>,
+    pub validated_actions: Vec<ActionValidator>,
     pub retained_guard_sha256: Option<String>,
 }
 impl Observation {
@@ -369,6 +439,7 @@ impl Observation {
         let mut units = BTreeSet::new();
         let mut apis = BTreeSet::new();
         let mut users = BTreeSet::new();
+        let mut actions = BTreeSet::new();
         if !self.mounts.iter().all(|m| mounts.insert(m))
             || !self
                 .units
@@ -382,9 +453,22 @@ impl Observation {
                 .user_units
                 .iter()
                 .all(|u| users.insert((u.uid, &u.name)))
+            || !self.validated_actions.iter().all(|action| actions.insert(action))
         {
             return Err(Error::Health);
         }
+        let candidate_running = self.running
+            == match &plan.candidate {
+                Candidate::System { closure } => closure.path.as_str(),
+                Candidate::ModelOnly { .. } => plan.prior.running.path.as_str(),
+            };
+        let expected_user_units = if matches!(&plan.candidate, Candidate::System { .. })
+            && candidate_running
+        {
+            &plan.health.required_user_units
+        } else {
+            &plan.health.baseline_user_units
+        };
         if !self.system_bus
             || !plan
                 .health
@@ -401,11 +485,11 @@ impl Observation {
                 .required_apis
                 .iter()
                 .all(|required| self.apis.contains(required))
-            || !plan
-                .health
-                .required_user_units
+            || !expected_user_units
                 .iter()
                 .all(|required| self.user_units.contains(required))
+            || (candidate_running
+                && self.validated_actions != plan.health.action_validators)
         {
             return Err(Error::Health);
         }
@@ -435,13 +519,16 @@ impl Observation {
     fn tested(&self, plan: &Plan) -> bool {
         self.profile == plan.prior.profile.path
             && self.boot == plan.prior.boot.path
-            && self.managed_sha256 == plan.prior.managed_sha256
             && match &plan.candidate {
                 Candidate::System { closure } => {
-                    self.running == closure.path && self.model == plan.prior.model
+                    self.running == closure.path
+                        && self.managed_sha256 == plan.managed_sha256
+                        && self.model == plan.prior.model
                 }
                 Candidate::ModelOnly { artifact } => {
-                    self.running == plan.prior.running.path && self.model.as_ref() == Some(artifact)
+                    self.running == plan.prior.running.path
+                        && self.managed_sha256 == plan.prior.managed_sha256
+                        && self.model.as_ref() == Some(artifact)
                 }
             }
     }
@@ -967,11 +1054,7 @@ impl Engine {
                 Ok(value) => value.max(now),
                 Err(_) => return self.recover(ledger, adapter),
             };
-            if self.live(current).is_err()
-                || !self
-                    .heartbeat_at
-                    .is_some_and(|t| current.checked_sub(t).is_some_and(|age| age <= 5000))
-            {
+            if self.live(current).is_err() {
                 return self.recover(ledger, adapter);
             }
             if self
@@ -990,9 +1073,6 @@ impl Engine {
             Err(_) => return self.recover(ledger, adapter),
         };
         if self.live(current).is_err()
-            || !self
-                .heartbeat_at
-                .is_some_and(|t| current.checked_sub(t).is_some_and(|age| age <= 5000))
             || observation.health(&self.plan).is_err()
             || !observation.committed(&self.plan)
             || observation.retained_guard_sha256.as_ref() != Some(&self.plan.retained_guard_sha256)
@@ -1086,6 +1166,12 @@ impl Engine {
     pub fn reconcile<A: Adapter>(ledger: &mut Ledger, id: &str, adapter: &mut A) -> Result<State> {
         let plan = ledger.plan(id)?;
         let state = ledger.state(id)?;
+        if matches!(state, State::Committed | State::RolledBack) {
+            adapter.apply(&Effect::DisarmGuard {
+                transaction_id: plan.transaction_id.clone(),
+            })?;
+            return Ok(state);
+        }
         if state.terminal() || state == State::AwaitingReboot {
             return Ok(state);
         }

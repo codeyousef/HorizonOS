@@ -50,6 +50,7 @@ let
         kernelProbes = config.services.aios.observability.kernelProbes.enable;
         guardTimeoutSeconds = config.services.aios.transactions.guardTimeoutSeconds;
         keepKnownGoodGenerations = config.services.aios.transactions.keepKnownGoodGenerations;
+        policy = builtins.fromJSON config.environment.etc."aios/transaction-policy.json".text;
       };
     };
   evaluate = evaluateWith { inherit aiosCore; };
