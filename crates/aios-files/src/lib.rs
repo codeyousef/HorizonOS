@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     ffi::CString,
-    fs::{self, File},
+    fs::File,
     io::{Read, Seek, SeekFrom},
     mem::MaybeUninit,
     os::{fd::{AsRawFd, FromRawFd}, unix::fs::MetadataExt},
@@ -217,20 +217,34 @@ fn relative_valid(path: &Path) -> bool {
         && !secret(path) && path.components().all(|part| matches!(part,Component::Normal(_)))
 }
 
-fn parse_xdg(home: &Path) -> Vec<PathBuf> {
+fn xdg_configuration(home_fd: &File, uid: u32) -> Option<String> {
+    let file = openat2(home_fd.as_raw_fd(), Path::new(".config/user-dirs.dirs"),
+        nix::libc::O_RDONLY | nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK,
+        RESOLVE_BENEATH | RESOLVE_NO_XDEV | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_SYMLINKS).ok()?;
+    let before = identity(&file).ok()?;
+    if before.uid != uid || before.mode & nix::libc::S_IFMT != nix::libc::S_IFREG
+        || before.size > 16 * 1024 { return None; }
+    let mut bytes = Vec::new();
+    // Bound allocation even if a concurrently modified file grows after stat.
+    (&file).take(16 * 1024 + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > 16 * 1024 || identity(&file).ok()? != before { return None; }
+    String::from_utf8(bytes).ok()
+}
+
+fn parse_xdg(home: &Path, home_fd: &File, uid: u32) -> Vec<PathBuf> {
     let mut configured = HashMap::new();
-    if let Ok(text) = fs::read_to_string(home.join(".config/user-dirs.dirs")) {
-        if text.len() <= 16 * 1024 {
+    if let Some(text) = xdg_configuration(home_fd, uid) {
             for line in text.lines() {
                 let Some((key,quoted))=line.split_once('=') else {continue};
                 let key=match key{"XDG_DOCUMENTS_DIR"=>"XDG_DOCUMENTS_DIR","XDG_DOWNLOAD_DIR"=>"XDG_DOWNLOAD_DIR","XDG_DESKTOP_DIR"=>"XDG_DESKTOP_DIR",_=>continue};
                 if !quoted.starts_with('"') || !quoted.ends_with('"') {continue;}
                 let raw=&quoted[1..quoted.len()-1];
                 if raw.contains('\\') || raw.contains('`') || raw.contains("$(") {continue;}
-                let expanded=raw.strip_prefix("$HOME/").map(|rest|home.join(rest)).or_else(||(raw=="$HOME").then(||home.to_owned()));
+                let expanded=raw.strip_prefix("$HOME/").map(|rest|home.join(rest))
+                    .or_else(||(raw=="$HOME").then(||home.to_owned()))
+                    .or_else(||raw.starts_with('/').then(||PathBuf::from(raw)));
                 if let Some(path)=expanded { configured.insert(key,path); }
             }
-        }
     }
     [("XDG_DOCUMENTS_DIR","Documents"),("XDG_DOWNLOAD_DIR","Downloads"),("XDG_DESKTOP_DIR","Desktop")].into_iter()
         .map(|(key,fallback)|configured.remove(key).unwrap_or_else(||home.join(fallback))).collect()
@@ -244,11 +258,11 @@ fn absolute_clean(path:&Path)->bool{
 impl Manager {
     pub fn propose_xdg_roots(&mut self, owner: Owner, home: &Path, now_ms: u64) -> Result<Proposal> {
         if !owner_valid(&owner) || !absolute_clean(home) { return Err(ErrorCode::InvalidArgument); }
-        let (_home_fd,home_identity)=open_root(home)?;
+        let (home_fd,home_identity)=open_root(home)?;
         if home_identity.uid != owner.uid { return Err(ErrorCode::PermissionDenied); }
         let home=home.to_owned();
         let mut seen=HashSet::new();let mut roots=Vec::new();
-        for path in parse_xdg(&home) {
+        for path in parse_xdg(&home, &home_fd, owner.uid) {
             if !path.starts_with(&home) || path==home || secret(path.strip_prefix(&home).map_err(|_|ErrorCode::PermissionDenied)?) {continue;}
             let Ok((file,id))=open_root(&path) else {continue};
             if id.uid!=owner.uid || id.device!=home_identity.device || id.mount_id!=home_identity.mount_id {continue;}
@@ -267,7 +281,7 @@ impl Manager {
     pub fn enroll(&mut self, owner: &Owner, proposal_id: &str, approved: &[String], allowed_access: &[Access], now_ms: u64) -> Result<Vec<RootGrant>> {
         if approved.is_empty() || approved.len()>3 || approved.iter().collect::<HashSet<_>>().len()!=approved.len()
             || allowed_access.is_empty() || allowed_access.len()>3 || allowed_access.iter().copied().collect::<HashSet<_>>().len()!=allowed_access.len(){return Err(ErrorCode::InvalidArgument);}
-        let proposal=self.pending.remove(proposal_id).ok_or(ErrorCode::PermissionDenied)?;
+        let proposal=self.pending.get(proposal_id).ok_or(ErrorCode::PermissionDenied)?;
         if &proposal.owner!=owner{return Err(ErrorCode::PermissionDenied);}if now_ms>=proposal.expires{return Err(ErrorCode::ApprovalExpired);}
         if self.roots.len().checked_add(approved.len()).ok_or(ErrorCode::ResourceExhausted)?>MAX_ROOTS{return Err(ErrorCode::ResourceExhausted);}
         let expires=now_ms.checked_add(HANDLE_LIFETIME_MS).ok_or(ErrorCode::InvalidArgument)?;let mut prepared=Vec::new();
@@ -280,6 +294,9 @@ impl Manager {
             prepared.push((id.clone(),root,grant));
         }
         let mut result=Vec::with_capacity(prepared.len());
+        // Consume only after owner, expiry, exact selection and live identities
+        // pass. A foreign probe must not withdraw another client's proposal.
+        self.pending.remove(proposal_id);
         for (id,root,grant) in prepared{self.roots.insert(id,root);result.push(grant);}
         Ok(result)
     }
@@ -354,7 +371,7 @@ impl Manager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::Write, os::unix::fs::{PermissionsExt,symlink}};
+    use std::{fs, io::Write, os::unix::fs::{PermissionsExt,symlink}};
 
     fn setup()->(tempfile::TempDir,Owner,Manager,Proposal){
         let temp=tempfile::tempdir().unwrap();let home=temp.path();fs::create_dir(home.join("Documents")).unwrap();fs::create_dir(home.join("Downloads")).unwrap();
@@ -417,6 +434,38 @@ mod tests {
             assert!(manager.active_roots(&foreign,103).is_empty());
         }
         assert_eq!(manager.read(&owner,&handle.file_handle,32,104).unwrap(),b"safe text");
+    }
+
+    #[test]
+    fn xdg_configuration_is_bounded_descriptor_relative_and_never_follows_links(){
+        let (temp,owner,mut manager,_)=setup();let home=temp.path();
+        fs::create_dir(home.join(".config")).unwrap();fs::create_dir(home.join("Work")).unwrap();
+        let config=home.join(".config/user-dirs.dirs");
+        fs::write(&config,format!("XDG_DOCUMENTS_DIR=\"{}\"\nXDG_DOWNLOAD_DIR=\"$HOME\"\n",home.join("Work").display())).unwrap();
+        let proposal=manager.propose_xdg_roots(owner.clone(),home,110).unwrap();
+        assert_eq!(proposal.roots.len(),1);assert!(proposal.roots[0].display_path.ends_with("Work"));
+        let (fd,_)=open_root(home).unwrap();
+        fs::remove_file(&config).unwrap();symlink(home.join("Documents/note.txt"),&config).unwrap();
+        assert!(xdg_configuration(&fd,owner.uid).is_none());
+        fs::remove_file(&config).unwrap();fs::write(&config,vec![b'x';16*1024+1]).unwrap();
+        assert!(xdg_configuration(&fd,owner.uid).is_none());
+        fs::remove_file(&config).unwrap();
+        let name=CString::new(config.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: live NUL-terminated name, fixed permission bits; creates only
+        // the owned fixture FIFO. Discovery must refuse without blocking on it.
+        assert_eq!(unsafe{nix::libc::mkfifo(name.as_ptr(),0o600)},0);
+        assert!(xdg_configuration(&fd,owner.uid).is_none());
+    }
+
+    #[test]
+    fn foreign_enrollment_probe_does_not_consume_the_owners_proposal(){
+        let (_temp,owner,mut manager,proposal)=setup();
+        let id=proposal.roots[0].root_id.clone();
+        let mut foreign=owner.clone();foreign.client_binding_sha256="b".repeat(64);
+        assert_eq!(manager.enroll(&foreign,&proposal.proposal_id,&[id.clone()],&[Access::Content],101),Err(ErrorCode::PermissionDenied));
+        let roots=manager.enroll(&owner,&proposal.proposal_id,&[id.clone()],&[Access::Content],102).unwrap();
+        assert_eq!(roots[0].root_id,id);
+        assert_eq!(manager.enroll(&owner,&proposal.proposal_id,&[id],&[Access::Content],103),Err(ErrorCode::PermissionDenied));
     }
 
     #[test]
