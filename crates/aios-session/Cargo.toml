@@ -18,6 +18,7 @@ path = "src/process_main.rs"
 
 [dependencies]
 aios-protocol = { path = "../aios-protocol" }
+aios-files = { path = "../aios-files" }
 aios-policy = { path = "../aios-policy" }
 aios-system = { path = "../aios-system" }
 serde = { version = "1.0", features = ["derive"] }

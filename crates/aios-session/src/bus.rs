@@ -1,8 +1,9 @@
 //! Public session control. The bus, never request JSON, supplies the subject.
 use crate::{Operation, Request, SharedState, identity::{self, Peer}, parse_operation};
 use aios_protocol::{MAX_TASK_BYTES, contracts::ErrorCode};
+use serde::Deserialize;
 use serde_json::Value;
-use std::{collections::HashMap,fmt,sync::{Arc,Mutex,atomic::{AtomicUsize,Ordering}},time::{Duration,Instant}};
+use std::{collections::HashMap,fmt,path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicUsize,Ordering}},time::{Duration,Instant}};
 use zbus::{Connection, DBusError, Message, message::Header, names::ErrorName};
 
 pub const NAME: &str = "org.aios.Session1";
@@ -34,11 +35,35 @@ struct Admission(Arc<AtomicUsize>);
 impl Drop for Admission { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); } }
 
 #[derive(Clone)]
-pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,control_active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>>,processes:Arc<Mutex<HashMap<(String,String),ProcessConnection>>> }
+pub struct Agent { state:SharedState,active:Arc<AtomicUsize>,control_active:Arc<AtomicUsize>,ui:Arc<Mutex<HashMap<(String,String),UiConnection>>>,processes:Arc<Mutex<HashMap<(String,String),ProcessConnection>>>,files:Arc<Mutex<aios_files::Manager>> }
 struct UiConnection { peer:Peer,expires:Instant,client:Arc<crate::graphical::Connection> }
 struct ProcessConnection { peer:Peer,expires:u64,client:crate::process_selection::Connection,control:Arc<crate::process_control::Connection> }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrollRootsRequest { schema_version:u32,proposal_id:String,approved_root_ids:Vec<String>,allowed_access:Vec<aios_files::Access>,confirmed:bool }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenScopedRequest { schema_version:u32,root_id:String,relative_path:String,access:aios_files::Access }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HandleRequest { schema_version:u32,file_handle:String }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadScopedRequest { schema_version:u32,file_handle:String,max_bytes:usize }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RevokeRootRequest { schema_version:u32,root_id:String,confirmed:bool }
+fn file_owner(peer:&Peer)->aios_files::Owner{aios_files::Owner{uid:peer.uid,boot_id:peer.boot_id.clone(),session_id:peer.logind_session.clone()}}
+fn file_json(value:Value)->Result<String>{
+    let text=serde_json::to_string(&value).map_err(|_|ErrorCode::InvalidArgument)?;
+    if text.len()>aios_protocol::MAX_FRAME_BYTES{return Err(ErrorCode::ResourceExhausted.into());}Ok(text)
+}
+fn user_home(uid:u32)->std::result::Result<PathBuf,ErrorCode>{
+    nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid)).map_err(|_|ErrorCode::TargetChanged)?
+        .map(|user|user.dir).ok_or(ErrorCode::PermissionDenied)
+}
 impl Agent {
-    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),control_active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())),processes:Arc::new(Mutex::new(HashMap::new())) } }
+    pub fn new(state: SharedState) -> Self { Self { state,active:Arc::new(AtomicUsize::new(0)),control_active:Arc::new(AtomicUsize::new(0)),ui:Arc::new(Mutex::new(HashMap::new())),processes:Arc::new(Mutex::new(HashMap::new())),files:Arc::new(Mutex::new(aios_files::Manager::default())) } }
     fn admit(&self) -> Result<Admission> {
         if self.active.fetch_add(1, Ordering::AcqRel) >= 16 {
             self.active.fetch_sub(1, Ordering::AcqRel);
@@ -266,7 +291,13 @@ impl Agent {
         serde_json::to_string(&value).map_err(|_| ErrorCode::InvalidArgument.into())
     }
     async fn privacy_scopes(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
-        self.json(connection,header,Operation::PrivacyScopes).await
+        let mut value=self.dispatch(connection,header.clone(),Operation::PrivacyScopes).await?;
+        let peer=Self::peer(connection,&header).await?;let original=peer.clone();let agent=self.clone();
+        let roots=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+            Ok::<_,ErrorCode>(agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.active_roots(&file_owner(&original),now))}).await?;
+        if Self::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
+        value["data"]["file_roots"]=serde_json::to_value(roots).map_err(|_|ErrorCode::InvalidArgument)?;
+        file_json(value)
     }
     async fn list_history(&self, #[zbus(connection)] connection: &Connection, #[zbus(header)] header: Header<'_>) -> Result<String> {
         self.json(connection,header,Operation::ListHistory).await
@@ -346,8 +377,86 @@ macro_rules! surface {
         }
     }
 }
-surface!(Files,"org.aios.Files1",[(search,"files.search"),(metadata,"files.metadata"),(read,"files.read"),
-    (summarize,"files.summarize"),(copy,"files.copy"),(move_file,"files.move"),(trash,"files.trash"),(restore,"files.restore")]);
+pub struct Files{agent:Agent}
+#[zbus::interface(name="org.aios.Files1")]
+impl Files{
+    async fn get_capabilities(&self,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        self.agent.capabilities_for(connection,header,"org.aios.Files1",&["files.search","files.metadata","files.read","files.summarize","files.copy","files.move","files.trash","files.restore"]).await
+    }
+    async fn propose_roots(&self,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        let _admission=self.agent.admit()?;let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
+        let proposal=blocking::unblock(move||{identity::verify_peer(&original)?;let home=user_home(original.uid)?;let now=aios_policy::boottime_ms()?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.propose_xdg_roots(file_owner(&original),&home,now)}).await?;
+        if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
+        file_json(serde_json::json!({"schema_version":1,"operation":"file_roots_proposed","data":proposal,"mutation_performed":false}))
+    }
+    async fn enroll_roots(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        let _admission=self.agent.admit()?;if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
+        let request:EnrollRootsRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
+        if request.schema_version!=1||!request.confirmed||!crate::uuid(&request.proposal_id){return Err(ErrorCode::InvalidArgument.into());}
+        let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
+        let roots=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.enroll(&file_owner(&original),&request.proposal_id,&request.approved_root_ids,&request.allowed_access,now)}).await?;
+        if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
+        file_json(serde_json::json!({"schema_version":1,"operation":"file_roots_enrolled","data":{"roots":roots},"mutation_performed":true}))
+    }
+    async fn list_roots(&self,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        let _admission=self.agent.admit()?;let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
+        let roots=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+            Ok::<_,ErrorCode>(agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.active_roots(&file_owner(&original),now))}).await?;
+        if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
+        file_json(serde_json::json!({"schema_version":1,"operation":"file_roots","data":{"roots":roots},"mutation_performed":false}))
+    }
+    async fn open_scoped(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        let _admission=self.agent.admit()?;if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
+        let request:OpenScopedRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
+        if request.schema_version!=1||!crate::uuid(&request.root_id){return Err(ErrorCode::InvalidArgument.into());}
+        let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
+        let metadata=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.issue_handle(&file_owner(&original),&request.root_id,PathBuf::from(request.relative_path).as_path(),request.access,now)}).await?;
+        if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
+        file_json(serde_json::json!({"schema_version":1,"operation":"file_handle_issued","data":metadata,"mutation_performed":false}))
+    }
+    async fn scoped_metadata(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        let _admission=self.agent.admit()?;if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
+        let request:HandleRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
+        if request.schema_version!=1||!crate::uuid(&request.file_handle){return Err(ErrorCode::InvalidArgument.into());}
+        let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
+        let metadata=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.metadata(&file_owner(&original),&request.file_handle,now)}).await?;
+        if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
+        file_json(serde_json::json!({"schema_version":1,"operation":"file_metadata","data":metadata,"mutation_performed":false}))
+    }
+    async fn read_scoped(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        let _admission=self.agent.admit()?;if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
+        let request:ReadScopedRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
+        if request.schema_version!=1||!crate::uuid(&request.file_handle)||request.max_bytes>262_144{return Err(ErrorCode::InvalidArgument.into());}
+        let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();let handle=request.file_handle.clone();
+        let bytes=blocking::unblock(move||{identity::verify_peer(&original)?;let now=aios_policy::boottime_ms()?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.read(&file_owner(&original),&request.file_handle,request.max_bytes,now)}).await?;
+        let content=String::from_utf8(bytes).map_err(|_|ErrorCode::UnsupportedCapability)?;
+        if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
+        file_json(serde_json::json!({"schema_version":1,"operation":"file_read","data":{"file_handle":handle,"bytes_read":content.len(),"content":content},"mutation_performed":false}))
+    }
+    async fn revoke_root(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        let _admission=self.agent.admit()?;if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
+        let request:RevokeRootRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
+        if request.schema_version!=1||!request.confirmed||!crate::uuid(&request.root_id){return Err(ErrorCode::InvalidArgument.into());}
+        let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();
+        let receipt=blocking::unblock(move||{identity::verify_peer(&original)?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.revoke(&file_owner(&original),&request.root_id)}).await?;
+        if Agent::peer(connection,&header).await?!=peer{return Err(ErrorCode::TargetChanged.into());}
+        file_json(serde_json::json!({"schema_version":1,"operation":"file_root_revoked","data":receipt,"mutation_performed":true}))
+    }
+    async fn search(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{self.agent.action(connection,header,request_json,"files.search").await}
+    async fn metadata(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{self.agent.action(connection,header,request_json,"files.metadata").await}
+    async fn read(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{self.agent.action(connection,header,request_json,"files.read").await}
+    async fn summarize(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{self.agent.action(connection,header,request_json,"files.summarize").await}
+    async fn copy(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{self.agent.action(connection,header,request_json,"files.copy").await}
+    async fn move_file(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{self.agent.action(connection,header,request_json,"files.move").await}
+    async fn trash(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{self.agent.action(connection,header,request_json,"files.trash").await}
+    async fn restore(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{self.agent.action(connection,header,request_json,"files.restore").await}
+}
 surface!(Applications,"org.aios.Applications1",[(list,"apps.list"),(launch,"apps.launch"),(actions,"apps.actions"),(invoke,"apps.invoke")]);
 surface!(Settings,"org.aios.Settings1",[(get,"settings.get"),(set,"settings.set")]);
 surface!(Audio,"org.aios.Audio1",[(outputs,"audio.outputs"),(inputs,"audio.inputs"),(default_get,"audio.default_get"),

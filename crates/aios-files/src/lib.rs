@@ -27,7 +27,7 @@ pub struct Owner {
     pub session_id: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Access { Metadata, Content, Mutation }
 
@@ -50,6 +50,7 @@ pub struct RootGrant {
     pub root_id: String,
     pub display_path: String,
     pub identity_sha256: String,
+    pub allowed_access: Vec<Access>,
     pub expires_at_boottime_ms: u64,
 }
 
@@ -87,7 +88,7 @@ struct Identity {
 
 struct Candidate { root: ProposedRoot, path: PathBuf, identity: Identity }
 struct Pending { owner: Owner, expires: u64, roots: Vec<Candidate> }
-struct Root { owner: Owner, path: PathBuf, identity: Identity, identity_sha256: String, expires: u64, directory: File }
+struct Root { owner: Owner, path: PathBuf, identity: Identity, identity_sha256: String, allowed: HashSet<Access>, expires: u64, directory: File }
 struct Handle { owner: Owner, root_id: String, relative: String, identity: Identity, access: Access, expires: u64 }
 
 #[derive(Clone)]
@@ -201,7 +202,8 @@ fn parse_xdg(home: &Path) -> Vec<PathBuf> {
         if text.len() <= 16 * 1024 {
             for line in text.lines() {
                 let Some((key,quoted))=line.split_once('=') else {continue};
-                if !matches!(key,"XDG_DOCUMENTS_DIR"|"XDG_DOWNLOAD_DIR"|"XDG_DESKTOP_DIR") || !quoted.starts_with('"') || !quoted.ends_with('"') {continue;}
+                let key=match key{"XDG_DOCUMENTS_DIR"=>"XDG_DOCUMENTS_DIR","XDG_DOWNLOAD_DIR"=>"XDG_DOWNLOAD_DIR","XDG_DESKTOP_DIR"=>"XDG_DESKTOP_DIR",_=>continue};
+                if !quoted.starts_with('"') || !quoted.ends_with('"') {continue;}
                 let raw=&quoted[1..quoted.len()-1];
                 if raw.contains('\\') || raw.contains('`') || raw.contains("$(") {continue;}
                 let expanded=raw.strip_prefix("$HOME/").map(|rest|home.join(rest)).or_else(||(raw=="$HOME").then(||home.to_owned()));
@@ -236,8 +238,9 @@ impl Manager {
         self.pending.insert(proposal_id,Pending{owner,expires,roots});Ok(result)
     }
 
-    pub fn enroll(&mut self, owner: &Owner, proposal_id: &str, approved: &[String], now_ms: u64) -> Result<Vec<RootGrant>> {
-        if approved.is_empty() || approved.len()>3 || approved.iter().collect::<HashSet<_>>().len()!=approved.len(){return Err(ErrorCode::InvalidArgument);}
+    pub fn enroll(&mut self, owner: &Owner, proposal_id: &str, approved: &[String], allowed_access: &[Access], now_ms: u64) -> Result<Vec<RootGrant>> {
+        if approved.is_empty() || approved.len()>3 || approved.iter().collect::<HashSet<_>>().len()!=approved.len()
+            || allowed_access.is_empty() || allowed_access.len()>3 || allowed_access.iter().copied().collect::<HashSet<_>>().len()!=allowed_access.len(){return Err(ErrorCode::InvalidArgument);}
         let proposal=self.pending.remove(proposal_id).ok_or(ErrorCode::PermissionDenied)?;
         if &proposal.owner!=owner{return Err(ErrorCode::PermissionDenied);}if now_ms>=proposal.expires{return Err(ErrorCode::ApprovalExpired);}
         if self.roots.len().checked_add(approved.len()).ok_or(ErrorCode::ResourceExhausted)?>MAX_ROOTS{return Err(ErrorCode::ResourceExhausted);}
@@ -246,8 +249,8 @@ impl Manager {
             let candidate=proposal.roots.iter().find(|root|&root.root.root_id==id).ok_or(ErrorCode::PermissionDenied)?;
             let (directory,current)=open_root(&candidate.path)?;
             if current!=candidate.identity{return Err(ErrorCode::TargetChanged);}
-            let grant=RootGrant{root_id:id.clone(),display_path:candidate.root.display_path.clone(),identity_sha256:candidate.root.identity_sha256.clone(),expires_at_boottime_ms:expires};
-            let root=Root{owner:owner.clone(),path:candidate.path.clone(),identity:current,identity_sha256:grant.identity_sha256.clone(),expires,directory};
+            let grant=RootGrant{root_id:id.clone(),display_path:candidate.root.display_path.clone(),identity_sha256:candidate.root.identity_sha256.clone(),allowed_access:allowed_access.to_vec(),expires_at_boottime_ms:expires};
+            let root=Root{owner:owner.clone(),path:candidate.path.clone(),identity:current,identity_sha256:grant.identity_sha256.clone(),allowed:allowed_access.iter().copied().collect(),expires,directory};
             prepared.push((id.clone(),root,grant));
         }
         let mut result=Vec::with_capacity(prepared.len());
@@ -263,7 +266,7 @@ impl Manager {
 
     pub fn issue_handle(&mut self,owner:&Owner,root_id:&str,relative:&Path,access:Access,now_ms:u64)->Result<ScopedMetadata>{
         if !relative_valid(relative){return Err(ErrorCode::PermissionDenied);}if self.handles.len()>=MAX_HANDLES{return Err(ErrorCode::ResourceExhausted);}
-        let root=self.root(owner,root_id,now_ms)?;
+        let root=self.root(owner,root_id,now_ms)?;if !root.allowed.contains(&access){return Err(ErrorCode::PermissionDenied);}
         let file=openat2(root.directory.as_raw_fd(),relative,nix::libc::O_RDONLY|nix::libc::O_NOFOLLOW,
             RESOLVE_BENEATH|RESOLVE_NO_XDEV|RESOLVE_NO_MAGICLINKS|RESOLVE_NO_SYMLINKS)?;
         let id=identity(&file)?;if id.uid!=owner.uid || id.mode&nix::libc::S_IFMT!=nix::libc::S_IFREG{return Err(ErrorCode::PermissionDenied);}
@@ -318,7 +321,7 @@ impl Manager {
     }
 
     pub fn active_roots(&self,owner:&Owner,now_ms:u64)->Vec<RootGrant>{
-        self.roots.iter().filter(|(_,root)|&root.owner==owner&&now_ms<root.expires).map(|(id,root)|RootGrant{root_id:id.clone(),display_path:root.path.to_string_lossy().into_owned(),identity_sha256:root.identity_sha256.clone(),expires_at_boottime_ms:root.expires}).collect()
+        self.roots.iter().filter(|(_,root)|&root.owner==owner&&now_ms<root.expires).map(|(id,root)|{let mut allowed_access=root.allowed.iter().copied().collect::<Vec<_>>();allowed_access.sort_by_key(|access|match access{Access::Metadata=>0,Access::Content=>1,Access::Mutation=>2});RootGrant{root_id:id.clone(),display_path:root.path.to_string_lossy().into_owned(),identity_sha256:root.identity_sha256.clone(),allowed_access,expires_at_boottime_ms:root.expires}}).collect()
     }
 }
 
@@ -335,7 +338,7 @@ mod tests {
     }
     fn enroll()->(tempfile::TempDir,Owner,Manager,RootGrant){
         let (temp,owner,mut manager,proposal)=setup();let id=proposal.roots.iter().find(|root|root.display_path.ends_with("Documents")).unwrap().root_id.clone();
-        let grant=manager.enroll(&owner,&proposal.proposal_id,&[id],101).unwrap().remove(0);(temp,owner,manager,grant)
+        let grant=manager.enroll(&owner,&proposal.proposal_id,&[id],&[Access::Metadata,Access::Content,Access::Mutation],101).unwrap().remove(0);(temp,owner,manager,grant)
     }
 
     #[test]
