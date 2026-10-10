@@ -42,6 +42,9 @@ mod tests {
     #[test] fn output_proposals_cannot_gain_authority_or_references() {
         let request = request();
         assert!(request.parse_output(r#"{"kind":"answer","text":"observed","evidence_ids":["ev_one"]}"#).is_ok());
+        assert!(request.parse_output(r#"{"kind":"answer","text":"observed","evidence_ids":["ev_one"],"claims":[{"kind":"observed","evidence_id":"ev_one","json_pointer":"/bytes","expected":42,"statement":"42 bytes observed"},{"kind":"hypothesis","statement":"Cause remains unknown"},{"kind":"missing_evidence","statement":"No causation evidence"}]}"#).is_ok());
+        assert!(request.grammar().unwrap().contains("observed-claim"));
+        assert_eq!(request.parse_output(r#"{"kind":"answer","text":"unsupported","evidence_ids":["ev_one"],"claims":[{"kind":"observed","evidence_id":"ev_one","json_pointer":"file:///etc/shadow","expected":42,"statement":"forged locator"}]}"#),Err(ErrorCode::ModelOutputInvalid));
         assert_eq!(request.parse_output(r#"{"kind":"answer","text":"observed","evidence_ids":["ev_other"]}"#),Err(ErrorCode::StaleEvidence));
         assert_eq!(request.parse_output(r#"{"kind":"tool_call","action_id":"system.info","arguments":{}}"#),Err(ErrorCode::PermissionDenied));
         for raw in [

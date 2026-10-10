@@ -32,6 +32,11 @@
   it under the retained native guard and rolls back, then commits only that
   tested exact closure through a distinct nonce-bound transaction. Production
   evaluation excludes the helper, unit and sudo route.
+- Verify factual answers against request-scoped evidence before rendering.
+  Retrieval uses fixed provider, installed-documentation, authorized-file, then
+  separately authorized external ordering; stale versions, cross-scope IDs,
+  forged locators, unsupported external freshness, and mismatched structured
+  numeric claims fail closed. Rendered locators never carry execution authority.
 - Bind the independent guard's target identity and prior running, profile, and
   boot closures to the immutable prepared baseline. Activation now closes an
   intervening Nix profile generation or target change as a terminal rejection

@@ -17,6 +17,19 @@ authentication and action policy must be applied above framing; a parsed frame
 alone grants no authority. The normative action schemas are PRD sections 8, 10
 and 27. SQLite stores scoped observations/evidence and a separate durable ledger.
 
+Factual retrieval is protocol-owned and ordered: fresh typed-provider evidence,
+documentation bound to the current installed closure and document digest,
+authorized file handles bound to current content digests and exact ranges, then
+an optional explicitly authorized HTTPS adapter. The default has no external
+adapter or credential input; a request that needs fresh external facts returns
+`NETWORK_REQUIRED`. Evidence records are request-scoped and complete. Before an
+answer is returned, deterministic code resolves every cited ID, rechecks source
+freshness/version/scope, and compares observed scalar claims to their structured
+JSON values. Hypotheses and missing evidence remain explicitly distinct.
+Rendered locators are inert provenance (`executable_uri=false`,
+`execution_authority=false`); model text cannot select a viewer, URI, handle,
+policy, or effect.
+
 Reviewed base modules own hardware/users/storage/SSH/security. A fixed locked
 template imports allowlisted managed JSON for supported declarative changes.
 User settings have scoped receipts. The model never edits Nix expressions, locks,
