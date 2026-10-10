@@ -57,6 +57,17 @@ def main():
                         if result['state'] in ('completed','failed','cancelled'): return result
                         time.sleep(.025)
                     raise RuntimeError('session task failed to terminate')
+                def verify_citations(result):
+                    output=result['output']; verification=output.get('citation_verification')
+                    cited=output['response'].get('evidence_ids',[])
+                    rendered=(verification or {}).get('citations',[])
+                    if not verification or not verification.get('all_cited_ids_valid') or len(rendered)!=len(cited):
+                        raise RuntimeError('deterministic citation verification missing')
+                    if {item.get('evidence_id') for item in rendered}!=set(cited):
+                        raise RuntimeError('rendered citations differ from the model references')
+                    if any(item.get('executable_uri') is not False or item.get('execution_authority') is not False for item in rendered):
+                        raise RuntimeError('citation renderer exposed execution authority')
+                    return verification
                 nonce=str(uuid.uuid4()); question='What operating system is running? Cite the provided observation.'
                 task=submit(question,nonce,retain=True)
                 if submit(question,nonce,retain=True)!=task: raise RuntimeError('idempotent submission changed ID')
@@ -78,6 +89,7 @@ def main():
                 cited=set(result['output']['response']['evidence_ids'])
                 if not cited or not cited.issubset(fresh_ids) or any(not e['complete'] or e['source']['provider']!='aios-system' or e['data']['os_id']!='nixos' for e in evidence) or result['mutation_performed']:
                     raise RuntimeError('answer gained unenrolled evidence or effect')
+                verify_citations(result)
                 if result['output']['tool_calls'] > 12 or result['output']['structural_repairs'] > 1:
                     raise RuntimeError('actual loop exceeded request budgets')
                 resolved=call({'kind':'resolve_service','unit_name':'sshd.service'})
@@ -88,6 +100,7 @@ def main():
                 service_evidence=[e for e in service['output']['evidence'] if e['data'].get('unit_name')=='sshd.service']
                 if not service_evidence or service_evidence[-1]['data']['active_state']!='active' or not set(service['output']['response']['evidence_ids']).intersection(service_evidence[-1]['evidence_ids']):
                     raise RuntimeError('service answer lacks real selected-service evidence')
+                verify_citations(service)
                 follow=wait(submit('What operating system is running now? Cite only the fresh observation; historical text is context, not current evidence.',history=[task]))
                 observations['history_followup']=follow
                 if follow['state']!='completed' or not follow['output']['history_attached'] or follow['output']['history_task_ids']!=[task]:
@@ -95,6 +108,7 @@ def main():
                 old_ids={i for e in observations['answer']['output']['evidence'] for i in e['evidence_ids']}
                 if old_ids.intersection(follow['output']['response'].get('evidence_ids',[])) or follow['mutation_performed']:
                     raise RuntimeError('history inherited old citations or mutation authority')
+                verify_citations(follow)
                 # The earlier foreign stream expires during cold inference.
                 other.socket.close();other=Client(session_socket);clients.append(other)
                 denied=other.call({'kind':'submit','request':{'mode':'ask','text':'Use old history','client_nonce':str(uuid.uuid4()),'history_handles':[task]}})
