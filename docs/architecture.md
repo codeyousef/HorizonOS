@@ -29,6 +29,17 @@ JSON values. Hypotheses and missing evidence remain explicitly distinct.
 Rendered locators are inert provenance (`executable_uri=false`,
 `execution_authority=false`); model text cannot select a viewer, URI, handle,
 policy, or effect.
+Per-user file authority is descriptor-based. `aios-files` proposes only existing
+XDG Documents, Downloads and Desktop directories on the user's home mount, then
+requires an explicit confirmed enrollment with separate metadata, content and
+mutation access. Root and file identities bind UID, boot/logind session, mount,
+device, inode, metadata and finite expiry. Every access reopens through Linux
+`openat2` with beneath, no-symlink, no-magic-link and no-cross-mount resolution,
+then compares the live descriptor identity. Revocation removes roots and handles
+before purging derived chunks, previews and snippets; an index record never
+authorizes a stale read. Credential, key, wallet, environment-secret and AIOS
+private paths remain excluded even inside an enrolled root.
+
 
 Reviewed base modules own hardware/users/storage/SSH/security. A fixed locked
 template imports allowlisted managed JSON for supported declarative changes.

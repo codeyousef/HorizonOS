@@ -189,8 +189,9 @@ fn secret(relative: &Path) -> bool {
     relative.components().any(|component| {
         let Component::Normal(name) = component else { return true };
         let name = name.to_string_lossy().to_ascii_lowercase();
-        matches!(name.as_str(), ".ssh"|".gnupg"|".password-store"|"keyrings"|"credentials"|"secrets"|"wallet"|"wallets"|".aios"|"aios-private")
-            || name == ".env" || name.starts_with(".env.") || name.starts_with("id_rsa") || name.starts_with("id_ed25519")
+        matches!(name.as_str(), ".ssh"|".gnupg"|".password-store"|".aws"|".azure"|".kube"|".docker"|".mozilla"|".git-credentials"|".netrc"|".npmrc"|".pypirc"|
+            "keyrings"|"kwalletd"|"google-chrome"|"chromium"|"credentials"|"secrets"|"wallet"|"wallets"|".aios"|"aios-private")
+            || name.contains("password") || name == ".env" || name.starts_with(".env.") || name.starts_with("id_rsa") || name.starts_with("id_ed25519")
             || [".pem",".key",".p12",".pfx",".kdbx",".wallet"].iter().any(|suffix|name.ends_with(suffix))
     })
 }
@@ -357,7 +358,7 @@ mod tests {
         assert_eq!(manager.read(&owner,&handle.file_handle,32,103).unwrap(),b"safe text");
         let mut foreign=owner.clone();foreign.uid+=1;assert_eq!(manager.read(&foreign,&handle.file_handle,32,103),Err(ErrorCode::PermissionDenied));
         assert_eq!(manager.read(&owner,&handle.file_handle,32,handle.expires_at_boottime_ms),Err(ErrorCode::ApprovalExpired));
-        for path in [".ssh/id_rsa","project/.env","wallets/a.dat","cert.pem"]{assert_eq!(manager.issue_handle(&owner,&root.root_id,Path::new(path),Access::Content,104),Err(ErrorCode::PermissionDenied));}
+        for path in [".ssh/id_rsa","project/.env","wallets/a.dat","cert.pem",".mozilla/firefox/logins.json",".aws/credentials","passwords.txt"]{assert_eq!(manager.issue_handle(&owner,&root.root_id,Path::new(path),Access::Content,104),Err(ErrorCode::PermissionDenied));}
         let mut file=File::options().write(true).truncate(true).open(temp.path().join("Documents/note.txt")).unwrap();file.write_all(b"changed").unwrap();file.sync_all().unwrap();
         assert_eq!(manager.read(&owner,&handle.file_handle,32,105),Err(ErrorCode::TargetChanged));
     }

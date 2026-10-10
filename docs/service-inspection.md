@@ -81,20 +81,25 @@ the bus instance and unique sender; another connection cannot inherit it.
 The same bus owner exports `org.aios.Files1`, `org.aios.Applications1`,
 `org.aios.Settings1`, `org.aios.Audio1`, `org.aios.Power1` and `org.aios.UI1`
 at their corresponding `/org/aios/...` paths. The interfaces share the same
-16-call admission budget and caller authentication. Files exposes Search,
-Metadata, Read, Summarize, Copy, MoveFile, Trash and Restore; Applications
-exposes List, Launch, Actions and Invoke; Settings exposes Get and Set; Audio
-exposes Outputs, Inputs, DefaultGet, DefaultSet and MuteSet; Power exposes
-Status, ProfileSet and ConfirmProfileSet. Ordinary action methods take one
-versioned control request with `operation.kind=invoke` and a strict registry
-`tool_call`. The method fixes the permitted action ID: Search accepts only
-`files.search`, for example.
-Callers cannot choose another dispatch namespace through its JSON.
-GetCapabilities reports registered contracts separately from available actions.
-File and application providers currently report unavailable. Settings Get is
-available when at least one of the three registered keys has an authoritative
-pinned adapter. `desktop.theme_mode` reads only the Breeze Light/Dark
-`kdeglobals` color-scheme key, `display.idle_seconds` reads only the active
+16-call admission budget and caller authentication. Files exposes the registered
+Search, Metadata, Read, Summarize, Copy, MoveFile, Trash and Restore action
+methods. It also exposes deterministic scope-management methods: ProposeRoots,
+EnrollRoots, ListRoots, OpenScoped, ScopedMetadata, ReadScoped and RevokeRoot.
+Those methods accept only server-proposed XDG roots, require explicit confirmed
+access classes, issue opaque expiring handles and revalidate the live descriptor
+before every read. They do not accept absolute source paths or make an index hit
+into read authority. Applications exposes List, Launch, Actions and Invoke;
+Settings exposes Get and Set; Audio exposes Outputs, Inputs, DefaultGet and
+MuteSet; Power exposes Status, ProfileSet and ConfirmProfileSet. Ordinary action
+methods take one versioned control request with `operation.kind=invoke` and a
+strict registry `tool_call`. The method fixes the permitted action ID: Search
+accepts only `files.search`, for example. Callers cannot choose another dispatch
+namespace through its JSON. GetCapabilities reports registered contracts
+separately from available actions. File search/extraction and application
+providers remain unavailable; scope enrollment alone does not advertise them.
+Settings Get is available when at least one of the three registered keys has an
+authoritative pinned adapter. `desktop.theme_mode` reads only the Breeze
+Light/Dark `kdeglobals` color-scheme key, `display.idle_seconds` reads only the active
 PowerDevil profile's Plasma 6 display-idle key, and
 `keyboard.backlight_percent` reads the UPower KbdBacklight API. Missing files,
 keys, hardware or unrecognized values are unsupported. Audio inventory and
@@ -180,13 +185,15 @@ the fixed graph-owner socket and returns no graph database path or execution
 authority. These commands support `--json`, authenticate the root bus owner
 before and after each call, and invoke neither inference nor a shell.
 
-`aiosctl privacy scopes` reports only the authenticated client's live
-non-persistent broker scope: enrolled file roots, temporary service handles,
-retained-history count and active-task count. `aiosctl history list` returns
-metadata for that same originating client's eligible volatile history and never
-the prompt or answer text. A fresh CLI connection therefore receives an empty
-history rather than another local process's tasks. Both support `--json`, invoke
-no model and perform no mutation.
+`aiosctl privacy scopes` reports only the authenticated UID/logind session's
+live non-persistent broker scope: enrolled file roots, temporary service handles,
+retained-history count and active-task count. File roots and opaque file handles
+are boot/session bound and disappear when the broker restarts; reconnecting never
+restores an expired capability. `aiosctl history list` returns metadata for that
+same originating client's eligible volatile history and never the prompt or
+answer text. A fresh CLI connection therefore receives an empty history rather
+than another local process's tasks. Both support `--json`, invoke no model and
+perform no source-file mutation.
 
 Public `Submit` takes the same versioned control request used by the private
 transport, with `operation.kind=submit` and a typed `operation.request`. Other
