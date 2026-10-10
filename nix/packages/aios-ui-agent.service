@@ -1,5 +1,5 @@
 [Unit]
-Description=Horizon OS scoped native graphical provider
+Description=Minnerite scoped native graphical provider
 After=graphical-session.target dbus.socket
 Requisite=graphical-session.target
 PartOf=graphical-session.target

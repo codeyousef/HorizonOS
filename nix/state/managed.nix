@@ -29,13 +29,13 @@ let
   package = id: lib.getAttrFromPath (entry id).attribute pkgs;
 in {
   assertions = [
-    { assertion = valid; message = "AIOS managed data must be canonical, typed and bound to the installed catalog/template."; }
+    { assertion = valid; message = "Minnerite managed data must be canonical, typed and bound to the installed catalog/template."; }
     { assertion = installationStateVersion == "26.05" && config.system.stateVersion == installationStateVersion;
-      message = "AIOS managed updates preserve the installation stateVersion baseline."; }
+      message = "Minnerite managed updates preserve the installation stateVersion baseline."; }
     { assertion = config.services.openssh.enable && config.services.openssh.openFirewall;
-      message = "AIOS cannot disable the protected management transport."; }
+      message = "Minnerite cannot disable the protected management transport."; }
     { assertion = !(config.nixpkgs.config.allowUnfree or false);
-      message = "AIOS does not permit a broad allowUnfree override."; }
+      message = "Minnerite does not permit a broad allowUnfree override."; }
   ];
   environment.systemPackages = map package checked.system_packages;
   services.openssh = { enable = lib.mkDefault true; openFirewall = lib.mkDefault true; };

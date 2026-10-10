@@ -120,7 +120,7 @@ fn run(args: Vec<String>) {
             if command == "transaction"
                 && matches!(
                     operation.as_str(),
-                    "inspect" | "authorize" | "apply" | "rollback-plan"
+                    "inspect" | "authorize" | "apply" | "cancel" | "rollback-plan"
                 ) =>
         {
             Some((operation.as_str(), id.as_str(), false))
@@ -129,7 +129,7 @@ fn run(args: Vec<String>) {
             if command == "transaction"
                 && matches!(
                     operation.as_str(),
-                    "inspect" | "authorize" | "apply" | "rollback-plan"
+                    "inspect" | "authorize" | "apply" | "cancel" | "rollback-plan"
                 )
                 && flag == "--json" =>
         {
@@ -142,14 +142,18 @@ fn run(args: Vec<String>) {
             let client = native::ExecutorClient::connect()?;
             match operation {
                 "inspect" => client.transaction(id),
+                "cancel" => client.cancel(id),
                 "rollback-plan" => client.rollback_plan(id),
                 "authorize" | "apply" => {
                     let plan = client.plan(id)?;
                     let hash = plan["data"]["plan_sha256"]
                         .as_str()
                         .ok_or(aios_protocol::contracts::ErrorCode::TargetChanged)?;
-                    if operation == "authorize" {
-                        client.authorize(id, hash)
+                    let authorization = client.authorize(id, hash)?;
+                    if operation == "authorize"
+                        || authorization["data"]["status"].as_str() != Some("SYSTEM_AUTHORIZED")
+                    {
+                        Ok(authorization)
                     } else {
                         client.execute(id, hash)
                     }
@@ -365,7 +369,7 @@ fn run(args: Vec<String>) {
         if let Err(error) = result { eprintln!("aiosctl: {error}"); std::process::exit(1); }
         return;
     }
-    eprintln!("Usage: aiosctl status --json | ask [--mode read-only] TEXT [--json] | ask TEXT --json --service UNIT | plan TEXT [--json] | transaction inspect|authorize|apply|rollback-plan ID [--json] | automation list [--json] | package search QUERY [--json] | package info ID [--json] | graph status [--json] | privacy scopes [--json] | history list [--json] | model status [--json] | model unload [--json] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | process list --json | process terminate SESSION BOOT_UUID PID START_TICKS GOAL --json | system info --json | inspect service UNIT [--json] [--socket PRIVATE_PATH]");
+    eprintln!("Usage: aiosctl status --json | ask [--mode read-only] TEXT [--json] | ask TEXT --json --service UNIT | plan TEXT [--json] | transaction inspect|authorize|apply|cancel|rollback-plan ID [--json] | automation list [--json] | package search QUERY [--json] | package info ID [--json] | graph status [--json] | privacy scopes [--json] | history list [--json] | model status [--json] | model unload [--json] | ui select-session SESSION --json | ui read-window SESSION EXACT_TITLE GOAL --json | process list --json | process inspect PID START_TICKS [--json] | process terminate SESSION BOOT_ID PID START_TICKS START_TIME CLOCK_TICKS EXECUTABLE DEVICE INODE [--service UNIT] --json | session info --json | session activate SESSION --json | system logout SESSION BOOT_ID --json | system reboot|poweroff BOOT_ID --json | inspect service UNIT [--socket PATH] [--json]");
     std::process::exit(2);
 }
 

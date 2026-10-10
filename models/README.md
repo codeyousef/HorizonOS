@@ -1,4 +1,4 @@
-# Horizon OS model artifacts
+# Minnerite model artifacts
 
 The normal candidate is the official Qwen3.5-2B checkpoint converted locally
 to Q4_K_M. `source-lock.json` pins original file sizes and SHA-256 hashes, the

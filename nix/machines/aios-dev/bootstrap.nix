@@ -52,6 +52,6 @@ in {
     requires = [ "aios-bootstrap-identity.service" ];
     after = [ "aios-bootstrap-identity.service" ];
   };
-  # AIOS services and development deployment authority are not enabled here.
+  # Minnerite services and development deployment authority are not enabled here.
   # No desktop autologin, plaintext passwords, host secrets or host mounts.
 }

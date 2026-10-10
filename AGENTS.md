@@ -1,10 +1,10 @@
-# Horizon OS engineering workflow
+# Minnerite engineering workflow
 
 Read the linked Linear issue and latest comments before implementation. Linear
 holds private planning, blockers, requirement status and session handoffs. Keep
 tracked documentation about the product and its engineering contracts.
 
-The canonical specification is the Horizon OS PRD v1.0 in Linear. Preserve its
+The canonical specification is the Minnerite PRD v1.0 in Linear. Preserve its
 AIOS interface names. The fixed implementation is NixOS, Rust, Qt/KDE and local
 CPU inference. Read the relevant PRD sections before changing a subsystem.
 

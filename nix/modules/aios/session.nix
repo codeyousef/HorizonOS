@@ -12,7 +12,7 @@ in {
   config = lib.mkIf cfg.session.enable {
     assertions = [{
       assertion = core != null;
-      message = "Enabled Horizon OS user broker requires the reviewed aiosCore package.";
+      message = "Enabled Minnerite user broker requires the reviewed aiosCore package.";
     }];
     environment.systemPackages = lib.optional (core != null) core;
     systemd.packages = lib.optional (core != null) core;

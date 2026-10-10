@@ -2,7 +2,7 @@ use super::*;
 use std::{io::Write,os::unix::fs::{PermissionsExt,DirBuilderExt,symlink},sync::atomic::{AtomicU64,Ordering}};
 static NEXT:AtomicU64=AtomicU64::new(0);
 struct Temporary(std::path::PathBuf);
-impl Temporary {fn new()->Self{let path=std::env::temp_dir().join(format!("horizon-graph-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));fs::create_dir(&path).unwrap();fs::set_permissions(&path,fs::Permissions::from_mode(0o700)).unwrap();Self(path)}}
+impl Temporary {fn new()->Self{let path=std::env::temp_dir().join(format!("minnerite-graph-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));fs::create_dir(&path).unwrap();fs::set_permissions(&path,fs::Permissions::from_mode(0o700)).unwrap();Self(path)}}
 impl Drop for Temporary {fn drop(&mut self){fs::remove_dir_all(&self.0).unwrap();}}
 #[test] fn native_descriptor_storage_identity_observation(){
     let temp=Temporary::new();let file=OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(temp.0.join("owned")).unwrap();

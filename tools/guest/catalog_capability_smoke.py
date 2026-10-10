@@ -106,8 +106,8 @@ def qualify(reference, locked, pure, catalog, run, scratch):
                 for row in Path("/proc/net/" + protocol).read_text().splitlines()[1:]:
                     if row.split()[9] in inodes:
                         raise RuntimeError("Unix-only fixture unexpectedly owns a TCP socket")
-            run([*psql, "CREATE TABLE horizon_catalog_fixture (value integer); INSERT INTO horizon_catalog_fixture VALUES (17);"], timeout=5)
-            if run([*psql, "SELECT value FROM horizon_catalog_fixture;"], timeout=5).strip() != b"17":
+            run([*psql, "CREATE TABLE minnerite_catalog_fixture (value integer); INSERT INTO minnerite_catalog_fixture VALUES (17);"], timeout=5)
+            if run([*psql, "SELECT value FROM minnerite_catalog_fixture;"], timeout=5).strip() != b"17":
                 raise RuntimeError("PostgreSQL fixture failed actual query capability")
             result = {"package": str(postgres), "version_output": version, "fixture_uid": os.getuid(),
                 "fixture_user": owner, "probe": fixed_probe, "readiness_verified": True,

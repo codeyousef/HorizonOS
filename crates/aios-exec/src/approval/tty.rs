@@ -71,7 +71,9 @@ fn foreground_identity(pid: u32) -> Result<(i32, i32)> {
 fn open_terminal(caller: &VerifiedCaller) -> Result<File> {
     let identity = caller.identity();
     let session = identity.session.as_ref().ok_or_else(|| denied("missing-session"))?;
-    if identity.uid < 1000 || session.kind != "tty" || session.class != "user"
+    let eligible_session = session.kind == "tty"
+        || (!session.remote && matches!(session.kind.as_str(), "wayland" | "x11"));
+    if identity.uid < 1000 || !eligible_session || session.class != "user"
         || session.state != "active" || !session.active {
         return Err(denied("ineligible-session"));
     }
@@ -135,7 +137,7 @@ pub(super) fn confirm(bus: &SystemBus, caller: &VerifiedCaller, binding: &Bindin
     let mut terminal = open_terminal(caller)?;
     let rendered = display(&canonical);
     let phrase = expected("AUTHORIZE", &binding.plan_id);
-    terminal.write_all(b"\nHorizon OS trusted system approval\n")?;
+    terminal.write_all(b"\nMinnerite trusted system approval\n")?;
     terminal.write_all(&rendered)?;
     terminal.write_all(b"\nRecovery is limited exactly as shown above. Polkit administrator authentication follows.\n")?;
     terminal.write_all(format!("Type `{phrase}` to continue, or press Enter to cancel:\n> ").as_bytes())?;
@@ -167,7 +169,7 @@ pub(super) fn confirm_resource(
     let mut terminal = open_terminal(caller)?;
     let rendered = display(&canonical);
     let phrase = expected("BUILD", plan_id);
-    terminal.write_all(b"\nHorizon OS candidate build approval\n")?;
+    terminal.write_all(b"\nMinnerite candidate build approval\n")?;
     terminal.write_all(&rendered)?;
     terminal.write_all(b"\nThis permits only the resource limits and cache shown above; it does not permit activation.\n")?;
     terminal.write_all(format!("Type `{phrase}` to build, or press Enter to cancel:\n> ").as_bytes())?;

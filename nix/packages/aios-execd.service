@@ -1,5 +1,5 @@
 [Unit]
-Description=Horizon OS authenticated plan executor
+Description=Minnerite authenticated plan executor
 After=dbus.service polkit.service aios-bootstrap-identity.service
 Requires=dbus.service
 StartLimitIntervalSec=60

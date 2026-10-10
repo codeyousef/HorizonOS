@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
     if (argc!=1 || geteuid()==0 || getsockopt(0,SOL_SOCKET,SO_PEERCRED,&peer,&size)!=0 || peer.uid!=geteuid() || peer.pid!=getppid() || peer.pid<=1) return 2;
     if (fcntl(0,F_SETFL,fcntl(0,F_GETFL)|O_NONBLOCK)<0) return 2;
     QApplication app(argc,argv);
-    app.setApplicationName("Horizon OS confirmation");
+    app.setApplicationName("Minnerite confirmation");
     app.setDesktopFileName("org.aios.Confirmation");
     app.setQuitOnLastWindowClosed(false);
     QByteArray input; std::unique_ptr<ScopeDialog> dialog;

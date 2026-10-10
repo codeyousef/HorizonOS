@@ -148,7 +148,7 @@ def prepare_case(owner, directory, case, run_id, manifest, digest, contents, med
     # represented as the canonical source HEAD in qualification reports.
     provision.run(["git", "-C", str(directory), "init", "-q"])
     provision.run(["git", "-C", str(directory), "add", "."])
-    provision.run(["git", "-C", str(directory), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=AIOS Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Public disposable source fixture"])
+    provision.run(["git", "-C", str(directory), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Minnerite Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Public disposable source fixture"])
     values = {**owner.values, "ssh_host": "127.0.0.1", "ssh_port": free_port(), "vcpus": 2, "memory_mib": 2048, "disk_gib": 8}
     for field in ("guest_uuid", "installation_uuid", "guest_role"):
         values.pop(field, None)

@@ -1,5 +1,5 @@
 [Unit]
-Description=Horizon OS isolated CPU inference
+Description=Minnerite isolated CPU inference
 Requires=aios-model.socket
 After=aios-model.socket
 StartLimitIntervalSec=60

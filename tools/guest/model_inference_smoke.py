@@ -34,7 +34,7 @@ def main():
     forbidden = re.compile(r'-(?:python[0-9.]*|torch|pytorch|cuda[^/]*|cudatoolkit|rocm[^/]*|vulkan-loader|opencl[^/]*)-')
     if any(forbidden.search(path) for path in paths):
         raise RuntimeError('forbidden inference runtime dependency')
-    bridges = [Path(path) for path in paths if re.search(r'-horizon-os-llama-bridge-',path)]
+    bridges = [Path(path) for path in paths if re.search(r'-minnerite-llama-bridge-',path)]
     if len(bridges) != 1:
         raise RuntimeError('unexpected native runtime identity')
     native = bridges[0] / 'lib/libaios-llama-bridge.so'

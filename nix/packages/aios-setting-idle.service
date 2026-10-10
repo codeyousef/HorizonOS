@@ -1,5 +1,5 @@
 [Unit]
-Description=Apply one registered PowerDevil idle setting for AIOS
+Description=Apply one registered PowerDevil idle setting for Minnerite
 
 [Service]
 Type=oneshot

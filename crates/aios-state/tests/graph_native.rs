@@ -127,6 +127,10 @@ fn real_system_pointers_are_separate_and_do_not_infer_boot_or_management() {
     assert_eq!(pointers.running_closure,fs::canonicalize("/run/current-system").unwrap().to_str().unwrap());
     assert_eq!(pointers.selected_profile_closure.as_deref(),fs::canonicalize("/nix/var/nix/profiles/system").ok().as_ref().and_then(|p|p.to_str()));
     assert_eq!(pointers.bootloader_entry,None);assert_eq!(pointers.managed_transaction,None);
+    assert!(pointers.profile_generations.iter().all(|generation| {
+        generation.ownership == "unmanaged_system_profile"
+            && generation.management_attribution.is_none()
+    }));
     let states=snapshot.apply(&store).unwrap();assert_eq!(states.0.status,ProviderStatus::Ready);
     assert_eq!(states.1.status,if pointers.selected_profile_generation.is_some(){ProviderStatus::Ready}else{ProviderStatus::Partial});
     let rows=store.nodes(vec!["generation:running-system".into(),"generation:selected-system-profile".into()]).unwrap();
@@ -174,7 +178,7 @@ fn actual_profile_generations_reconcile_without_overwriting_native_or_intended_s
     assert!(fs::read_to_string("/etc/os-release").unwrap().lines().any(|l|l=="ID=nixos"));
     assert_eq!(fs::read_to_string("/etc/aios/guest-role").unwrap().trim(),"development");
     let uid=unsafe{libc::geteuid()};assert!(uid>=1000);let scope=Scope::User(uid);
-    let initial_time=time();let directory=std::env::temp_dir().join(format!("horizon-native-graph-{}-{}",std::process::id(),initial_time.monotonic_ns));
+    let initial_time=time();let directory=std::env::temp_dir().join(format!("minnerite-native-graph-{}-{}",std::process::id(),initial_time.monotonic_ns));
     fs::create_dir(&directory).unwrap();fs::set_permissions(&directory,fs::Permissions::from_mode(0o700)).unwrap();let fixture=Fixture(directory);
     let graph=fixture.0.join("graph");fs::create_dir(&graph).unwrap();fs::set_permissions(&graph,fs::Permissions::from_mode(0o700)).unwrap();let profile=fixture.0.join("profile");
     let installed=fs::canonicalize("/run/current-system").unwrap();let software=fs::canonicalize("/run/current-system/sw").unwrap();assert_ne!(installed,software);
@@ -211,7 +215,7 @@ impl Drop for OwnedChild{fn drop(&mut self){if self.0.try_wait().unwrap().is_non
 fn process_fixture()->(Fixture,u32){
     assert!(fs::read_to_string("/etc/os-release").unwrap().lines().any(|l|l=="ID=nixos"));assert_eq!(fs::read_to_string("/etc/aios/guest-role").unwrap().trim(),"development");
     let uid=unsafe{libc::geteuid()};assert!(uid>=1000);
-    let path=std::env::temp_dir().join(format!("horizon-native-process-{}-{}",std::process::id(),time().monotonic_ns));
+    let path=std::env::temp_dir().join(format!("minnerite-native-process-{}-{}",std::process::id(),time().monotonic_ns));
     fs::create_dir(&path).unwrap();fs::set_permissions(&path,fs::Permissions::from_mode(0o700)).unwrap();(Fixture(path),uid)
 }
 fn observed_process_snapshot(store:&GraphStore)->(aios_state::graph::native::NativeProcessSnapshot,String){

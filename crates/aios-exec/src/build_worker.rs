@@ -513,10 +513,10 @@ fn serve(mut stream: UnixStream, uid: u32) -> Result<()> {
             schema_version,
             request_id,
         } if schema_version == 1 && uuid(&request_id) => json!({
+            "schema_version": 1,
+            "request_id": request_id,
             "ok": true,
             "data": {
-                "schema_version": 1,
-                "request_id": request_id,
                 "uid": uid,
                 "candidate_build_authority": true,
                 "activation_authority": false,
@@ -548,14 +548,39 @@ fn serve(mut stream: UnixStream, uid: u32) -> Result<()> {
             recovery_reserve_bytes,
             &approved_cache,
         ) {
-            Ok(result) => {
-                json!({"ok": true, "data": {"schema_version": 1, "request_id": request_id, "build": result}})
-            }
-            Err(error) => json!({"ok": false, "error": format!("{error:?}")}),
+            Ok(build) => json!({
+                "schema_version": 1,
+                "request_id": request_id,
+                "ok": true,
+                "build": build
+            }),
+            Err(error) => json!({
+                "schema_version": 1,
+                "request_id": request_id,
+                "ok": false,
+                "error": format!("{error:?}")
+            }),
         },
-        _ => json!({"ok": false, "error": "INVALID_REQUEST"}),
+        _ => json!({
+            "schema_version": 1,
+            "request_id": null,
+            "ok": false,
+            "error": "INVALID_REQUEST"
+        }),
     };
     frame_write(&mut stream, &reply)
+}
+
+/// A capability proving that the authenticated single-flight worker returned a
+/// complete failure response for this request. It carries no caller-controlled
+/// error text and cannot be constructed outside this module.
+pub(crate) struct VerifiedWorkerFailure {
+    _private: (),
+}
+
+pub(crate) enum WorkerCompletion {
+    Built(VerifiedWorkerBuild),
+    Failed(VerifiedWorkerFailure),
 }
 
 /// Non-serializable capability returned only after the root broker has
@@ -572,16 +597,11 @@ impl VerifiedWorkerBuild {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BuildReply {
-    ok: bool,
-    data: Option<BuildReplyData>,
-    error: Option<String>,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BuildReplyData {
     schema_version: u32,
     request_id: String,
-    build: BuildResult,
+    ok: bool,
+    build: Option<BuildResult>,
+    error: Option<String>,
 }
 
 fn worker_identity(stream: &UnixStream, uid: u32) -> Result<libc::ucred> {
@@ -649,8 +669,8 @@ fn retained_root(path: &str, expected: &str, uid: u32, suffix: &str) -> Result<(
 pub(crate) fn supervise(
     plan: &PreparedPlan,
     permission: &ResourcePermission,
-) -> crate::Result<VerifiedWorkerBuild> {
-    let run = || -> Result<VerifiedWorkerBuild> {
+) -> crate::Result<WorkerCompletion> {
+    let run = || -> Result<WorkerCompletion> {
         plan.validate().map_err(|_| Error::Invalid)?;
         let candidate = CandidateStore::registered(&plan.candidate_sha256)
             .map_err(|_| Error::Candidate)?;
@@ -680,17 +700,13 @@ pub(crate) fn supervise(
         frame_write(&mut stream, &request)?;
         let bytes = frame_read(&mut stream, MAX_REPLY)?;
         let reply: BuildReply = serde_json::from_slice(&bytes).map_err(|_| Error::Invalid)?;
-        let data = reply.data.ok_or(Error::Build {
-            stderr_sha256: sha256(reply.error.as_deref().unwrap_or("WORKER_FAILED").as_bytes()),
-            stderr_tail: "worker refused fixed build request".into(),
-        })?;
-        if !reply.ok || reply.error.is_some() || data.schema_version != 1
-            || data.request_id != request_id {
+        if reply.schema_version != 1 || reply.request_id != request_id {
             return Err(Error::Integrity);
         }
         let rechecked_peer = worker_identity(&stream, uid)?;
         if (rechecked_peer.pid, rechecked_peer.uid, rechecked_peer.gid)
-            != (peer.pid, peer.uid, peer.gid) {
+            != (peer.pid, peer.uid, peer.gid)
+        {
             return Err(Error::TargetChanged);
         }
         let rechecked = CandidateStore::registered(&plan.candidate_sha256)
@@ -698,7 +714,18 @@ pub(crate) fn supervise(
         if rechecked.manifest() != candidate.manifest() {
             return Err(Error::TargetChanged);
         }
-        let result = data.build;
+        if !reply.ok {
+            if reply.build.is_some() || reply.error.as_deref().is_none_or(str::is_empty) {
+                return Err(Error::Integrity);
+            }
+            return Ok(WorkerCompletion::Failed(VerifiedWorkerFailure {
+                _private: (),
+            }));
+        }
+        if reply.error.is_some() {
+            return Err(Error::Integrity);
+        }
+        let result = reply.build.ok_or(Error::Integrity)?;
         retained_root(
             &result.prior_gc_root, &plan.baseline.running_closure, uid,
             &format!("{}-prior", plan.plan_id))?;
@@ -715,7 +742,7 @@ pub(crate) fn supervise(
             nar_bytes: result.nar_bytes,
             measured_download_bytes: result.measured_download_bytes,
         };
-        Ok(VerifiedWorkerBuild { result })
+        Ok(WorkerCompletion::Built(VerifiedWorkerBuild { result }))
     };
     run().map_err(|error| match error {
         Error::TargetChanged | Error::Baseline => crate::Error::TargetChanged,

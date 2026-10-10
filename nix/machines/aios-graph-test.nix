@@ -24,7 +24,7 @@ in {
   # No boot link or RPC. Only the fixed coordinator starts this exact command;
   # systemd supplies native dev credentials before executing the store binary.
   systemd.services.aios-graph-denied-probe = {
-    description = "Horizon OS fixed normal UID graph denial probe";
+    description = "Minnerite fixed normal UID graph denial probe";
     serviceConfig = {
       Type = "oneshot"; User = "dev"; Group = config.users.users.dev.group;
       ExecStart = "${aiosState}/bin/aios-stated --inspect";
@@ -37,7 +37,7 @@ in {
     };
   };
   systemd.services.aios-graph-acceptance = {
-    description = "Horizon OS fixed initial installed graph qualification";
+    description = "Minnerite fixed initial installed graph qualification";
     wantedBy = [ "multi-user.target" ];
     after = [ "aios-state.service" "sshd.service" "user@1001.service" ];
     path = [ pkgs.systemd pkgs.procps ];

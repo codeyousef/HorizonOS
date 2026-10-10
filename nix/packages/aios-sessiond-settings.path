@@ -1,5 +1,5 @@
 [Unit]
-Description=Watch registered desktop settings for AIOS
+Description=Watch registered desktop settings for Minnerite
 ConditionUser=!root
 
 [Path]

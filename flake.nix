@@ -1,5 +1,5 @@
 {
-  description = "Horizon OS: deterministic AIOS control plane on NixOS";
+  description = "Minnerite deterministic local control plane on NixOS";
 
   # Exact revision/NAR hash are pinned in the guest-generated flake.lock.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
@@ -87,6 +87,10 @@
       guard = (productPackage "aios-guard" "aios-guard" "aios-guard").overrideAttrs (old: {
         nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
         buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
+        postInstall = (old.postInstall or "") + ''
+          install -Dm644 ${./nix/packages/aios-guard-template.service} "$out/lib/systemd/system/aios-guard@.service"
+          substituteInPlace "$out/lib/systemd/system/aios-guard@.service" --replace-fail @EXECUTABLE@ "$out/bin/aios-guard"
+        '';
       });
       executor = (productPackage "aios-exec" "aios-exec" "aios-execd").overrideAttrs (old: {
         AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";

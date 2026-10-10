@@ -1,5 +1,5 @@
 [Unit]
-Description=Horizon OS authenticated local inference socket
+Description=Minnerite authenticated local inference socket
 
 [Socket]
 ListenStream=/run/aios/model.sock

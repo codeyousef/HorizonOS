@@ -63,8 +63,8 @@ fn native_selected_kate_snapshot_and_stale_owner(){
     assert!(WindowBinding::discover(&display,&control).expect("initial accessibility discovery").is_empty(),"must not inspect another existing Kate instance");
     let directory=PathBuf::from(format!("/tmp/aios-native-kate-{}",uuid::Uuid::new_v4()));
     fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
-    let document=directory.join("horizon-native-fixture.txt");
-    fs::write(&document,"Horizon OS synthetic selected document. No credentials or external effects.\n").unwrap();
+    let document=directory.join("minnerite-native-fixture.txt");
+    fs::write(&document,"Minnerite synthetic selected document. No credentials or external effects.\n").unwrap();
     fs::set_permissions(&document,fs::Permissions::from_mode(0o600)).unwrap();
     let home=directory.join("home");fs::DirBuilder::new().mode(0o700).create(&home).unwrap();
     let diagnostic=directory.join("native-kate.log");
@@ -97,7 +97,7 @@ fn native_selected_kate_snapshot_and_stale_owner(){
         };
         if !windows.is_empty(){
             assert_eq!(windows.len(),1,"ambiguous owned window");
-            let w=windows.remove(0);assert!(w.title.contains("horizon-native-fixture.txt"));kate.track_native(&document);break w;
+            let w=windows.remove(0);assert!(w.title.contains("minnerite-native-fixture.txt"));kate.track_native(&document);break w;
         }
         assert!(Instant::now()<until,"Kate accessibility registration timed out");
         std::thread::sleep(Duration::from_millis(50));

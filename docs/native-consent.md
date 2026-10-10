@@ -70,10 +70,10 @@ starts and never authorizes a store path supplied by the caller.
 
 Final R2 system plans also have a broker-owned terminal path. The root executor
 reopens file descriptor 0 of the authenticated D-Bus caller through `/proc`,
-requires an active non-root `tty` logind session, a user-owned character device,
-and the caller's process group and session to be that terminal's foreground
-owners. A pipe, redirected input, background job, reconnect or another session
-cannot provide confirmation.
+requires an active non-root user logind session that is either a TTY or a local
+Wayland/X11 desktop, a user-owned character device, and the caller's process
+group and session to be that terminal's foreground owners. A pipe, redirected
+input, background job, reconnect or another session cannot provide confirmation.
 
 The broker writes a bounded canonical presentation containing the exact plan
 and closure digests, target, semantic changes, risk, reboot requirement, ordered
@@ -83,7 +83,7 @@ typing `AUTHORIZE <exact-plan-id>` before the final five-minute deadline. The
 response is consumed in broker memory and never becomes a request field, token,
 status value or log entry. A successful response only constructs the internal
 `TrustedConfirmation`; fresh native polkit administrator authentication for the
-original system-bus subject remains mandatory. AIOS UI automation has no TTY or
+original system-bus subject remains mandatory. Minnerite UI automation has no TTY or
 polkit operation and cannot observe or activate this surface.
 The terminal and polkit waits run without the broker runtime lock. Public
 `Cancel` atomically revokes the pending authorization; terminal polling observes
@@ -292,14 +292,14 @@ The dialog uses the native palette, fonts, focus and accessibility of Qt Widgets
 Cancel is the default Return action; Escape, withdrawal and expiry cancel. Allow
 requires a deliberate action on its separate button. There is no universal
 approval option. Its desktop identity is `org.aios.Confirmation` and its window
-object identity is `aios-protected-confirmation`; AIOS computer-use providers
+object identity is `aios-protected-confirmation`; Minnerite computer-use providers
 must exclude confirmation surfaces from observation and activation. Ordinary
 native assistive technology remains available.
 
 The policy-owned launcher explicitly enables Qt's native accessibility bridge
 for this dialog even when the desktop reports no active screen reader. This
 fixed setting is independent of request fields and does not register the
-confirmation executable as an AIOS observation or input target.
+confirmation executable as a Minnerite observation or input target.
 
 `checks.x86_64-linux.consent-ui` contains widget fixtures for literal untrusted
 text, accessibility, default cancellation, explicit keyboard choice, immutable
@@ -332,7 +332,7 @@ permission renderer while it is open. The actor is compiled only into the
 ignored guest integration test, is absent from installed products, and requires
 the disposable profile, tester UID and explicit registered scenario. This is
 native assistive-input fixture evidence, never evidence of human review or
-AIOS semantic input permission.
+Minnerite semantic input permission.
 
 The same registered scenario checks real public D-Bus window discovery through
 the hardened broker and exact native provider. A separate guarded native test

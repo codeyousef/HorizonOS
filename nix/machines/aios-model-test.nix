@@ -105,7 +105,7 @@ in {
   # No RPC or sudo route. Only this compiled initial test-image unit can invoke
   # the root fixture; it names one fixed service and accepts no arguments.
   systemd.services.aios-model-acceptance = {
-    description = "Fixed initial Horizon OS model crash/restart acceptance";
+    description = "Fixed initial Minnerite model crash/restart acceptance";
     wantedBy = [ "multi-user.target" ];
     after = [ "sshd.service" "aios-model.socket" "user@1001.service" ];
     requires = [ "user@1001.service" ];

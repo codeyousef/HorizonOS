@@ -6,6 +6,7 @@ pub mod bus;
 pub mod caller;
 pub mod candidate;
 pub mod health;
+pub mod guard;
 pub mod ledger;
 pub mod native;
 use aios_protocol::contracts::canonical_json;

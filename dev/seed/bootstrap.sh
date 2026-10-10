@@ -23,7 +23,7 @@ image_target=aios-dev
 [[ $serial == AIOS_DEV_ROOT ]] || die 'Unexpected disk serial'
 [[ $(tr '[:upper:]' '[:lower:]' </sys/class/dmi/id/product_uuid) == "$guest_uuid" ]] || die 'DMI UUID mismatch'
 [[ $(cat authorized.uuid) == "$guest_uuid" ]] || die 'No matching host provisioning authorization'
-[[ -f source/flake.lock && -f source/Cargo.lock && -f source/nix/machines/aios-dev/default.nix ]] || die 'Pinned Horizon OS image source is missing'
+[[ -f source/flake.lock && -f source/Cargo.lock && -f source/nix/machines/aios-dev/default.nix ]] || die 'Pinned Minnerite image source is missing'
 [[ ! -e source/nix/machines/aios-dev/enrollment.json ]] || die 'Seed source cannot override machine enrollment'
 [[ $(wc -l <dev.pub) == 1 ]] || die 'Expected one public development key'
 ssh-keygen -lf dev.pub -E sha256 >/dev/null || die 'Invalid public development key'
@@ -95,7 +95,7 @@ nixos-generate-config --root /mnt
 # Initial provisioning installs the same pinned full image used by system-build
 # verification. This path is reachable only after fresh-disk identity checks;
 # it is not an update/deployment route for an existing installation.
-candidate=/mnt/etc/nixos/horizon
+candidate=/mnt/etc/nixos/minnerite
 [[ ! -e $candidate ]] || die 'Initial image candidate already exists'
 mkdir "$candidate"
 cp -r source/. "$candidate/"

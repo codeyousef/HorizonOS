@@ -1,4 +1,4 @@
-# Horizon OS broker preparation
+# Minnerite broker preparation
 
 The Rust `aios-exec` preparation core separates trusted installed code, managed
 intent data, registered candidates and final plans. It does not yet expose a live

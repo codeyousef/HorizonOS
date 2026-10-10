@@ -154,14 +154,14 @@ fn installed_native_transport_is_private_typed_and_cancellable() {
     let introspection = Proxy::new(&connection, aios_exec::bus::NAME, aios_exec::bus::PATH, "org.freedesktop.DBus.Introspectable").unwrap();
     let xml: String = introspection.call("Introspect", &()).unwrap();
     let interface = xml.split("<interface name=\"org.aios.Executor1\">").nth(1).unwrap().split("</interface>").next().unwrap();
-    for method in ["GetCapabilities", "Prepare", "GetPlan", "Authorize", "Execute", "GetTransaction", "CancelTransaction", "RequestRollback"] {
+    for method in ["GetCapabilities", "Prepare", "GetPlan", "Authorize", "Execute", "GuardStatus", "GuardHeartbeat", "GetTransaction", "CancelTransaction", "RequestRollback"] {
         assert!(interface.contains(&format!("<method name=\"{method}\">")));
     }
     assert!(!interface.contains("<signal"));
     let proxy = Proxy::new(&connection, aios_exec::bus::NAME, aios_exec::bus::PATH, aios_exec::bus::NAME).unwrap();
     let capabilities = value(&proxy, "GetCapabilities", ());
     assert_eq!(capabilities["data"]["native_caller_verified"], true);
-    assert_eq!(capabilities["data"]["execute"], false);
+    assert_eq!(capabilities["data"]["execute"], true);
     let raw = json!({"schema_version":1,"request_id":uuid::Uuid::new_v4().to_string(),"operation":"prepare","mode":"act",
         "intent_text":"Install Kate (disposable IPC qualification)","intent":{"action":"install_package","package_id":"kate"}});
     for field in ["uid", "approved", "target", "template_path", "database_data", "grants"] {
@@ -176,6 +176,8 @@ fn installed_native_transport_is_private_typed_and_cancellable() {
     assert_eq!(data["plan"]["requester"]["uid"], uid);
     assert_eq!(data["plan"]["requester"]["bus_sender"], connection.unique_name().unwrap().as_str());
     assert!(!data["plan"]["requester"]["logind_session"].as_str().unwrap().is_empty());
+    denied(proxy.call::<_, _, String>("GuardStatus", &(id,)), "CONFLICT");
+    denied(proxy.call::<_, _, String>("GuardHeartbeat", &(id, "{}")), "CONFLICT");
     assert_eq!(data["plan"]["target"]["boot_id"], std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim());
     assert_eq!(data["plan"]["target"]["installation_uuid"], std::fs::read_to_string("/etc/aios/installation-uuid").unwrap().trim());
     for field in ["running_closure", "profile_closure", "boot_selected_closure"] {

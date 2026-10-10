@@ -21,7 +21,7 @@ in {
     isNormalUser = true;
     uid = 1002;
     extraGroups = [ "wheel" ];
-    hashedPassword = "$6$horizon-approval$umxH4YfaNTVGTrHzoeSWs5zbSmvKnGhG5iAkCbq9J9rLtqK3pf/Gr/MNyXH1xgfxCu8md/OODuxHUVH9lY0ku0";
+    hashedPassword = "$6$minnerite$ngxaoZ/FrRSdynnkKvyoGkm3aE5Tj8k0FpltmBncOH5m4pFbwVdzN8ADt1VbFY0NyLo7PUrmNHxDwv.IBF0qm1";
     openssh.authorizedKeys.keys = config.users.users.dev.openssh.authorizedKeys.keys;
   };
   services.aios.users = lib.mkForce [ "dev" "tester" "approval-test" ];
@@ -88,7 +88,7 @@ in {
     };
   };
   systemd.services.aios-builder-qualification = {
-    description = "Disposable Horizon OS candidate builder qualification";
+    description = "Disposable Minnerite candidate builder qualification";
     after = [ "aios-build.service" ];
     requires = [ "aios-build.service" ];
     serviceConfig = {
@@ -132,7 +132,7 @@ in {
     };
   };
   systemd.services.aios-service-lifecycle-test = {
-    description = "Disposable Horizon OS service lifecycle qualification";
+    description = "Disposable Minnerite service lifecycle qualification";
     after = [ "graphical.target" "aios-state.service" "aios-observer.service" "aios-build.service" "aios-execd.service" ];
     serviceConfig = {
       Type = "oneshot";

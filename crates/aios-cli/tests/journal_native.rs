@@ -15,7 +15,7 @@ fn native_filters_redaction_and_exact_cursor_continuation() {
     assert_eq!(fs::read_to_string("/etc/aios/guest-role").unwrap().trim(),"development");
     let boot=fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim().to_owned();
     let uid=unsafe { geteuid() };
-    let tag=format!("horizon-journal-check-{}",Uuid::new_v4().simple());
+    let tag=format!("minnerite-journal-check-{}",Uuid::new_v4().simple());
     let start=now();
     for message in [format!("{tag} service failed after startup."),format!("{tag} PASSWORD=fake-private-value"),format!("{tag} retry scheduled.")] {
         let mut child=Command::new("/run/current-system/sw/bin/systemd-cat").args(["--identifier",&tag,"--priority","notice"])

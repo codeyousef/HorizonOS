@@ -1,4 +1,4 @@
-# Horizon OS inference service
+# Minnerite inference service
 
 `aios-modeld` accepts inference requests through a local Unix socket. It has no
 tool executor, authorization, file inspection, network or download method.
@@ -126,7 +126,7 @@ this image is not a production release. The other development/desktop images
 remain model-disabled.
 
 The host administrator exports public data from an enrolled builder's immutable
-`horizon-os-model-normal-*` package with:
+`minnerite-model-normal-*` package with:
 
 ```fish
 python3 tools/devctl.py model-seed --artifact /nix/store/REVIEWED_MODEL_DATA_PACKAGE --json

@@ -100,7 +100,7 @@ in {
     };
   };
   systemd.services.aios-bootstrap-identity = {
-    description = "Publish verified Horizon OS VM identity";
+    description = "Publish verified Minnerite VM identity";
     wantedBy = [ "multi-user.target" ]; before = [ "sshd.service" ];
     serviceConfig.Type = "oneshot";
     script = ''

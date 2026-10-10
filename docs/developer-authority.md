@@ -1,6 +1,6 @@
 # VM-only developer authority
 
-Horizon OS separates host developer authority from product actions. The product
+Minnerite separates host developer authority from product actions. The product
 model cannot invoke `aios-dev-deploy`, obtain the dedicated developer SSH key,
 change Nix modules or approve code deployment. Developer-supplied NixOS code is
 effectively guest-root authority; a typed wrapper does not make that code

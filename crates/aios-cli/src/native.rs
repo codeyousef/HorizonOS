@@ -167,6 +167,10 @@ impl ExecutorClient {
         self.call("GetTransaction", &(id,))
     }
 
+    pub fn cancel(&self, id: &str) -> Result<Value, ErrorCode> {
+        self.call("Cancel", &(id,))
+    }
+
     pub fn authorize(&self, id: &str, hash: &str) -> Result<Value, ErrorCode> {
         self.call("Authorize", &(id, hash))
     }

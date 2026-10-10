@@ -1,11 +1,11 @@
-# Horizon OS
+# Minnerite
 
-Horizon OS implements the AI-native NixOS specification under the internal `aios-*`
+Minnerite implements the AI-native NixOS specification under the internal `aios-*`
 interface names. A deterministic control plane authorizes, executes, verifies and
 recovers typed actions; local CPU inference interprets requests and evidence.
 
-[Project and delivery issues](https://linear.app/felidai-studio/project/horizon-os-978454c1cb4a)
-and [full PRD v1.0](https://linear.app/felidai-studio/document/horizon-os-full-prd-v10-11afca2bea89)
+[Project and delivery issues](https://linear.app/felidai-studio/project/minnerite-978454c1cb4a)
+and [full PRD v1.0](https://linear.app/felidai-studio/document/minnerite-full-prd-v10-11afca2bea89)
 are the canonical task and specification context.
 
 ## Host entry points

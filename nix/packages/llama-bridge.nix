@@ -1,7 +1,7 @@
 { lib, stdenv, cmake, ninja, llama-cpp }:
 assert llama-cpp.version == "9190";
 stdenv.mkDerivation {
-  pname = "horizon-os-llama-bridge";
+  pname = "minnerite-llama-bridge";
   version = "1-b9190";
   src = ../../native/llama-bridge;
   nativeBuildInputs = [ cmake ninja ];
@@ -29,5 +29,5 @@ stdenv.mkDerivation {
   '';
   doCheck = true;
   checkPhase = "ctest --output-on-failure";
-  meta = { description = "Horizon OS bounded CPU inference ABI"; license = lib.licenses.mit; platforms = [ "x86_64-linux" ]; };
+  meta = { description = "Minnerite bounded CPU inference ABI"; license = lib.licenses.mit; platforms = [ "x86_64-linux" ]; };
 }

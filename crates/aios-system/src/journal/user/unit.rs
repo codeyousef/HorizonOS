@@ -169,7 +169,7 @@ impl UserUnit {
         assert_eq!(unit.id, "aios-sessiond.service");
         assert_eq!(unit.load, "loaded"); assert_eq!(unit.invocation.len(), 16);
         assert!(matches!(bus.unit("../sshd.service"), Err(ErrorCode::InvalidArgument)));
-        assert!(matches!(bus.unit("horizon-missing-unit-11111111111111111111111111111111.service"), Err(ErrorCode::TargetNotFound)));
+        assert!(matches!(bus.unit("minnerite-missing-unit-11111111111111111111111111111111.service"), Err(ErrorCode::TargetNotFound)));
         assert_eq!(bus.unit("aios-sessiond.service").unwrap(), unit);
         assert_eq!(endpoint(uid).unwrap(), endpoint_before);
         peer(&socket, uid, manager.pid).unwrap();

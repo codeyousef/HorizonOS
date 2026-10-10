@@ -55,11 +55,16 @@ must fit 64 KiB. Caller UID, target, baseline, template paths, database facts,
 permission receipts and approval flags are never request fields.
 
 Native bus credentials, process start time, boot identity and logind association
-determine the original requester. Preparation reads the system profile's
-persisted managed declaration independently of the running system. It records
-the running closure, system profile closure, exact boot-selected closure and
-boot metadata separately. Unknown firmware selection, payload disagreement,
-revision drift and target changes fail closed.
+determine the original requester. A desktop process delegated to the per-user
+systemd manager may have no direct logind session; only in that case, or when
+logind reports the manager session, the broker resolves the same UID's root-owned
+`User.Display` pointer and requires an active, local X11/Wayland user session.
+A concrete SSH or TTY session is never replaced by the display session.
+Preparation reads the system profile's persisted managed declaration
+independently of the running system. It records the running closure, system
+profile closure, exact boot-selected closure and boot metadata separately.
+Unknown firmware selection, payload disagreement, revision drift and target
+changes fail closed.
 
 The broker seals the candidate and registers its plan in the root-owned durable
 ledger. A repeated nonce from the same authenticated connection returns the same
@@ -88,9 +93,21 @@ running closure and approved resource limits. A reply becomes a non-serializable
 capability only after the candidate and separately retained prior/candidate GC
 roots are rechecked. Native target and baseline are re-read before the ledger
 records the result and freezes the final plan. `GetPlan` then returns that final
-plan and exact hash; a second `Authorize` performs trusted exact-plan TTY plus
-fresh polkit approval. Build failure, ambiguous worker termination or baseline
-drift never yields a final plan or activation authority.
+plan and exact hash. A second `Authorize` performs trusted exact-plan TTY plus
+fresh polkit approval. Because that volatile receipt is bound to the exact
+process and system-bus connection, `aiosctl transaction apply` performs final
+authorization and `Execute` on one connection; a standalone final
+`transaction authorize` intentionally cannot transfer authority to a later CLI
+process. An authenticated, request-bound worker failure durably enters `FAILED`
+and releases the active-plan slot. Ambiguous worker termination or baseline
+drift retains the build lock and never yields a final plan or activation
+authority.
+
+The system-bus policy exposes only the typed `GuardStatus` and
+`GuardHeartbeat` management members alongside the transaction API. Runtime
+code still requires the transaction owner UID, an active remote management
+session, the enrolled SSH development channel, exact authorized ledger state,
+and a matching durable guard handoff before either call reaches the guard.
 
 Database-data and unfree acknowledgement adapters are not supplied by request
 JSON. Intents needing these facts or grants remain refused until their trusted

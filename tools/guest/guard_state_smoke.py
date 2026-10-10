@@ -35,7 +35,8 @@ def fixture_plan():
                                           for name in ("sshd.service", "dbus.service")],
                        "required_apis": [{"api": api, "uid": None, "healthy": True}
                                          for api in ("executor", "graph")],
-                       "required_user_units": []}}
+                       "baseline_user_units": [], "required_user_units": [],
+                       "action_validators": []}}
 
 
 def main():
@@ -45,8 +46,9 @@ def main():
     formatted = []
     for relative in ("crates/aios-guard/src/lib.rs", "crates/aios-guard/src/main.rs",
                      "crates/aios-guard/src/activation.rs", "crates/aios-guard/src/native.rs",
-                     "crates/aios-guard/src/runtime.rs", "crates/aios-exec/src/native.rs",
-                     "crates/aios-exec/src/health.rs",
+                     "crates/aios-guard/src/runtime.rs", "crates/aios-guard/src/service.rs",
+                     "crates/aios-exec/src/native.rs", "crates/aios-exec/src/health.rs",
+                     "crates/aios-exec/src/guard.rs", "crates/aios-exec/src/ledger.rs",
                      "crates/aios-exec/src/health/tests.rs", "crates/aios-guard/tests/guard.rs"):
         original = (release / relative).read_bytes()
         result = subprocess.check_output(["nix", "develop", *locked, reference,
@@ -78,6 +80,8 @@ def main():
             raise RuntimeError("unqualified runtime acquired an execution path")
         if expected == 5 and response != {"schema_version": 1, "error": "GUARD_NATIVE_INTAKE_FAILED", "reason": "Authority"}:
             raise RuntimeError("nonroot native guard intake was not denied")
+        if expected == 8 and response != {"schema_version": 1, "error": "GUARD_TRANSACTION_FAILED", "reason": "Authority"}:
+            raise RuntimeError("nonroot caller reached the authorized guard runtime")
         checks.append({"name": name, "exit": result.returncode, "response": response})
         return response
 
@@ -96,12 +100,20 @@ def main():
     check("oversize", b" " * 65537, 2)
     check("no-live-runtime", b"", 9, args=())
     check("no-command-fallback", b'{"command":"true"}', 9, args=("--execute",))
+    check("no-nonroot-guard-handoff", b"", 8,
+          args=("--run-transaction", "11111111-1111-4111-8111-111111111111"))
     check("actual-nonroot-native-intake", b"", 5, args=("--native-preflight",))
     reboot = copy.deepcopy(plan)
     reboot["candidate"]["closure"]["kernel_sha256"] = "f" * 64
     if not check("separate-reboot", json.dumps(reboot).encode(), 0)["reboot_required"]:
         raise RuntimeError("kernel change bypassed reboot classification")
     closure_info = json.loads(subprocess.check_output(["nix", "path-info", "--json", "--recursive", package], timeout=30))
+    unit = Path(package) / "lib/systemd/system/aios-guard@.service"
+    unit_bytes = unit.read_bytes()
+    if (b"RefuseManualStop=yes" not in unit_bytes
+            or b"ExecStart=" + executable.encode() + b" --run-transaction %i" not in unit_bytes
+            or b"/bin/sh" in unit_bytes):
+        raise RuntimeError("independent guard unit lost its fixed retained runtime contract")
     current_wrapper = Path("/run/current-system/bin/switch-to-configuration")
     wrapper = current_wrapper.read_text()
     print("AIOS_GUARD_STATE " + json.dumps({"evidence_kind": "real-guest-package-with-fixture-plans",
@@ -109,10 +121,11 @@ def main():
             "sha256":hashlib.sha256(current_wrapper.read_bytes()).hexdigest(),
             "boot_adapter_exports":[line for line in wrapper.splitlines() if line.startswith("export INSTALL_BOOTLOADER=")]},
         "package": package, "executable_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
+        "guard_unit_sha256": hashlib.sha256(unit_bytes).hexdigest(),
         "checks": checks, "runtime_closure": closure_info, "real_activation_verified": False,
         "independent_guard_survival_verified": False, "authenticated_heartbeat_verified": False,
         "limitations": ["Plan/health/identity inputs are fixtures.",
-                        "No privileged adapter, guard unit, system activation or boot write runs in this test."]}, sort_keys=True))
+                        "The packaged service has no authorized handoff in this test; no system activation or boot write runs."]}, sort_keys=True))
 
 
 if __name__ == "__main__":

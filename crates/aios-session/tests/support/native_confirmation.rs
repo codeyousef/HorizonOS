@@ -1,5 +1,5 @@
 //! Test-only assistive input for the owned production permission dialog.
-//! This is never linked into an installed product or exposed as an AIOS tool.
+//! This is never linked into an installed product or exposed as a Minnerite tool.
 //! It proves transport/grant behavior, not that a human reviewed the request.
 use aios_session::display::DisplayBinding;
 use std::{collections::{HashSet,VecDeque},fs,os::unix::{net::UnixStream,fs::MetadataExt},path::Path,time::{Duration,Instant}};
@@ -74,8 +74,8 @@ pub fn allow_owned_termination(display:&DisplayBinding,goal:&str,process:&aios_s
 }
 fn allow_owned(display:&DisplayBinding,goal:&str,expected:Expected<'_>)->serde_json::Value{
     let (program,dialog_name,button,profile,mode,prefix)=match &expected{
-        Expected::Read{profile,..}=>("aios-ui-agent","Horizon OS application read permission","Allow this read scope",*profile,"ask","Native permission fixture "),
-        Expected::Termination{..}=>("aios-processd","Horizon OS process termination permission","Terminate this process","Human-confirmed own-user process termination","act","Native termination fixture "),
+        Expected::Read{profile,..}=>("aios-ui-agent","Minnerite application read permission","Allow this read scope",*profile,"ask","Native permission fixture "),
+        Expected::Termination{..}=>("aios-processd","Minnerite process termination permission","Terminate this process","Human-confirmed own-user process termination","act","Native termination fixture "),
     };
     assert_eq!(std::env::var("AIOS_NATIVE_BRIDGE_SCENARIO").unwrap(),"disposable-provider-v1");
     assert_eq!(nix::unistd::geteuid().as_raw(),1001);
@@ -105,7 +105,7 @@ fn allow_owned(display:&DisplayBinding,goal:&str,expected:Expected<'_>)->serde_j
         std::thread::sleep(Duration::from_millis(20));
     };
     let app_root=proxy(&bus,&app,ROOT,ACCESSIBLE);
-    assert_eq!(app_root.get_property::<String>("Name").unwrap(),"Horizon OS confirmation");
+    assert_eq!(app_root.get_property::<String>("Name").unwrap(),"Minnerite confirmation");
     let count:i32=app_root.get_property("ChildCount").unwrap();assert_eq!(count,1);
     let dialog:Object=app_root.call("GetChildAtIndex",&(0i32,)).unwrap();assert_eq!(dialog.0,app);
     let tree_deadline=Instant::now()+Duration::from_secs(2);

@@ -332,7 +332,7 @@ mod tests {
     }
     #[test] fn metadata_is_bounded_readonly_and_descriptor_verified() {
         use std::os::unix::fs::{symlink,PermissionsExt};
-        let directory=std::env::temp_dir().join(format!("horizon-metadata-{}",uuid::Uuid::new_v4()));
+        let directory=std::env::temp_dir().join(format!("minnerite-metadata-{}",uuid::Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();let path=directory.join("LICENSE");
         std::fs::write(&path,b"fixture license").unwrap();
         let expected=hash(b"fixture license");let trust=ArtifactTrust::Qualification;
@@ -357,7 +357,7 @@ mod tests {
         struct Directory(std::path::PathBuf);
         impl Drop for Directory { fn drop(&mut self) { let _=std::fs::remove_dir_all(&self.0); } }
         let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let directory=Directory(std::env::temp_dir().join(format!("horizon-model-contract-{}-{nonce}",std::process::id())));
+        let directory=Directory(std::env::temp_dir().join(format!("minnerite-model-contract-{}-{nonce}",std::process::id())));
         std::fs::create_dir(&directory.0).unwrap();
         let artifact=lock().unwrap().artifact.unwrap();let path=directory.0.join(artifact.filename);
         assert!(matches!(Model::load(&directory.0,ArtifactTrust::Qualification),Err(ErrorCode::TargetNotFound)));

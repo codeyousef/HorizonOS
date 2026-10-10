@@ -1,5 +1,5 @@
 [Unit]
-Description=AIOS authenticated user request broker
+Description=Minnerite authenticated user request broker
 After=dbus.socket
 Requires=dbus.socket
 ConditionUser=!root

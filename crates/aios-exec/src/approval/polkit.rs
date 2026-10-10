@@ -83,12 +83,12 @@ pub(crate) fn authenticate(
         .map_err(|_| Error::AuthRequired)?;
     verify_action(&descriptions(&proxy)?, &binding.action)?;
     let details = HashMap::from([
-        ("horizon.plan_id", binding.plan_id.as_str()),
-        ("horizon.plan_hash", binding.plan_hash.as_str()),
-        ("horizon.closure", binding.closure.as_str()),
-        ("horizon.policy_revision", binding.policy_revision.as_str()),
+        ("minnerite.plan_id", binding.plan_id.as_str()),
+        ("minnerite.plan_hash", binding.plan_hash.as_str()),
+        ("minnerite.closure", binding.closure.as_str()),
+        ("minnerite.policy_revision", binding.policy_revision.as_str()),
         (
-            "horizon.installation_uuid",
+            "minnerite.installation_uuid",
             binding.target.installation_uuid.as_str(),
         ),
     ]);
@@ -195,7 +195,7 @@ mod tests {
                 policy::ACTION.into(),
                 "".into(),
                 "".into(),
-                "Horizon OS".into(),
+                "Minnerite".into(),
                 "".into(),
                 "".into(),
                 defaults,
@@ -262,11 +262,11 @@ mod tests {
         let proxy = Proxy::new(&connection, owner.sender.as_str(), PATH, INTERFACE).unwrap();
         let actions = descriptions(&proxy).unwrap();
         assert!(!actions.is_empty());
-        let horizon: Vec<_> = actions
+        let minnerite: Vec<_> = actions
             .iter()
             .filter(|a| matches!(a.0.as_str(), policy::ACTION | policy::ELEVATED_ACTION))
             .collect();
-        for a in &horizon {
+        for a in &minnerite {
             verify_action(&actions, &a.0).unwrap();
         }
         let version: String = proxy.get_property("BackendVersion").unwrap();
@@ -278,7 +278,7 @@ mod tests {
             "AIOS_POLKIT_OBSERVATIONS {}",
             serde_json::json!({"evidence_kind":"actual-guest-read-only-polkit-owner-and-action-catalog",
             "service_available":true,"owner_identity_verified":true,"owner":owner.sender,"uid":owner.uid,"pid":owner.pid,"start_ticks":owner.start_ticks,"boot_id":owner.boot_id,
-            "backend_version":version,"registered_action_count":actions.len(),"horizon_actions_installed":horizon.len(),
+            "backend_version":version,"registered_action_count":actions.len(),"minnerite_actions_installed":minnerite.len(),
             "native_authorization_verified":false,"trusted_ui_confirmation_verified":false,"check_authorization_called":false})
         );
     }

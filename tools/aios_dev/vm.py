@@ -73,7 +73,7 @@ test ! -e /mnt/etc/systemd/system.control/aios-initial-preflight.service
 mkdir -p /mnt/etc/systemd/system.control/multi-user.target.wants
 cat >/mnt/etc/systemd/system.control/aios-initial-preflight.service <<'UNIT'
 [Unit]
-Description=Horizon OS initial installed native preflight
+Description=Minnerite initial installed native preflight
 Requires=aios-bootstrap-identity.service
 After=aios-bootstrap-identity.service dbus.service sshd.service
 [Service]

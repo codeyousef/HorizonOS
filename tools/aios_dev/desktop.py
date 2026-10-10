@@ -101,7 +101,7 @@ def prepare(owner, *, with_model=False):
         provision.write_new(target, data, item["mode"])
     provision.run(["git", "-C", str(directory), "init", "-q"])
     provision.run(["git", "-C", str(directory), "add", "."])
-    provision.run(["git", "-C", str(directory), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=AIOS Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Public synthetic desktop fixture"])
+    provision.run(["git", "-C", str(directory), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Minnerite Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Public synthetic desktop fixture"])
     values = fixture_configuration(owner, with_model=with_model)
     config = VMConfig.from_data(directory, values, configured=True)
     provision.private_directory(directory, ".local/vm")

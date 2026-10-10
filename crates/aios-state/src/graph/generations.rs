@@ -87,8 +87,10 @@ fn system_generations(running:&str,selected:Option<(&str,u64)>)->Result<Vec<Syst
     for (number,path) in paths {
         let path=path.to_str().ok_or(Error::Native(aios_protocol::contracts::ErrorCode::TargetChanged))?;
         let (target,_)=pointer(path)?;
+        // A root-owned Nix profile proves generation mechanics, not that the
+        // Minnerite broker created or approved the generation.
         result.push(SystemProfileGeneration{generation:number,selected:selected.is_some_and(|(closure,generation)|generation==number&&closure==target),
-            running:target==running,closure:target,ownership:"declarative_system_profile".into(),management_attribution:None});
+            running:target==running,closure:target,ownership:"unmanaged_system_profile".into(),management_attribution:None});
     }
     let after=fs::symlink_metadata(directory).map_err(|_|Error::Native(aios_protocol::contracts::ErrorCode::TargetChanged))?;
     if (before.dev(),before.ino(),before.ctime(),before.ctime_nsec())!=(after.dev(),after.ino(),after.ctime(),after.ctime_nsec()){

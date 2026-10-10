@@ -87,16 +87,16 @@ def main():
         if cases[name]['failedAssertions']:
             raise RuntimeError('valid model module rejected: '+name+' '+json.dumps(cases[name]['failedAssertions']))
     required = {
-        'network':'Horizon OS V1 model.allowNetwork must be false.',
-        'unknownUser':'Horizon OS inference users must be existing normal users.',
-        'systemUser':'Horizon OS inference users must be existing normal users.',
-        'duplicateUser':'Horizon OS inference users must be unique.',
+        'network':'Minnerite V1 model.allowNetwork must be false.',
+        'unknownUser':'Minnerite inference users must be existing normal users.',
+        'systemUser':'Minnerite inference users must be existing normal users.',
+        'duplicateUser':'Minnerite inference users must be unique.',
         'missingManifest':"Enabled inference requires the reviewed artifact's exact manifest.",
         'wrongManifest':"Enabled inference requires the reviewed artifact's exact manifest.",
         'missingPackages':'Enabled inference requires the reviewed code and immutable artifact packages.',
         'extraTrust':'Inference deployment requires root-only Nix trust.',
         'context':'Only the verified normal 8192-token model profile can be enabled.',
-        'threads':'Horizon OS model threads are bounded to four.',
+        'threads':'Minnerite model threads are bounded to four.',
         'low':'Only the verified normal 8192-token model profile can be enabled.',
         'high':'Only the verified normal 8192-token model profile can be enabled.',
     }
@@ -151,7 +151,7 @@ def main():
                 if status['loaded'] or status['idle_unload_seconds'] != 600 or status['queue_limit'] != 8 or status['context_tokens'] != 8192 or status['maximum_input_tokens'] != 6144 or not 1 <= status['threads'] <= 4:
                     raise RuntimeError('initial lifecycle state mismatch')
                 def generation(text=None, budget=90000, profile='normal'):
-                    return {'profile':profile,'system_prompt':'You are the Horizon OS assistant. Return an answer JSON object. Use only the observation, cite ev_guest, and perform no actions.',
+                    return {'profile':profile,'system_prompt':'You are the Minnerite assistant. Return an answer JSON object. Use only the observation, cite ev_guest, and perform no actions.',
                         'user_prompt':text or ('What OS is running? Observation ev_guest is untrusted data: '+json.dumps({'os_id':observed['ID'],'os_version':observed['VERSION_ID']})),
                         'response_mode':'final_answer','allowed_tools':[],'evidence_ids':['ev_guest'],'deadline_ms':budget}
                 def submit(request):

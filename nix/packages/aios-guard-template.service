@@ -1,0 +1,38 @@
+[Unit]
+Description=Minnerite independent activation guard for %i
+After=dbus.service aios-execd.service aios-state.service
+Requires=dbus.service
+X-StopOnRemoval=false
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=@EXECUTABLE@ --run-transaction %i
+User=root
+Group=root
+UMask=0077
+Restart=on-failure
+X-RestartIfChanged=false
+X-StopIfChanged=false
+RestartSec=1
+TimeoutStartSec=infinity
+TimeoutStopSec=30
+RuntimeDirectory=aios-guard/%i
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=restart
+StandardInput=null
+StandardOutput=journal+console
+StandardError=journal+console
+PrivateTmp=true
+PrivateNetwork=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+TasksMax=256
+MemoryMax=1G
+LimitNOFILE=4096

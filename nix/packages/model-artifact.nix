@@ -6,7 +6,7 @@ let
   # the exact reviewed conversion and original metadata with add-fixed sha256.
   required = name: sha256: requireFile {
     inherit name sha256;
-    message = "Import the verified Horizon OS normal-profile artifact with nix-store --add-fixed sha256; inference never downloads model files.";
+    message = "Import the verified Minnerite normal-profile artifact with nix-store --add-fixed sha256; inference never downloads model files.";
   };
   weights = required lock.artifact.filename lock.artifact.sha256;
   metadata = builtins.filter (file: file.bytes < 32 * 1024 * 1024) source.files;
@@ -14,7 +14,7 @@ in
 assert lock.schema_version == 1 && lock.profile == "normal" && lock.availability == "available";
 assert lock.source_lock_sha256 == builtins.hashFile "sha256" ../../models/source-lock.json;
 assert source.runtime.revision == lock.runtime_revision && source.inference_backend == "cpu";
-runCommandNoCC "horizon-os-model-normal-${builtins.substring 0 12 lock.artifact.sha256}" {
+runCommandNoCC "minnerite-model-normal-${builtins.substring 0 12 lock.artifact.sha256}" {
   meta = { license = lib.licenses.asl20; platforms = [ "x86_64-linux" ]; };
 } ''
   mkdir -p "$out/source"

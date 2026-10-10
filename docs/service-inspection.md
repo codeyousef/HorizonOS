@@ -193,7 +193,7 @@ transport, with `operation.kind=submit` and a typed `operation.request`. Other
 public methods use the PRD's small typed arguments. Task status, event,
 cancellation and deletion JSON include version, task ID and operation.
 Stable D-Bus errors are named `org.aios.Error.CODE`, using the PRD's codes.
-The AIOS interface declares no task/evidence broadcast signals.
+The Executor1 interface declares no task/evidence broadcast signals.
 
 Module/image activation, persistent evidence enrollment, interactive grants,
 journal/process diagnosis and the multi-step tool loop have separate contracts.

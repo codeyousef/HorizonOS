@@ -1,5 +1,5 @@
 [Unit]
-Description=Project registered desktop settings for AIOS
+Description=Project registered desktop settings for Minnerite
 ConditionUser=!root
 
 [Service]

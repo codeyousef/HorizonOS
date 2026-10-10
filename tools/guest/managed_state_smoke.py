@@ -54,9 +54,9 @@ def main():
     if not pg["enabled"] or not pg["version"].startswith("17.") or pg["listen"] != "" or pg["tcp"] or pg["authentication"] != "local all all peer":
         raise RuntimeError("PostgreSQL template is not the fixed Unix-only approved major")
     for name, message in (
-        ("changedStateVersion","AIOS managed updates preserve the installation stateVersion baseline."),
-        ("closedFirewall","AIOS cannot disable the protected management transport."),
-        ("broadUnfree","AIOS does not permit a broad allowUnfree override."),
+        ("changedStateVersion","Minnerite managed updates preserve the installation stateVersion baseline."),
+        ("closedFirewall","Minnerite cannot disable the protected management transport."),
+        ("broadUnfree","Minnerite does not permit a broad allowUnfree override."),
     ):
         if message not in cases[name]["failedAssertions"]:
             raise RuntimeError("trusted module override bypassed protection: " + name)

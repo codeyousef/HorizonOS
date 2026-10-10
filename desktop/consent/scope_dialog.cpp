@@ -112,11 +112,11 @@ std::optional<ScopePreview> ScopePreview::parse(const QByteArray &canonical) {
     return ScopePreview{o,o["digest"].toString(),expires};
 }
 ScopeDialog::ScopeDialog(const ScopePreview &preview) : preview_(preview) {
-    setWindowTitle(tr("Horizon OS — Needs permission"));
+    setWindowTitle(tr("Minnerite — Needs permission"));
     setObjectName("aios-protected-confirmation");
     const bool termination=preview.document["kind"]=="process_termination";
     const bool powerProfile=preview.document["kind"]=="power_profile_change";
-    setAccessibleName(termination ? tr("Horizon OS process termination permission") : powerProfile ? tr("Horizon OS power profile permission") : tr("Horizon OS application read permission"));
+    setAccessibleName(termination ? tr("Minnerite process termination permission") : powerProfile ? tr("Minnerite power profile permission") : tr("Minnerite application read permission"));
     setModal(true); resize(600,540);
     auto layout = new QVBoxLayout(this);
     auto content = new QWidget; auto rows = new QVBoxLayout(content);

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:aios:model-request:v1",
-  "title": "Horizon OS inference request v1",
+  "title": "Minnerite inference request v1",
   "description": "Inference proposals confer no execution authority. UTF-8 frame maximum 65536 bytes; duplicate fields are rejected before validation.",
   "type": "object",
   "additionalProperties": false,

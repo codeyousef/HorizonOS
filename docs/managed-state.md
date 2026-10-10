@@ -1,4 +1,4 @@
-# Horizon OS managed state
+# Minnerite managed state
 
 The reviewed Rust `aios-state` compiler accepts data, never Nix expressions.
 Its catalog comes from the installed administrator template. `Catalog::from_installed`
@@ -76,10 +76,13 @@ plans to the originating UID, boot, system-bus instance and exact live logind
 session. A later CLI process in that same session can inspect the plan, while
 another user, session, boot or bus cannot. Client-supplied plan hashes are never
 accepted. The returned UUID and digest identify the immutable plan.
-`aiosctl transaction inspect|authorize|apply|rollback-plan UUID` obtains plan
-hashes from the broker rather than accepting client-supplied hashes. In a
-headless session, authorization and apply fail with `AUTH_REQUIRED` while
-retaining the concrete plan UUID in the typed error; they never infer consent.
+`aiosctl transaction inspect|authorize|apply|cancel|rollback-plan UUID` obtains
+plan hashes from the broker rather than accepting client-supplied hashes.
+`cancel` terminally closes a pre-effect prepared, building, or awaiting-approval
+transaction and releases its active-plan slot; an already authorized guard owns
+recovery instead. In a headless session, authorization and apply fail with
+`AUTH_REQUIRED` while retaining the concrete plan UUID in the typed error; they
+never infer consent.
 
 ## Verification scope
 

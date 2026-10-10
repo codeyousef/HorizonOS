@@ -300,7 +300,7 @@ impl WindowBinding {
 }
 fn protected_title(title:&str)->bool{
     let name=title.to_lowercase();
-    ["id_ed25519","id_rsa","private key","keyring","password","authorization","authentication","wallet","horizon os — needs permission"].iter().any(|w|name.contains(w))
+    ["id_ed25519","id_rsa","private key","keyring","password","authorization","authentication","wallet","minnerite — needs permission"].iter().any(|w|name.contains(w))
 }
 #[derive(Serialize)]
 pub struct Snapshot {
@@ -356,7 +356,7 @@ pub struct Node {pub node_handle:String,pub role:String,pub name:String,pub stat
 #[cfg(test)]mod tests{
     use super::*;
     fn selector_fixture()->Snapshot{
-        let lineage=[("first","ملف Horizon",61), ("second","ملف Horizon",61), ("third","Save",43)].into_iter().map(|(handle,name,role)|NodeLineage{
+        let lineage=[("first","ملف Minnerite",61), ("second","ملف Minnerite",61), ("third","Save",43)].into_iter().map(|(handle,name,role)|NodeLineage{
             handle:handle.into(),path:OwnedObjectPath::try_from(format!("/fixture/{handle}")).unwrap(),parent:OwnedObjectPath::try_from("/fixture/window").unwrap(),
             role,name:name.into(),observed_name:name.into(),states:vec![1<<7],actions:vec![],children:0,
         }).collect();
@@ -365,7 +365,7 @@ pub struct Node {pub node_handle:String,pub role:String,pub name:String,pub stat
     }
     #[test]fn selectors_preserve_ambiguity_native_states_unicode_and_private_lineage(){
         let mut snapshot=selector_fixture();let control=AtomicU8::new(0);
-        let result=snapshot.find_nodes(&serde_json::json!({"role":"atspi:61","name":"ملف Horizon","states":["atspi:7"]}),&control).unwrap();
+        let result=snapshot.find_nodes(&serde_json::json!({"role":"atspi:61","name":"ملف Minnerite","states":["atspi:7"]}),&control).unwrap();
         assert_eq!(result["matches"],serde_json::json!(["first","second"]));assert_eq!(result["ambiguous"],true);
         aios_protocol::validation::validate(aios_protocol::contracts::schema_source("ui.find","data").unwrap(),&result).unwrap();
         let unique=snapshot.find_nodes(&serde_json::json!({"name":"av","name_match":"contains","role":"atspi:43"}),&control).unwrap();
@@ -379,7 +379,7 @@ pub struct Node {pub node_handle:String,pub role:String,pub name:String,pub stat
         snapshot.lineage[0].name.push_str(" private native suffix");
         assert_eq!(snapshot.find_nodes(&serde_json::json!({"name":"private native suffix","name_match":"contains"}),&control).unwrap()["matches"],serde_json::json!([]));
         snapshot.lineage[0].states=vec![u32::MAX];
-        assert_eq!(snapshot.find_nodes(&serde_json::json!({"name":"ملف Horizon","states":["atspi:16"]}),&control).unwrap()["matches"],serde_json::json!([]));
+        assert_eq!(snapshot.find_nodes(&serde_json::json!({"name":"ملف Minnerite","states":["atspi:16"]}),&control).unwrap()["matches"],serde_json::json!([]));
     }
     #[test]fn selectors_refuse_malformed_incomplete_stale_cancelled_and_overflow_results(){
         let mut snapshot=selector_fixture();let control=AtomicU8::new(0);
@@ -406,7 +406,7 @@ pub struct Node {pub node_handle:String,pub role:String,pub name:String,pub stat
         c.store(0,Ordering::Release);assert_eq!(check(Instant::now()-Duration::from_millis(1),&c),Err(ErrorCode::DeadlineExceeded));
     }
     #[test]fn protected_titles_and_directional_names_never_enter_content(){
-        for v in ["id_ed25519 — Kate","Password — Kate","Authentication","Horizon OS — Needs permission"]{assert!(protected_title(v));}
+        for v in ["id_ed25519 — Kate","Password — Kate","Authentication","Minnerite — Needs permission"]{assert!(protected_title(v));}
         assert!(!protected_title("fixture.txt — Kate"));assert!(text("spoof\u{202e}text".into(),128).is_err());
     }
     #[test]fn container_metadata_is_private_and_cannot_refresh_expired_generation_fixture(){

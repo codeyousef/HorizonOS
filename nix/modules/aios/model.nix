@@ -29,11 +29,11 @@ in {
   };
   config = lib.mkMerge [ {
     assertions = [
-      { assertion = !cfg.model.allowNetwork; message = "Horizon OS V1 model.allowNetwork must be false."; }
+      { assertion = !cfg.model.allowNetwork; message = "Minnerite V1 model.allowNetwork must be false."; }
       { assertion = builtins.all (name: builtins.hasAttr name config.users.users && config.users.users.${name}.isNormalUser) cfg.users;
-        message = "Horizon OS inference users must be existing normal users."; }
-      { assertion = builtins.length cfg.users == builtins.length (lib.unique cfg.users); message = "Horizon OS inference users must be unique."; }
-      { assertion = cfg.model.threads == null || cfg.model.threads <= 4; message = "Horizon OS model threads are bounded to four."; }
+        message = "Minnerite inference users must be existing normal users."; }
+      { assertion = builtins.length cfg.users == builtins.length (lib.unique cfg.users); message = "Minnerite inference users must be unique."; }
+      { assertion = cfg.model.threads == null || cfg.model.threads <= 4; message = "Minnerite model threads are bounded to four."; }
     ];
   } (lib.mkIf cfg.model.enable {
     assertions = [

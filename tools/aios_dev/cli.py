@@ -16,7 +16,7 @@ class Parser(argparse.ArgumentParser):
 
 
 def parser() -> Parser:
-    root = Parser(prog="devctl", description="Host tooling for verified AIOS guests")
+    root = Parser(prog="devctl", description="Host tooling for verified Minnerite guests")
     root.add_argument("--workspace", type=Path, default=Path(__file__).resolve().parents[2])
     # --json is handled before parsing so every command accepts it in any position.
     root.add_argument("--json", action="store_true", help="emit a structured result")

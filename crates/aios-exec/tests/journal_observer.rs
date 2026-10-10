@@ -83,8 +83,8 @@ impl Drop for UserUnitFixture {
     }
 }
 fn user_unit_records(proxy:&Proxy<'_>,foreign:&Proxy<'_>,boot:&str,uid:u32)->String {
-    let mut fixture=UserUnitFixture{name:format!("horizon-journal-fixture-{}.service",uuid::Uuid::new_v4().simple()),invocation:String::new()};
-    let tag=format!("horizon-observer-userunit-{}",uuid::Uuid::new_v4().simple());
+    let mut fixture=UserUnitFixture{name:format!("minnerite-journal-fixture-{}.service",uuid::Uuid::new_v4().simple()),invocation:String::new()};
+    let tag=format!("minnerite-observer-userunit-{}",uuid::Uuid::new_v4().simple());
     let messages=[format!("{tag} user {uid} startup failed."),format!("{tag} PASSWORD=fake-private-value"),format!("{tag} user {uid} retry scheduled.")];
     let script=format!("for value in {}: print(value)",serde_json::to_string(&messages).unwrap());
     let since=now();
@@ -114,7 +114,7 @@ fn user_unit_records(proxy:&Proxy<'_>,foreign:&Proxy<'_>,boot:&str,uid:u32)->Str
     denied(foreign,"GetJournalEvidence",(observed["evidence_ids"][0].as_str().unwrap(),),"PERMISSION_DENIED");
     let mut wrong=args;wrong["source"]=json!("system");denied(proxy,"Logs",(request(wrong),),"INVALID_ARGUMENT");
     denied(proxy,"ResolveUserLogService",("../sshd.service",),"INVALID_ARGUMENT");
-    denied(proxy,"ResolveUserLogService",("horizon-missing-unit-11111111111111111111111111111111.service",),"TARGET_NOT_FOUND");
+    denied(proxy,"ResolveUserLogService",("minnerite-missing-unit-11111111111111111111111111111111.service",),"TARGET_NOT_FOUND");
     // Restart our own fixed fixture only. The old invocation-bound read scope
     // must fail, and a fresh explicit resolution may authorize the new unit.
     assert_eq!(fixture.invocation(),fixture.invocation);
@@ -148,7 +148,7 @@ fn installed_journal_filters_private_cursors_and_sanitized_evidence() {
     assert!(main.status.success());assert_eq!(String::from_utf8(main.stdout).unwrap().trim().parse::<u32>().unwrap(),observer_pid);
     let installed=fs::canonicalize("/run/current-system/sw/bin/aios-execd").unwrap();assert!(installed.starts_with("/nix/store"));
     let proxy=Proxy::new(&connection,"org.aios.System1","/org/aios/System1","org.aios.System1").unwrap();
-    let tag=format!("horizon-observer-check-{}",uuid::Uuid::new_v4().simple());
+    let tag=format!("minnerite-observer-check-{}",uuid::Uuid::new_v4().simple());
     let since=now();
     for message in [format!("{tag} startup failed."),format!("{tag} PASSWORD=fake-private-value"),format!("{tag} retry scheduled.")] {
         let mut writer=Command::new("/run/current-system/sw/bin/systemd-cat").args(["--identifier",&tag,"--priority","notice"])
@@ -171,7 +171,7 @@ fn installed_journal_filters_private_cursors_and_sanitized_evidence() {
     // the same enrolled guest. Only the fixed public fixture pattern is read.
     let previous=Command::new("/run/current-system/sw/bin/journalctl").args(["--quiet","--no-pager","--output=json",
         "--output-fields=MESSAGE,__CURSOR,__REALTIME_TIMESTAMP,_UID,_BOOT_ID,PRIORITY,SYSLOG_IDENTIFIER",
-        "--boot=-1","--case-sensitive=yes","--grep=^horizon-observer-check-[0-9a-f]{32} (startup failed[.]|PASSWORD=fake-private-value|retry scheduled[.])$",
+        "--boot=-1","--case-sensitive=yes","--grep=^minnerite-observer-check-[0-9a-f]{32} (startup failed[.]|PASSWORD=fake-private-value|retry scheduled[.])$",
         "--lines=3",&format!("_UID={uid}")]).stdin(Stdio::null()).output().unwrap();
     assert!(previous.status.success(),"prior-boot fixture access required");
     assert!(previous.stdout.len()<131072 && previous.stderr.len()<4096);

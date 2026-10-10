@@ -1,5 +1,5 @@
 [Unit]
-Description=Horizon OS authenticated native own-user process provider
+Description=Minnerite authenticated native own-user process provider
 After=dbus.socket
 Requires=dbus.socket
 ConditionUser=!root

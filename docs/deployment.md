@@ -124,7 +124,7 @@ qualification path unit. A mode-0600 correlation marker owned by `dev` can
 trigger only the installed no-argument verifier. The test-only root unit retains
 only DAC-read/search and UID/GID-switch capabilities so it can read that marker,
 enter the `tester` identity, and address the tester user manager. It restarts
-the fixed AIOS system and tester user units, proves SSH/network/display
+the fixed Minnerite system and tester user units, proves SSH/network/display
 independence, terminates the tester login, and publishes a bounded public report
 under `/run`. The path unit and verifier are absent from `aios-dev` and
 production composition; they accept no unit, command, path, or argument from
@@ -200,7 +200,7 @@ Lock adoption into the host checkout requires matching artifact hashes and
 unchanged flake/Cargo source. Ordinary builds require those locks and refuse
 to update them. The host never runs Nix or Cargo.
 
-`build --target packages` selects all five required non-image AIOS packages;
+`build --target packages` selects all five required non-image Minnerite packages;
 missing outputs fail rather than silently reducing the target. An explicitly
 selected package such as `--package aios-dev-tools` supports an upstream smoke
 build. `build --target system` prepares the enrolled development candidate and

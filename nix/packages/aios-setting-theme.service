@@ -1,5 +1,5 @@
 [Unit]
-Description=Apply one registered Horizon OS desktop theme
+Description=Apply one registered Minnerite desktop theme
 ConditionUser=!root
 
 [Service]

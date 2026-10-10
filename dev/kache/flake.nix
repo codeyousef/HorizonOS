@@ -1,5 +1,5 @@
 {
-  description = "Optional isolated Horizon OS developer Rust cache";
+  description = "Optional isolated Minnerite developer Rust cache";
 
   # Keep the tool's compiler/package inputs separate from the OS package base.
   # v0.28.1, resolved to its immutable commit; flake.lock pins the full graph.

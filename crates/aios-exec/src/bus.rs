@@ -213,8 +213,23 @@ impl Runtime {
         let mut ledger = Ledger::open().map_err(|e| diagnostic("durable-ledger", e))?;
         // A new bus connection cannot resurrect old volatile caller authority.
         // Durable pre-effect plans are cancelled; BUILDING keeps its slot until
-        // a verified worker-stop adapter reconciles it.
-        ledger.cancel_abandoned_pre_effects().map_err(|e| diagnostic("orphan-reconciliation", e))?;
+        // a verified worker-stop adapter reconciles it. Already-authorized
+        // transactions are handed back to their independent retained guards.
+        ledger
+            .cancel_abandoned_pre_effects()
+            .map_err(|e| diagnostic("orphan-reconciliation", e))?;
+        for (id, uid, hash) in ledger
+            .authorized_handoffs()
+            .map_err(|e| diagnostic("guard-reconciliation", e))?
+        {
+            let handoff =
+                crate::guard::read(&id).map_err(|e| diagnostic("guard-handoff", e))?;
+            if handoff.requester_uid != uid || handoff.final_plan_sha256 != hash {
+                return Err(diagnostic("guard-handoff", Error::Integrity));
+            }
+            crate::guard::restart(&handoff)
+                .map_err(|e| diagnostic("guard-restart", e))?;
+        }
         let candidates = CandidateStore::open().map_err(|e| diagnostic("candidate-store", e))?;
         Ok(Self {
             authorizer,
@@ -232,6 +247,36 @@ impl Runtime {
         self.authorizer.bus().recheck(caller)?;
         Ok(owner)
     }
+    fn management(
+        &self,
+        id: &str,
+        caller: &VerifiedCaller,
+    ) -> Result<crate::guard::GuardHandoff> {
+        references(id, None)?;
+        let identity = caller.identity();
+        if !identity.session.as_ref().is_some_and(|session| {
+            session.remote
+                && session.active
+                && session.class == "user"
+                && session.state == "active"
+        }) || self.authorizer.bus().target().target().management_channel != "ssh-development"
+        {
+            return Err(ErrorCode::PermissionDenied.into());
+        }
+        let handoff = crate::guard::read(id)?;
+        if handoff.requester_uid != identity.uid {
+            return Err(ErrorCode::PermissionDenied.into());
+        }
+        let status = self.ledger.status(id, identity.uid)?;
+        if status.state != State::Authorized
+            || status.final_plan_sha256.as_deref()
+                != Some(handoff.final_plan_sha256.as_str())
+        {
+            return Err(ErrorCode::Conflict.into());
+        }
+        self.authorizer.bus().recheck(caller)?;
+        Ok(handoff)
+    }
     fn cleanup(&mut self) -> crate::Result<()> {
         self.authorizer.bus().target().recheck()?;
         self.reads.cleanup()?;
@@ -241,7 +286,11 @@ impl Runtime {
             let status = self.ledger.status(id, owner.caller.identity().uid)?;
             if matches!(
                 status.state,
-                State::Cancelled | State::Rejected | State::Failed
+                State::Committed
+                    | State::RolledBack
+                    | State::Cancelled
+                    | State::Rejected
+                    | State::Failed
             ) {
                 if now.saturating_sub(owner.created_ms) > TERMINAL_RETENTION_MS {
                     expired.push(id.clone());
@@ -409,8 +458,9 @@ impl Runtime {
             Operation::Capabilities => Ok(envelope(
                 "capabilities",
                 json!({"interface":NAME,"prepare":true,"private_plans":true,
-                "native_caller_verified":true,"authorize":true,"execute":false,"rollback":false,"resource_consent":true,
-                "trusted_confirmation":true,"max_request_bytes":MAX_TASK_BYTES,"max_reply_bytes":MAX_FRAME_BYTES}),
+                "native_caller_verified":true,"authorize":true,"execute":true,"rollback":true,
+                "management_heartbeat":true,"resource_consent":true,"trusted_confirmation":true,
+                "max_request_bytes":MAX_TASK_BYTES,"max_reply_bytes":MAX_FRAME_BYTES}),
             )),
             Operation::Prepare(raw) => self.prepare(caller, &raw),
             Operation::GetPlan(id) => {
@@ -419,10 +469,19 @@ impl Runtime {
             }
             Operation::GetTransaction(id) => {
                 self.owner(&id, caller)?;
+                let status = self.ledger.status(&id, caller.identity().uid)?;
+                let system_effects_performed = matches!(
+                    status.state,
+                    State::Authorized
+                        | State::Committed
+                        | State::RolledBack
+                        | State::RecoveryRequired
+                );
                 Ok(envelope(
                     "transaction",
-                    json!({"status":self.ledger.status(&id,caller.identity().uid)?,
-                    "history":self.ledger.history(&id,caller.identity().uid)?,"system_effects_performed":false}),
+                    json!({"status":status,
+                    "history":self.ledger.history(&id,caller.identity().uid)?,
+                    "system_effects_performed":system_effects_performed}),
                 ))
             }
             Operation::Cancel(id) => {
@@ -436,18 +495,46 @@ impl Runtime {
                     json!({"complete":status.state==State::Cancelled,"status":status,"system_effects_performed":false}),
                 ))
             }
+            Operation::GuardStatus(id) => {
+                self.management(&id, caller)?;
+                Ok(envelope("guard_status", crate::guard::status(&id)?))
+            }
+            Operation::GuardHeartbeat(id, heartbeat) => {
+                self.management(&id, caller)?;
+                Ok(envelope(
+                    "guard_heartbeat",
+                    crate::guard::heartbeat(&id, &heartbeat)?,
+                ))
+            }
             Operation::Execute(id, hash) => {
                 self.approval_reference(caller, &id, &hash)?;
-                let authorization = self.authorizer.consume(
-                    &self.ledger, caller, &id, &hash)?;
+                if self
+                    .ledger
+                    .final_plan(&id, caller.identity().uid)?
+                    .reboot_required
+                {
+                    return Err(ErrorCode::UnsupportedCapability.into());
+                }
+                let authorization =
+                    self.authorizer
+                        .consume(&self.ledger, caller, &id, &hash)?;
                 if authorization.plan_id() != id || authorization.plan_hash() != hash {
                     return Err(ErrorCode::TargetChanged.into());
                 }
-                Err(ErrorCode::UnsupportedCapability.into())
+                let status =
+                    crate::guard::handoff(&mut self.ledger, &id, caller.identity().uid, &hash)?;
+                Ok(envelope(
+                    "guard_handoff",
+                    json!({"plan_id":id,"plan_sha256":hash,"status":status,
+                    "independent_guard_started":true}),
+                ))
             }
             Operation::Rollback(id) => {
                 self.owner(&id, caller)?;
-                Err(ErrorCode::UnsupportedCapability.into())
+                if self.ledger.status(&id, caller.identity().uid)?.state != State::Authorized {
+                    return Err(ErrorCode::Conflict.into());
+                }
+                Ok(envelope("guard_recovery", crate::guard::recover(&id)?))
             }
         }
     }
@@ -461,6 +548,8 @@ enum Operation {
     SystemAction(system::Scope, &'static str, String),
     GraphStatus,
     Capabilities,
+    GuardStatus(String),
+    GuardHeartbeat(String, String),
     Prepare(String),
     GetPlan(String),
     GetTransaction(String),
@@ -599,10 +688,10 @@ impl Executor {
                     let worker_plan = plan.clone();
                     let worker_permission = permission.clone();
                     std::thread::spawn(move || {
-                        let result = crate::build_worker::supervise(
+                        let completion = crate::build_worker::supervise(
                             &worker_plan, &worker_permission);
-                        let worker = match result {
-                            Ok(worker) => worker,
+                        let completion = match completion {
+                            Ok(completion) => completion,
                             Err(_) => {
                                 eprintln!("{}", json!({
                                     "schema_version": 1,
@@ -613,34 +702,56 @@ impl Executor {
                             }
                         };
                         let Ok(mut runtime) = worker_runtime.lock() else { return; };
-                        let stop = VerifiedWorkerStop::from_completed_worker(
-                            &worker_plan, &worker);
-                        if runtime.ledger.status(
-                            &worker_plan.plan_id, worker_plan.requester.uid)
-                            .is_ok_and(|status| status.cancel_requested)
-                        {
-                            let _ = runtime.ledger.acknowledge_worker_stopped(
-                                &worker_plan.plan_id, worker_plan.requester.uid, &stop);
-                            return;
-                        }
-                        let Ok(template) = InstalledTemplate::from_installed() else { return; };
-                        let Ok(baseline) = NativeBaseline::capture(&template) else { return; };
-                        let unchanged = baseline.baseline == worker_plan.baseline
-                            && runtime.authorizer.bus().target().recheck().is_ok();
-                        let verified = VerifiedBuild::from_worker(worker, unchanged);
-                        match runtime.ledger.record_build(
-                            &worker_plan.plan_id, worker_plan.requester.uid, &verified,
-                            &worker_plan.target, &worker_plan.baseline)
-                            .and_then(|_| runtime.ledger.freeze(
-                                &worker_plan.plan_id, worker_plan.requester.uid,
-                                boottime_ms()?, false).map(|_| ()))
-                        {
-                            Ok(()) => {}
-                            Err(_) => eprintln!("{}", json!({
-                                "schema_version": 1,
-                                "error": "BUILD_RESULT_NOT_COMMITTED",
-                                "state": "BUILDING",
-                            })),
+                        match completion {
+                            crate::build_worker::WorkerCompletion::Failed(failure) => {
+                                let stop = VerifiedWorkerStop::from_failed_worker(
+                                    &worker_plan, &failure);
+                                match runtime.ledger.record_build_failure(
+                                    &worker_plan.plan_id, worker_plan.requester.uid, &stop)
+                                {
+                                    Ok(_) => eprintln!("{}", json!({
+                                        "schema_version": 1,
+                                        "error": "BUILD_FAILED",
+                                        "state": "FAILED",
+                                    })),
+                                    Err(_) => eprintln!("{}", json!({
+                                        "schema_version": 1,
+                                        "error": "BUILD_FAILURE_NOT_COMMITTED",
+                                        "state": "BUILDING",
+                                    })),
+                                }
+                            }
+                            crate::build_worker::WorkerCompletion::Built(worker) => {
+                                let stop = VerifiedWorkerStop::from_completed_worker(
+                                    &worker_plan, &worker);
+                                if runtime.ledger.status(
+                                    &worker_plan.plan_id, worker_plan.requester.uid)
+                                    .is_ok_and(|status| status.cancel_requested)
+                                {
+                                    let _ = runtime.ledger.acknowledge_worker_stopped(
+                                        &worker_plan.plan_id, worker_plan.requester.uid, &stop);
+                                    return;
+                                }
+                                let Ok(template) = InstalledTemplate::from_installed() else { return; };
+                                let Ok(baseline) = NativeBaseline::capture(&template) else { return; };
+                                let unchanged = baseline.baseline == worker_plan.baseline
+                                    && runtime.authorizer.bus().target().recheck().is_ok();
+                                let verified = VerifiedBuild::from_worker(worker, unchanged);
+                                match runtime.ledger.record_build(
+                                    &worker_plan.plan_id, worker_plan.requester.uid, &verified,
+                                    &worker_plan.target, &worker_plan.baseline)
+                                    .and_then(|_| runtime.ledger.freeze(
+                                        &worker_plan.plan_id, worker_plan.requester.uid,
+                                        boottime_ms()?, false).map(|_| ()))
+                                {
+                                    Ok(()) => {}
+                                    Err(_) => eprintln!("{}", json!({
+                                        "schema_version": 1,
+                                        "error": "BUILD_RESULT_NOT_COMMITTED",
+                                        "state": "BUILDING",
+                                    })),
+                                }
+                            }
                         }
                     });
                     envelope("build", json!({
@@ -698,6 +809,29 @@ impl Executor {
     ) -> Result<String> {
         self.call(header, Operation::Execute(plan_id.into(), plan_hash.into()))
             .await
+    }
+    async fn guard_status(
+        &self,
+        transaction_id: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> Result<String> {
+        self.call(header, Operation::GuardStatus(transaction_id.into()))
+            .await
+    }
+    async fn guard_heartbeat(
+        &self,
+        transaction_id: &str,
+        heartbeat_json: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> Result<String> {
+        if heartbeat_json.len() > MAX_TASK_BYTES {
+            return Err(ErrorCode::ResourceExhausted.into());
+        }
+        self.call(
+            header,
+            Operation::GuardHeartbeat(transaction_id.into(), heartbeat_json.into()),
+        )
+        .await
     }
     async fn get_transaction(
         &self,

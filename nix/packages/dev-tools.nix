@@ -21,7 +21,7 @@ stdenvNoCC.mkDerivation {
     runHook postInstall
   '';
   meta = {
-    description = "Verified AIOS guest development tooling";
+    description = "Verified Minnerite guest development tooling";
     mainProgram = "devctl";
     platforms = lib.platforms.linux;
   };

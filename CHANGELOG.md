@@ -43,10 +43,18 @@
   broad `ProtectSystem`, `ProtectKernelTunables`, and `ProtectHome` mounts made
   candidate and recovery activation fail read-only while command, identity and
   artifact gates remain.
+- Resolve desktop applications delegated to the per-user systemd manager through
+  logind's root-owned `User.Display` pointer for the same UID, while refusing to
+  substitute a graphical session for a concrete SSH or TTY caller.
+- Permit broker-owned foreground-terminal confirmations from a Konsole process
+  in the caller's active local Wayland/X11 logind session; terminal ownership,
+  foreground process-group, UID, boot and session bindings remain mandatory.
 - Add authenticated `aiosctl plan` and transaction inspection, authorization,
-  apply and rollback-plan commands for bounded package intents. Prepared plans
-  persist only for the same UID, boot, system bus and live logind session;
-  headless denials preserve the concrete plan ID instead of claiming consent.
+  apply, cancel and rollback-plan commands for bounded package intents. Cancel
+  exposes the broker's owner-bound pre-effect cancellation so an expired or
+  declined approval cannot strand the active-plan slot. Prepared plans persist
+  only for the same UID, boot, system bus and live logind session; headless
+  denials preserve the concrete plan ID instead of claiming consent.
 - Add broker-owned final-plan TTY confirmation with foreground process/session
   checks, control-safe immutable impact/recovery rendering, an exact plan-bound
   phrase, and mandatory separate fresh native polkit authentication.

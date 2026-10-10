@@ -361,20 +361,71 @@ fn session(
         "org.freedesktop.login1.Manager",
     )
     .map_err(|_| Error::Authority)?;
-    let path: OwnedObjectPath = match manager.call("GetSessionByPID", &(pid,)) {
-        Ok(path) => path,
+    let direct_path: Option<OwnedObjectPath> = match manager.call("GetSessionByPID", &(pid,)) {
+        Ok(path) => Some(path),
         Err(zbus::Error::MethodError(name, _, _))
             if name.as_str() == "org.freedesktop.login1.NoSessionForPID" =>
         {
-            return Ok(None);
+            None
         }
         Err(_) => return Err(Error::Authority),
     };
-    if !path
-        .as_str()
-        .starts_with("/org/freedesktop/login1/session/")
-        || path.as_str().len() > 256
+    let direct = direct_path
+        .as_ref()
+        .map(|path| read_session(connection, owner, path, uid))
+        .transpose()?;
+    // Desktop applications launched by the per-user systemd manager are not
+    // members of the graphical session scope. logind's root-owned User.Display
+    // property is the authoritative association for this exact UID. Never
+    // replace a concrete SSH/TTY session with the display session.
+    if direct.as_ref().is_some_and(|session| session.class != "manager") {
+        return Ok(direct);
+    }
+    let user_path: OwnedObjectPath = manager
+        .call("GetUser", &(uid,))
+        .map_err(|_| Error::Authority)?;
+    if !valid_path(&user_path, "/org/freedesktop/login1/user/") {
+        return Err(Error::Authority);
+    }
+    let properties = Proxy::new(
+        connection,
+        owner,
+        user_path.as_str(),
+        "org.freedesktop.DBus.Properties",
+    )
+    .map_err(|_| Error::Authority)?;
+    let display: zbus::zvariant::OwnedValue = properties
+        .call("Get", &("org.freedesktop.login1.User", "Display"))
+        .map_err(|_| Error::Authority)?;
+    let (display_id, display_path): (String, OwnedObjectPath) =
+        display.try_into().map_err(|_| Error::Authority)?;
+    if display_id.is_empty() && display_path.as_str() == "/" {
+        return Ok(direct);
+    }
+    let selected = read_session(connection, owner, &display_path, uid)?;
+    if selected.id != display_id
+        || selected.remote
+        || !selected.active
+        || selected.class != "user"
+        || selected.state != "active"
+        || !matches!(selected.kind.as_str(), "x11" | "wayland")
     {
+        return Err(Error::Authority);
+    }
+    Ok(Some(selected))
+}
+
+fn valid_path(path: &OwnedObjectPath, prefix: &str) -> bool {
+    path.as_str().starts_with(prefix) && path.as_str().len() <= 256
+}
+
+fn read_session(
+    connection: &Connection,
+    owner: &str,
+    path: &OwnedObjectPath,
+    uid: u32,
+) -> Result<SessionIdentity> {
+    if !valid_path(path, "/org/freedesktop/login1/session/") {
         return Err(Error::Authority);
     }
     // Fresh direct Properties.Get calls avoid proxy property caches during recheck.
@@ -407,15 +458,14 @@ fn session(
         }
         Ok(s)
     };
-    let result = SessionIdentity {
+    Ok(SessionIdentity {
         id: string("Id", 128)?,
         remote: get("Remote")?.try_into().map_err(|_| Error::Authority)?,
         kind: string("Type", 32)?,
         class: string("Class", 32)?,
         state: string("State", 32)?,
         active: get("Active")?.try_into().map_err(|_| Error::Authority)?,
-    };
-    Ok(Some(result))
+    })
 }
 fn read_proc(path: &str, owner: u32) -> Result<String> {
     let file = OpenOptions::new()

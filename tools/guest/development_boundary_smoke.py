@@ -49,10 +49,10 @@ def main():
         "productionTestProfile":"Production excludes disposable test scenario profiles.",
         "productionFixtureService":"Production excludes fixed acceptance fixture services.",
         "productionFixtureActivation":"Production excludes fixed acceptance fixture activation units.",
-        "sessionMissingPackage":"Enabled Horizon OS user broker requires the reviewed aiosCore package.",
-        "visualWithoutDesktop":"Horizon OS visual control requires desktop.enable.",
-        "initrdWithoutRecovery":"Horizon OS initrd diagnostics require recovery.enable.",
-        "networkAllowed":"Horizon OS V1 model.allowNetwork must be false.",
+        "sessionMissingPackage":"Enabled Minnerite user broker requires the reviewed aiosCore package.",
+        "visualWithoutDesktop":"Minnerite visual control requires desktop.enable.",
+        "initrdWithoutRecovery":"Minnerite initrd diagnostics require recovery.enable.",
+        "networkAllowed":"Minnerite V1 model.allowNetwork must be false.",
     }
     for name, reason in required_denials.items():
         if reason not in cases[name]["failedAssertions"]:

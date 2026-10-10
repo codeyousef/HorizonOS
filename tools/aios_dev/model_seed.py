@@ -81,7 +81,7 @@ def validate_cache(root):
 def export(config, artifact):
     if not config.root.is_relative_to(Path('/mnt/Storage')):
         raise invalid('Model storage must be under /mnt/Storage')
-    if not re.fullmatch(r'/nix/store/[a-z0-9]{32}-horizon-os-model-normal-[a-f0-9]{12}', artifact):
+    if not re.fullmatch(r'/nix/store/[a-z0-9]{32}-minnerite-model-normal-[a-f0-9]{12}', artifact):
         raise invalid('Only the reviewed immutable model data package can be exported')
     values = entries(config.root)
     if not artifact.endswith('-'+values[0]['sha256'][:12]):

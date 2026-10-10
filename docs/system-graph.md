@@ -149,9 +149,10 @@ Running NixOS activation and the selected system profile are observed separately
 through fixed root-owned paths and retained as separate source-truth providers.
 The provider also performs a bounded, stable enumeration of root-owned
 `system-N-link` history. Each entry records its generation, realized closure,
-running/selected status, `declarative_system_profile` ownership and null
-management attribution. Null attribution is unknown—not evidence that a user or
-transaction created it. The system owner never enumerates another account's
+running/selected status, `unmanaged_system_profile` ownership and null
+management attribution. A profile link does not prove the broker created or
+approved that generation; attribution remains unknown until transaction
+provenance is independently joined. The system owner never enumerates another account's
 profiles. A separately sandboxed user timer derives only its effective account
 from the native account database and inventories the two documented Nix profile
 locations for that account. It stores a private `Scope::User(uid)` graph under

@@ -22,7 +22,7 @@ def main():
         release = Path(__file__).resolve().parents[2]
         unit = subprocess.check_output(['/run/current-system/sw/bin/systemctl', '--system', 'show',
                                        'aios-model.service', '--property=ExecStart'], timeout=5).decode()
-        match = re.search(r'--model-directory (/nix/store/[a-z0-9]{32}-horizon-os-model-normal-[a-f0-9]{12})', unit)
+        match = re.search(r'--model-directory (/nix/store/[a-z0-9]{32}-minnerite-model-normal-[a-f0-9]{12})', unit)
         if not match or '--qualification' in unit:
             raise RuntimeError('requires actual installed normal model service')
         lock = (Path(match[1]) / 'lock.json').read_bytes()

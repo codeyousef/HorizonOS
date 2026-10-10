@@ -26,7 +26,7 @@ in {
     users.users.aios-observer = { isSystemUser = true; group = "aios-observer"; home = "/var/empty"; };
     environment.systemPackages = lib.optional (aiosState != null) aiosState;
     systemd.services.aios-state = {
-      description = "Horizon OS private native system graph";
+      description = "Minnerite private native system graph";
       wantedBy = [ "multi-user.target" ]; after = [ "local-fs.target" "dbus.service" ];
       serviceConfig = common // {
         Type = "exec"; ExecStart = "${aiosState}/bin/aios-stated";
@@ -41,7 +41,7 @@ in {
       };
     };
     systemd.services.aios-observer = {
-      description = "Horizon OS filtered native event observer";
+      description = "Minnerite filtered native event observer";
       wantedBy = [ "multi-user.target" ];
       after = [ "dbus.service" "systemd-udevd.service" ];
       serviceConfig = common // {
@@ -56,17 +56,17 @@ in {
       };
     };
     systemd.services.aios-reconcile = {
-      description = "Horizon OS native graph reconciliation";
+      description = "Minnerite native graph reconciliation";
       after = [ "aios-state.service" ];
       serviceConfig = common // { Type = "oneshot"; ExecStart = "${aiosState}/bin/aios-stated --reconcile"; };
     };
     systemd.timers.aios-reconcile = {
-      description = "Reconcile the Horizon OS graph every fifteen minutes";
+      description = "Reconcile the Minnerite graph every fifteen minutes";
       wantedBy = [ "timers.target" ];
       timerConfig = { OnActiveSec = "15min"; OnUnitActiveSec = "15min"; AccuracySec = "1s"; Unit = "aios-reconcile.service"; };
     };
     systemd.user.services.aios-user-profile-reconcile = {
-      description = "Horizon OS private per-user Nix profile reconciliation";
+      description = "Minnerite private per-user Nix profile reconciliation";
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${aiosState}/bin/aios-user-stated --reconcile";
