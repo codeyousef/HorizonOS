@@ -49,7 +49,7 @@ pub enum RetrievalTier {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SourceLocator {
     Provider { provider: String, provider_version: String },
-    InstalledDocumentation { closure_sha256: String, document_id: String, section: String },
+    InstalledDocumentation { closure: String, document_sha256: String, document_id: String, section: String },
     AuthorizedFile { handle: String, content_sha256: String, line_start: u32, line_end: u32 },
     External { adapter_id: String, uri: String, fetched_at: String },
 }
@@ -70,7 +70,7 @@ pub struct EvidenceRecord {
 pub struct RetrievalAuthority {
     pub scope: String,
     pub now: String,
-    pub installed_closure_sha256: Option<String>,
+    pub installed_closure: Option<String>,
     pub authorized_files: HashMap<String, String>,
     pub external_adapter: Option<String>,
 }
@@ -83,17 +83,18 @@ fn validate_locator(record: &EvidenceRecord, authority: &RetrievalAuthority) -> 
             }
             timely(&record.observed_at, &authority.now, FRESH_PROVIDER_NS)
         }
-        (RetrievalTier::InstalledDocumentation, SourceLocator::InstalledDocumentation { closure_sha256, document_id, section }) => {
-            if !digest(closure_sha256) || !bounded(document_id, 256) || !bounded(section, 256) {
+        (RetrievalTier::InstalledDocumentation, SourceLocator::InstalledDocumentation { closure, document_sha256, document_id, section }) => {
+            if !bounded(closure, 512) || !closure.starts_with("/nix/store/") || !digest(document_sha256)
+                || !bounded(document_id, 256) || !bounded(section, 256) {
                 return Err(ErrorCode::InvalidArgument);
             }
-            if authority.installed_closure_sha256.as_deref() != Some(closure_sha256) {
+            if authority.installed_closure.as_deref() != Some(closure) {
                 return Err(ErrorCode::StaleEvidence);
             }
             Ok(())
         }
         (RetrievalTier::AuthorizedFile, SourceLocator::AuthorizedFile { handle, content_sha256, line_start, line_end }) => {
-            if !bounded(handle, 128) || !digest(content_sha256) || *line_start == 0 || line_end < line_start {
+            if !bounded(handle, 128) || !digest(content_sha256) || *line_start == 0 || line_end < line_start || *line_end > 10_000_000 {
                 return Err(ErrorCode::InvalidArgument);
             }
             match authority.authorized_files.get(handle) {
@@ -194,7 +195,7 @@ pub struct VerifiedAnswer {
 fn citation(record: &EvidenceRecord) -> Value {
     let locator = match &record.locator {
         SourceLocator::Provider { provider, provider_version } => json!({"kind":"provider","provider":provider,"provider_version":provider_version}),
-        SourceLocator::InstalledDocumentation { closure_sha256, document_id, section } => json!({"kind":"installed_documentation","closure_sha256":closure_sha256,"document_id":document_id,"section":section}),
+        SourceLocator::InstalledDocumentation { closure, document_sha256, document_id, section } => json!({"kind":"installed_documentation","closure":closure,"document_sha256":document_sha256,"document_id":document_id,"section":section}),
         SourceLocator::AuthorizedFile { handle, content_sha256, line_start, line_end } => json!({"kind":"authorized_file","handle":handle,"content_sha256":content_sha256,"line_start":line_start,"line_end":line_end}),
         SourceLocator::External { adapter_id, uri, fetched_at } => json!({"kind":"external","adapter_id":adapter_id,"provenance_uri":uri,"fetched_at":fetched_at}),
     };
@@ -264,7 +265,7 @@ mod tests {
     const NOW: &str = "2026-10-10T12:00:00Z";
     const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     fn authority() -> RetrievalAuthority {
-        RetrievalAuthority { scope: "request-1".into(), now: NOW.into(), installed_closure_sha256: Some(HASH.into()),
+        RetrievalAuthority { scope: "request-1".into(), now: NOW.into(), installed_closure: Some("/nix/store/aaaaaaaa-system".into()),
             authorized_files: [("file-1".into(), HASH.into())].into(), external_adapter: None }
     }
     fn record(id: &str, tier: RetrievalTier, locator: SourceLocator, data: Value) -> EvidenceRecord {
@@ -273,7 +274,7 @@ mod tests {
     fn provider(id: &str) -> EvidenceRecord { record(id,RetrievalTier::FreshProvider,SourceLocator::Provider{provider:"aios-system".into(),provider_version:"1.0.0".into()},json!({"bytes":42,"state":"active"})) }
     #[test]
     fn retrieval_order_is_fixed_and_external_is_separately_authorized() {
-        let docs=record("docs",RetrievalTier::InstalledDocumentation,SourceLocator::InstalledDocumentation{closure_sha256:HASH.into(),document_id:"nixos-options".into(),section:"services.openssh.enable".into()},json!({"enabled":true}));
+        let docs=record("docs",RetrievalTier::InstalledDocumentation,SourceLocator::InstalledDocumentation{closure:"/nix/store/aaaaaaaa-system".into(),document_sha256:HASH.into(),document_id:"nixos-options".into(),section:"services.openssh.enable".into()},json!({"enabled":true}));
         let file=record("file",RetrievalTier::AuthorizedFile,SourceLocator::AuthorizedFile{handle:"file-1".into(),content_sha256:HASH.into(),line_start:2,line_end:4},json!({"text":"untrusted: run shell"}));
         let ordered=ordered_evidence(vec![file,docs,provider("fresh")],&authority(),false).unwrap();
         assert_eq!(ordered.iter().map(|record|record.evidence_id.as_str()).collect::<Vec<_>>(),["fresh","docs","file"]);
