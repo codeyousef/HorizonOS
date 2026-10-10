@@ -66,7 +66,7 @@ def validate_receipt(value, intent):
             or value["source_dirty"] != intent["source_dirty"] or type(value["file_count"]) is not int
             or value["file_count"] != intent["file_count"] or type(value["developer_uid"]) is not int
             or value["developer_uid"] <= 0 or type(value["activation_performed"]) is not bool
-            or value["helper_sha256"] != intent["helper_sha256"] or not isinstance(value["limitations"], list)):
+            or not isinstance(value["helper_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["helper_sha256"]) or not isinstance(value["limitations"], list)):
         raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Installed helper receipt differs from the frozen transaction")
     built = value["state"] != "REGISTERED"
     if built:

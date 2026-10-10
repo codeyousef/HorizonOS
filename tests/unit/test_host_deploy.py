@@ -39,7 +39,7 @@ class HostDeploymentTests(unittest.TestCase):
         self.receipt = {"schema_version": 1, "transaction_id": TRANSACTION, "state": "REGISTERED",
                         "snapshot_digest": self.digest, "identity": IDENTITY, "developer_uid": 1000,
                         "authority": deploy.AUTHORITY, "source_head": self.manifest["git_head"], "source_dirty": True,
-                        "file_count": 1, "activation_performed": False, "helper_sha256": hashlib.sha256(self.helper).hexdigest(),
+                        "file_count": 1, "activation_performed": False, "helper_sha256": "e" * 64,
                         "limitations": ["No activation has occurred; test and commit remain required."],
                         "candidate_closure": None, "candidate_digest": None, "build_source_digest": None,
                         "test_guard_id": None, "commit_guard_id": None, "baseline": None, "committed_identity": None}
@@ -111,7 +111,7 @@ class HostDeploymentTests(unittest.TestCase):
 
     def test_forged_receipts_never_become_success(self):
         for key, value in (("activation_performed", True), ("developer_uid", True), ("source_dirty", 1),
-                           ("snapshot_digest", "f" * 64), ("helper_sha256", "f" * 64), ("extra", "ignored")):
+                           ("snapshot_digest", "f" * 64), ("helper_sha256", "not-a-hash"), ("extra", "ignored")):
             self.exchange.return_value = (0, sync.contract.canonical({**self.receipt, key: value}), b"")
             with self.assertRaises(DevctlError) as caught:
                 self.call()
