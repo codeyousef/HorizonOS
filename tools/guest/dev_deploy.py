@@ -436,7 +436,7 @@ def validate_receipt(receipt, prior):
             or type(receipt["file_count"]) is not int or receipt["file_count"] <= 0
             or type(receipt["activation_performed"]) is not bool
             or not isinstance(receipt["limitations"], list)
-            or receipt["state"] not in {"REGISTERED", "TESTING", "TESTED", "COMMITTING", "COMMITTED"}):
+            or receipt["state"] not in {"REGISTERED", "TESTING", "TESTED", "COMMITTING", "COMMITTED", "REJECTED", "RECOVERY_REQUIRED"}):
         raise ValueError("invalid registration receipt")
     empty_candidate = receipt["candidate_closure"] is None and receipt["candidate_digest"] is None and receipt["build_source_digest"] is None and receipt["baseline"] is None
     if receipt["state"] == "REGISTERED":
@@ -453,10 +453,12 @@ def validate_receipt(receipt, prior):
     for field in ("test_guard_id", "commit_guard_id"):
         if receipt[field] is not None:
             canonical_uuid(receipt[field])
-    if receipt["state"] in {"TESTING", "TESTED", "COMMITTING", "COMMITTED"} and receipt["test_guard_id"] is None:
+    if receipt["state"] in {"TESTING", "TESTED", "COMMITTING", "COMMITTED", "REJECTED", "RECOVERY_REQUIRED"} and receipt["test_guard_id"] is None:
         raise ValueError("missing test guard")
     if receipt["state"] in {"COMMITTING", "COMMITTED"} and receipt["commit_guard_id"] is None:
         raise ValueError("missing commit guard")
+    if receipt["state"] in {"REJECTED", "RECOVERY_REQUIRED"} and receipt["activation_performed"] and receipt["commit_guard_id"] is None:
+        raise ValueError("qualified test failure requires a commit guard")
     if receipt["state"] in {"TESTED", "COMMITTING", "COMMITTED"} and not receipt["activation_performed"]:
         raise ValueError("completed guard activation evidence missing")
     if receipt["state"] == "COMMITTED":
@@ -779,7 +781,17 @@ def dispatch(request, *, config_reader=read_config, identity_reader=root_identit
                 raise ValueError("registered candidate changed")
         finally:
             os.close(descriptor)
-        if receipt["state"] == "TESTING" and durable_guard == "ROLLED_BACK":
+        if durable_guard in {"REJECTED", "RECOVERY_REQUIRED"}:
+            receipt.update(
+                state=durable_guard,
+                limitations=[
+                    "Independent guard rejected the transaction; no retry or commit is permitted."
+                    if durable_guard == "REJECTED" else
+                    "Independent guard requires recovery; prior pointers alone do not prove recovery and further activation is blocked."
+                ],
+            )
+            save_receipt(state, owner_uid, prior, receipt)
+        elif receipt["state"] == "TESTING" and durable_guard == "ROLLED_BACK":
             receipt.update(
                 state="TESTED",
                 activation_performed=True,

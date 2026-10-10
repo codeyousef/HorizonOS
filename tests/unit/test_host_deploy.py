@@ -179,6 +179,26 @@ class HostDeploymentTests(unittest.TestCase):
             with self.assertRaises(DevctlError):
                 parser().parse_args(["deploy", "--mode", "register", flag, "untrusted"])
 
+    def test_failed_guard_receipts_remain_built_unqualified_evidence(self):
+        self.call()
+        intent = deploy.read_record(self.root / ".local/deployments" / TRANSACTION / "intent.json")
+        for state in ("REJECTED", "RECOVERY_REQUIRED"):
+            failed = {**self.receipt, "state": state,
+                      "candidate_closure": "/nix/store/" + "a" * 32 + "-nixos-system-aios-dev-test",
+                      "candidate_digest": "b" * 64, "build_source_digest": "c" * 64,
+                      "test_guard_id": "11111111-1111-4111-8111-111111111111",
+                      "baseline": {key: IDENTITY["current_system"] for key in ("running", "profile", "booted")},
+                      "limitations": ["Independent guard failed; recovery/qualification remains incomplete."]}
+            self.assertEqual(deploy.validate_receipt(failed, intent), failed)
+            with self.assertRaises(DevctlError):
+                deploy.validate_receipt({**failed, "activation_performed": True}, intent)
+            committed_test = {**failed, "activation_performed": True,
+                              "commit_guard_id": "22222222-2222-4222-8222-222222222222"}
+            self.assertEqual(deploy.validate_receipt(committed_test, intent), committed_test)
+            for key in ("candidate_closure", "candidate_digest", "build_source_digest", "test_guard_id"):
+                with self.assertRaises(DevctlError):
+                    deploy.validate_receipt({**failed, key: None}, intent)
+
 
 if __name__ == "__main__":
     unittest.main()

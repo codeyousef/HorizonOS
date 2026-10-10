@@ -60,7 +60,7 @@ def validate_receipt(value, intent):
     request = intent["request"]
     if (not isinstance(value, dict) or set(value) != FIELDS or type(value["schema_version"]) is not int
             or value["schema_version"] != 1
-            or value["state"] not in {"REGISTERED", "TESTING", "TESTED", "COMMITTING", "COMMITTED"}
+            or value["state"] not in {"REGISTERED", "TESTING", "TESTED", "COMMITTING", "COMMITTED", "REJECTED", "RECOVERY_REQUIRED"}
             or any(value[key] != request[key] for key in ("transaction_id", "snapshot_digest", "identity", "authority"))
             or value["source_head"] != intent["source_head"] or type(value["source_dirty"]) is not bool
             or value["source_dirty"] != intent["source_dirty"] or type(value["file_count"]) is not int
@@ -81,10 +81,12 @@ def validate_receipt(value, intent):
     for field in ("test_guard_id", "commit_guard_id"):
         if value[field] is not None:
             identifier(value[field])
-    if value["state"] in {"TESTING", "TESTED", "COMMITTING", "COMMITTED"} and value["test_guard_id"] is None:
+    if value["state"] in {"TESTING", "TESTED", "COMMITTING", "COMMITTED", "REJECTED", "RECOVERY_REQUIRED"} and value["test_guard_id"] is None:
         raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Test guard evidence is missing")
     if value["state"] in {"COMMITTING", "COMMITTED"} and value["commit_guard_id"] is None:
         raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Commit guard evidence is missing")
+    if value["state"] in {"REJECTED", "RECOVERY_REQUIRED"} and value["activation_performed"] and value["commit_guard_id"] is None:
+        raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Qualified test failure lacks its commit guard")
     if value["state"] in {"TESTED", "COMMITTING", "COMMITTED"} and value["activation_performed"] is not True:
         raise failure(ExitCode.VERIFICATION_FAILURE, "DEPLOYMENT_RECEIPT_MISMATCH", "Completed guard activation evidence is missing")
     if value["state"] == "COMMITTED":

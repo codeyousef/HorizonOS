@@ -100,6 +100,13 @@ product guards serialize through the same durable guard ledger, so two
 privileged activations cannot overlap. Guard recovery after service restart
 reconciles durable effects before another transaction can begin.
 
+Status reconciles a failed independent guard to `REJECTED` or
+`RECOVERY_REQUIRED`, preserving the frozen candidate and guard identifiers.
+These receipts cannot be retried as test/commit and never qualify a candidate.
+`RECOVERY_REQUIRED` continues to block privileged activation even when the
+running system already matches the baseline; full recovery remains unproven.
+Reading status does not restart a failed guard or clear its ledger.
+
 The helper is intentionally guest-root development authority; none of these
 operations is reachable through the product model, Executor1 action schema or
 production module. Existing bootstrap guests gain the route only after installing

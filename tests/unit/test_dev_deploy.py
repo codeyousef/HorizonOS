@@ -9,6 +9,7 @@ import sys
 import tempfile
 import types
 import unittest
+import uuid
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -299,6 +300,48 @@ class DeveloperBoundaryTests(unittest.TestCase):
                 self.call({**self.request, "operation": "commit"})
         self.assertEqual(raised.exception.label, "DEPLOYMENT_STATE_INVALID")
         guard.assert_not_called()
+
+    def test_failed_guard_status_is_durable_and_never_restarts_or_qualifies(self):
+        candidate = "/nix/store/" + "a" * 32 + "-nixos-system-aios-dev-test"
+        for phase in ("TESTING", "COMMITTING"):
+            for terminal in ("REJECTED", "RECOVERY_REQUIRED"):
+                with self.subTest(phase=phase, terminal=terminal):
+                    request = {**self.request, "transaction_id": str(uuid.uuid4())}
+                    receipt = self.call(request)
+                    receipt.update(
+                        state=phase, candidate_closure=candidate,
+                        candidate_digest=hashlib.sha256(candidate.encode()).hexdigest(),
+                        build_source_digest="b" * 64,
+                        baseline={key: IDENTITY["current_system"] for key in ("running", "profile", "booted")},
+                        test_guard_id=deploy.guard_id(request["transaction_id"], "test"),
+                        commit_guard_id=deploy.guard_id(request["transaction_id"], "commit") if phase == "COMMITTING" else None,
+                        activation_performed=phase == "COMMITTING",
+                    )
+                    deploy.save_receipt(self.state, os.getuid(), request, receipt)
+                    status = {key: request[key] for key in ("schema_version", "identity", "transaction_id")}
+                    status["operation"] = "status"
+                    with patch.object(deploy, "guard_state", return_value=terminal) as state_reader, \
+                         patch.object(deploy, "complete_guard") as guard, \
+                         patch.object(deploy, "write_handoff") as handoff, \
+                         patch.object(deploy, "build_candidate") as build:
+                        result = self.call(status)
+                        self.assertEqual(result["state"], terminal)
+                        self.assertEqual(result["candidate_closure"], candidate)
+                        self.assertEqual(result["test_guard_id"], receipt["test_guard_id"])
+                        self.assertEqual(result["commit_guard_id"], receipt["commit_guard_id"])
+                        self.assertEqual(result["activation_performed"], receipt["activation_performed"])
+                        self.assertIsNone(result["committed_identity"])
+                        # A second observer sees persisted failure even without
+                        # another guard query. Failed records cannot start effects.
+                        self.assertEqual(self.call(status), result)
+                        for operation in ("test", "commit"):
+                            with self.assertRaises(deploy.Denial) as caught:
+                                self.call({**request, "operation": operation})
+                            self.assertEqual(caught.exception.label, "DEPLOYMENT_STATE_INVALID")
+                        guard.assert_not_called()
+                        handoff.assert_not_called()
+                        build.assert_not_called()
+                        state_reader.assert_called_once_with(receipt["commit_guard_id"] if phase == "COMMITTING" else receipt["test_guard_id"])
 
 
 if __name__ == "__main__":
