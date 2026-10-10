@@ -662,6 +662,12 @@ def guard_exchange(identifier, value):
         connection.settimeout(2)
         connection.connect(path)
         connection.sendall(len(data).to_bytes(4, "big") + data)
+        # Completion includes fixed Nix activation/recovery effects. A two-second
+        # reply deadline disconnects the developer before rollback finishes and
+        # can also retire the requester's user manager needed by health checks.
+        # Connection, write and read-only status deadlines remain short.
+        if value.get("operation") in {"complete_test", "heartbeat"}:
+            connection.settimeout(300)
         size = int.from_bytes(receive_exact(connection, 4), "big")
         if not 0 < size <= MAX_REQUEST:
             raise ValueError("invalid guard response length")

@@ -5,8 +5,11 @@ import importlib.util
 import os
 from pathlib import Path
 import shutil
+import socket
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
 import uuid
@@ -342,6 +345,61 @@ class DeveloperBoundaryTests(unittest.TestCase):
                         handoff.assert_not_called()
                         build.assert_not_called()
                         state_reader.assert_called_once_with(receipt["commit_guard_id"] if phase == "COMMITTING" else receipt["test_guard_id"])
+
+    def test_effect_reply_waits_for_recovery_but_status_still_times_out(self):
+        original_socket = socket.socket
+        path = self.root / "control.sock"
+        fixed = "/run/aios-dev-guard/" + TRANSACTION + "/control.sock"
+        for operation in ("complete_test", "heartbeat", "status"):
+            with self.subTest(operation=operation):
+                failures = []
+                request = {"operation": operation, "transaction_id": TRANSACTION}
+                response = {"schema_version": 1, "state": "ROLLED_BACK"}
+                with original_socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                    server.bind(str(path))
+                    server.listen(1)
+
+                    def reply():
+                        try:
+                            with server.accept()[0] as connection:
+                                connection.settimeout(5)
+                                length = int.from_bytes(deploy.receive_exact(connection, 4), "big")
+                                observed = sync.contract.decode(deploy.receive_exact(connection, length))
+                                if observed != request:
+                                    raise AssertionError("control request differs")
+                                # Actual socket delay crosses the old two-second
+                                # reply deadline; this is a transport fixture,
+                                # not an installed activation or recovery proof.
+                                time.sleep(2.15)
+                                data = sync.contract.canonical(response)
+                                try:
+                                    connection.sendall(len(data).to_bytes(4, "big") + data)
+                                except BrokenPipeError:
+                                    if operation != "status":
+                                        raise
+                        except BaseException as error:
+                            failures.append(error)
+
+                    class FixtureSocket(original_socket):
+                        def connect(client, address):
+                            if address != fixed:
+                                raise AssertionError("unexpected control target")
+                            return super().connect(str(path))
+
+                    thread = threading.Thread(target=reply, daemon=True)
+                    thread.start()
+                    try:
+                        with patch.object(deploy.socket, "socket", FixtureSocket):
+                            if operation == "status":
+                                with self.assertRaises(socket.timeout):
+                                    deploy.guard_exchange(TRANSACTION, request)
+                            else:
+                                self.assertEqual(deploy.guard_exchange(TRANSACTION, request), response)
+                    finally:
+                        thread.join(5)
+                        self.assertFalse(thread.is_alive())
+                        path.unlink()
+                    self.assertEqual(failures, [])
 
 
 if __name__ == "__main__":

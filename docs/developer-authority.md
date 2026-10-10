@@ -107,6 +107,13 @@ These receipts cannot be retried as test/commit and never qualify a candidate.
 running system already matches the baseline; full recovery remains unproven.
 Reading status does not restart a failed guard or clear its ledger.
 
+The control connection and read-only status replies have a two-second deadline.
+Test completion and commit heartbeat replies allow up to 300 seconds because
+they acknowledge fixed activation/recovery effects, not merely receipt of the
+request. The independently retained guard still owns its verification deadline
+and rollback policy. A delayed reply must not prematurely disconnect a healthy
+developer request while rollback is running.
+
 The helper is intentionally guest-root development authority; none of these
 operations is reachable through the product model, Executor1 action schema or
 production module. Existing bootstrap guests gain the route only after installing
