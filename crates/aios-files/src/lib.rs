@@ -6,6 +6,7 @@ use std::{
     ffi::CString,
     fs::{self, File},
     io::{Read, Seek, SeekFrom},
+    mem::MaybeUninit,
     os::{fd::{AsRawFd, FromRawFd}, unix::fs::MetadataExt},
     path::{Component, Path, PathBuf},
 };
@@ -118,9 +119,19 @@ fn timespec_ns(seconds: i64, nanos: i64) -> Result<i128> {
         .ok_or(ErrorCode::TargetChanged)
 }
 
+const STATX_MNT_ID: u32 = 0x0000_1000;
+const AT_STATX_DONT_SYNC: i32 = 0x4000;
 fn mount_id(file: &File) -> Result<u64> {
-    let text = fs::read_to_string(format!("/proc/self/fdinfo/{}", file.as_raw_fd())).map_err(|_| ErrorCode::TargetChanged)?;
-    text.lines().find_map(|line| line.strip_prefix("mnt_id:\t")?.parse().ok()).ok_or(ErrorCode::TargetChanged)
+    let mut value=MaybeUninit::<nix::libc::statx>::zeroed();
+    // SAFETY: `value` points to writable statx storage and the empty C string
+    // requests metadata for the already-open descriptor via AT_EMPTY_PATH.
+    let result=unsafe{nix::libc::syscall(nix::libc::SYS_statx,file.as_raw_fd(),c"".as_ptr(),
+        nix::libc::AT_EMPTY_PATH|AT_STATX_DONT_SYNC,STATX_MNT_ID,value.as_mut_ptr())};
+    if result!=0{return Err(ErrorCode::TargetChanged);}
+    // SAFETY: a successful statx call initialized the supplied structure.
+    let value=unsafe{value.assume_init()};
+    if value.stx_mask&STATX_MNT_ID==0{return Err(ErrorCode::TargetChanged);}
+    Ok(value.stx_mnt_id)
 }
 
 fn identity(file: &File) -> Result<Identity> {
@@ -220,15 +231,20 @@ fn parse_xdg(home: &Path) -> Vec<PathBuf> {
         .map(|(key,fallback)|configured.remove(key).unwrap_or_else(||home.join(fallback))).collect()
 }
 
+fn absolute_clean(path:&Path)->bool{
+    let mut parts=path.components();
+    matches!(parts.next(),Some(Component::RootDir))&&parts.all(|part|matches!(part,Component::Normal(_)))
+}
+
 impl Manager {
     pub fn propose_xdg_roots(&mut self, owner: Owner, home: &Path, now_ms: u64) -> Result<Proposal> {
-        if !owner_valid(&owner) || !home.is_absolute() { return Err(ErrorCode::InvalidArgument); }
-        let (home_fd,home_identity)=open_root(home)?;
+        if !owner_valid(&owner) || !absolute_clean(home) { return Err(ErrorCode::InvalidArgument); }
+        let (_home_fd,home_identity)=open_root(home)?;
         if home_identity.uid != owner.uid { return Err(ErrorCode::PermissionDenied); }
-        let canonical_home=fs::read_link(format!("/proc/self/fd/{}",home_fd.as_raw_fd())).map_err(|_|ErrorCode::TargetChanged)?;
+        let home=home.to_owned();
         let mut seen=HashSet::new();let mut roots=Vec::new();
-        for path in parse_xdg(&canonical_home) {
-            if !path.starts_with(&canonical_home) || path==canonical_home || secret(path.strip_prefix(&canonical_home).map_err(|_|ErrorCode::PermissionDenied)?) {continue;}
+        for path in parse_xdg(&home) {
+            if !path.starts_with(&home) || path==home || secret(path.strip_prefix(&home).map_err(|_|ErrorCode::PermissionDenied)?) {continue;}
             let Ok((file,id))=open_root(&path) else {continue};
             if id.uid!=owner.uid || id.device!=home_identity.device || id.mount_id!=home_identity.mount_id {continue;}
             let display=path.to_string_lossy().into_owned();let digest={let mut value=id.clone();value.size=0;value.modified_ns=0;value.changed_ns=0;identity_sha256(&value)};
@@ -333,7 +349,7 @@ impl Manager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::Write, os::unix::fs::symlink};
+    use std::{io::Write, os::unix::fs::{PermissionsExt,symlink}};
 
     fn setup()->(tempfile::TempDir,Owner,Manager,Proposal){
         let temp=tempfile::tempdir().unwrap();let home=temp.path();fs::create_dir(home.join("Documents")).unwrap();fs::create_dir(home.join("Downloads")).unwrap();
@@ -359,8 +375,12 @@ mod tests {
         let mut foreign=owner.clone();foreign.uid+=1;assert_eq!(manager.read(&foreign,&handle.file_handle,32,103),Err(ErrorCode::PermissionDenied));
         assert_eq!(manager.read(&owner,&handle.file_handle,32,handle.expires_at_boottime_ms),Err(ErrorCode::ApprovalExpired));
         for path in [".ssh/id_rsa","project/.env","wallets/a.dat","cert.pem",".mozilla/firefox/logins.json",".aws/credentials","passwords.txt"]{assert_eq!(manager.issue_handle(&owner,&root.root_id,Path::new(path),Access::Content,104),Err(ErrorCode::PermissionDenied));}
-        let mut file=File::options().write(true).truncate(true).open(temp.path().join("Documents/note.txt")).unwrap();file.write_all(b"changed").unwrap();file.sync_all().unwrap();
-        assert_eq!(manager.read(&owner,&handle.file_handle,32,105),Err(ErrorCode::TargetChanged));
+        let path=temp.path().join("Documents/note.txt");
+        fs::set_permissions(&path,fs::Permissions::from_mode(0o000)).unwrap();
+        assert_eq!(manager.read(&owner,&handle.file_handle,32,105),Err(ErrorCode::PermissionDenied));
+        fs::set_permissions(&path,fs::Permissions::from_mode(0o600)).unwrap();
+        let mut file=File::options().write(true).truncate(true).open(path).unwrap();file.write_all(b"changed").unwrap();file.sync_all().unwrap();
+        assert_eq!(manager.read(&owner,&handle.file_handle,32,106),Err(ErrorCode::TargetChanged));
     }
 
     #[test]
