@@ -119,7 +119,7 @@ def main():
     lines = set(unit.splitlines())
     starts = [line for line in lines if line.startswith("ExecStart=")]
     if (not required_unit <= lines or len(starts) != 1
-            or not re.fullmatch(r"ExecStart=/nix/store/[a-z0-9]{32}-aios-guard-0\\.1\\.0/bin/aios-guard --run-developer-transaction %i", starts[0])
+            or not re.fullmatch(r"ExecStart=/nix/store/[a-z0-9]{32}-aios-guard-0\.1\.0/bin/aios-guard --run-developer-transaction %i", starts[0])
             or any(token in starts[0] for token in (" sh ", "bash", "$(", ";"))):
         raise RuntimeError("developer guard unit is missing its fixed retained authority")
     executable = str(Path(package) / "bin/aios-dev-deploy")
