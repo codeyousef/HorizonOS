@@ -9,9 +9,6 @@ import subprocess
 import uuid
 
 
-NAME = "org.aios.Session1"
-PATH = "/org/aios/Files1"
-INTERFACE = "org.aios.Files1"
 
 
 def main():
@@ -32,19 +29,6 @@ def main():
     if not match or Path(f"/proc/{match[1]}/exe").resolve(strict=True) != binary:
         raise RuntimeError("Files1 bus owner is not the installed broker")
 
-    def call(method, request=None, *, succeeds=True):
-        command = ["busctl", "--user", "--json=short", "call", NAME, PATH, INTERFACE, method]
-        if request is not None:
-            command += ["s", json.dumps(request, separators=(",", ":"))]
-        result = subprocess.run(command, env=env, capture_output=True, timeout=10)
-        if succeeds != (result.returncode == 0):
-            raise RuntimeError(f"unexpected Files1 result for {method}: {result.stderr.decode(errors='replace')[:512]}")
-        if not succeeds:
-            return result.stderr.decode(errors="replace")
-        envelope = json.loads(result.stdout)
-        if envelope.get("type") != "s" or not isinstance(envelope.get("data"), list) or len(envelope["data"]) != 1:
-            raise RuntimeError("invalid busctl Files1 response envelope")
-        return json.loads(envelope["data"][0])
 
     home = Path.home()
     documents = home / "Documents"
@@ -67,29 +51,19 @@ def main():
             handle.flush()
             os.fsync(handle.fileno())
         os.symlink("/etc/passwd", link)
-        proposal = call("ProposeRoots")
-        roots = proposal["data"]["roots"]
-        selected = next((item for item in roots if item["display_path"] == str(documents)), None)
-        if selected is None or any(not item["display_path"].startswith(str(home) + "/") for item in roots):
-            raise RuntimeError("installed root proposal escaped fixed XDG roots")
-        pregrant = {"schema_version": 1, "root_id": selected["root_id"], "relative_path": filename, "access": "content"}
-        call("OpenScoped", pregrant, succeeds=False)
-        enrolled = call("EnrollRoots", {"schema_version": 1, "proposal_id": proposal["data"]["proposal_id"],
-            "approved_root_ids": [selected["root_id"]], "allowed_access": ["content"], "confirmed": True})
-        if enrolled["data"]["roots"][0]["root_id"] != selected["root_id"]:
-            raise RuntimeError("installed root enrollment identity changed")
-        call("OpenScoped", {**pregrant, "relative_path": linkname}, succeeds=False)
-        opened = call("OpenScoped", pregrant)
-        handle_id = opened["data"]["file_handle"]
-        read = call("ReadScoped", {"schema_version": 1, "file_handle": handle_id, "max_bytes": 128})
-        if read["data"]["content"] != "consented installed content" or read["data"]["bytes_read"] != 27:
-            raise RuntimeError("installed scoped content mismatch")
-        revoked = call("RevokeRoot", {"schema_version": 1, "root_id": selected["root_id"], "confirmed": True})
-        if not revoked["data"]["access_blocked"] or revoked["data"]["handles_revoked"] != 1:
-            raise RuntimeError("installed revocation receipt is incomplete")
-        call("ReadScoped", {"schema_version": 1, "file_handle": handle_id, "max_bytes": 128}, succeeds=False)
-        print("AIOS_INSTALLED_FILE_SCOPES=" + json.dumps({"installed_executable": str(binary), "proposal_roots": len(roots),
-            "preconsent_denied": True, "symlink_denied": True, "content_verified": True, "revocation_blocked": True}, sort_keys=True))
+        release = Path(__file__).resolve().parents[2]
+        command = ["nix", "develop", "--no-update-lock-file", "--no-write-lock-file", "path:" + str(release),
+            "--command", "cargo", "run", "--locked", "--quiet", "-p", "aios-session", "--example",
+            "installed_file_scopes", "--", str(documents), filename, linkname]
+        result = subprocess.run(command, env=env, capture_output=True, timeout=300)
+        marker = "AIOS_INSTALLED_FILE_SCOPES_CLIENT="
+        lines = result.stdout.decode(errors="replace").splitlines()
+        if result.returncode or not any(line.startswith(marker) for line in lines):
+            raise RuntimeError("installed Files1 client failed: " + result.stderr.decode(errors="replace")[-1024:])
+        proof = json.loads(next(line[len(marker):] for line in lines if line.startswith(marker)))
+        if set(proof) != {"preconsent_denied", "symlink_denied", "content_verified", "revocation_blocked"} or not all(proof.values()):
+            raise RuntimeError("installed Files1 client proof is incomplete")
+        print("AIOS_INSTALLED_FILE_SCOPES=" + json.dumps({"installed_executable": str(binary), **proof}, sort_keys=True))
     finally:
         link.unlink(missing_ok=True)
         target.unlink(missing_ok=True)
