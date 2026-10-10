@@ -450,7 +450,7 @@ class QMP:
         if isinstance(command, tuple):
             command, payload = command
         sequence = [["ctrl", "c"], ["ctrl", "u"], *console_keys(command), ["ret"]]
-        attempt = f"{self.process['pid']}-{time.time_ns()}" if audit or repair else str(self.process["pid"])
+        attempt = f"{self.process['pid']}-{time.time_ns()}" if audit or repair or resume else str(self.process["pid"])
         marker = config.root / f".local/vm/{operation}-console-{attempt}.json"
         # Retain attempted state even on interrupted delivery. Never retry an
         # installer blindly after a partial command or possible disk mutation.
