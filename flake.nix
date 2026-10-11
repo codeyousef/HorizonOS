@@ -145,6 +145,14 @@
       nixosModules.production = import ./nix/modules/aios/production.nix;
       packages.${system} = { aios-consent-ui = consentUi; aios-model-artifact = modelArtifact; aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { aiosGuard = guard; }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system} = { host-unit = devTools; consent-ui = consentUiTests; };
+      # Optional non-performance TCG fixture; excluded from default checks and
+      # mandatory host tools. No host credentials or private directories enter it.
+      legacyPackages.${system}.fileScopesNative = import ./tests/nix/file-scopes-native.nix {
+        inherit pkgs;
+        source = productSource;
+        fixtureUuid = "e64a1bf0-814b-4dc0-94a3-04c539f41cd2";
+        installationUuid = "0d698869-1d37-4776-b3c7-30c7689a2d15";
+      };
       lib.stateContract = stateContract;
       lib.catalogPackages = builtins.listToAttrs (map (entry: {
         name = entry.id;

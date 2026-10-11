@@ -24,6 +24,30 @@ JOB = "44444444-4444-4444-8444-444444444444"
 
 
 class JobTests(unittest.TestCase):
+    def test_host_can_submit_only_registered_native_scope_job(self):
+        snapshot = self.root / 'snapshot.json'
+        snapshot.write_text(json.dumps({'manifest': {'files': [{'path': 'flake.lock'}, {'path': 'Cargo.lock'}]}}))
+        with patch.object(jobs.resources, 'require_build_headroom'), \
+             patch.object(jobs.sync, 'synchronize', return_value=(0, {'artifact_path': str(snapshot), 'snapshot_digest': 'a' * 64})), \
+             patch.object(jobs, 'remember') as remember, \
+             patch.object(jobs, 'request', return_value={'state': 'queued'}) as request:
+            code, result = jobs.start(self.config, 'file-scopes-native-smoke', detach=True)
+        self.assertEqual(int(code), 0)
+        self.assertEqual(result['state'], 'queued')
+        self.assertEqual(remember.call_args.args[2], 'file-scopes-native-smoke')
+        self.assertEqual(request.call_args.kwargs['kind'], 'file-scopes-native-smoke')
+
+    def test_optional_native_scope_fixture_is_fixed_bounded_and_not_in_fast_checks(self):
+        release=Path('/home/dev/aios-releases') / ('a' * 64)
+        with self.assertRaises(ValueError):
+            controller.commands('file-scopes-native-smoke', release)
+        commands=controller.commands('file-scopes-native-smoke',release,job_directory=Path('/owned/job'))
+        self.assertEqual(commands[0][-1], 'path:' + str(release) + '#legacyPackages.x86_64-linux.fileScopesNative')
+        self.assertIn('--no-update-lock-file',commands[0])
+        self.assertEqual(commands[0][commands[0].index('--max-jobs')+1],'1')
+        self.assertEqual(commands[0][commands[0].index('--out-link')+1],'/owned/job/scope-fixture-result')
+        self.assertFalse(any('fileScopesNative' in arg for command in controller.commands('test-unit',release) for arg in command))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aios-job-")
         self.addCleanup(self.temp.cleanup)

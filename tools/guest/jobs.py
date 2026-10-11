@@ -20,6 +20,7 @@ import snapshot as source
 PACKAGES = ("aios-consent-ui", "aios-core", "aios-model", "aios-desktop", "aios-cli", "aios-dev-tools")
 KINDS = {"resolve-lock", "build-packages", "build-system", "build-desktop-test", "test-unit", "system-info-smoke", "service-inspection-smoke", "public-session-smoke", "installed-session-inference-smoke", "installed-file-scopes-smoke", "terminal-job-cache-recovery-smoke", "consent-ui-smoke", "accessibility-smoke", "ui-provider-smoke", "model-compatibility-smoke", "upstream-compatibility-smoke", "host-boundary-smoke", "protocol-conformance-smoke", "model-profile-low-smoke", "model-profile-high-smoke", "model-inference-smoke", "model-service-smoke", "session-inference-smoke", "development-boundary-smoke", "guard-state-smoke", "managed-state-smoke", "broker-preparation-smoke", "installed-runtime-smoke", "installed-policy-smoke", "installed-development-smoke", "installed-guard-smoke", "installed-model-smoke", "installed-model-idle-smoke", "installed-model-lifecycle-smoke", "supervision-probe"}
 KINDS.update({"installed-service-lifecycle-smoke", "installed-builder-smoke"})
+KINDS.add("file-scopes-native-smoke")
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 LIMIT = 4 * 1024**2
 cancelled = False
@@ -96,6 +97,13 @@ def process_matches(record):
 def commands(kind, release, package=None, job_directory=None):
     reference = "path:" + str(release)
     locked = ["--no-update-lock-file", "--no-write-lock-file"]
+    if kind == "file-scopes-native-smoke":
+        if job_directory is None:
+            raise ValueError("native scope fixture requires its registered job directory")
+        return [["nix", "build", "--json", *locked, "--max-jobs", "1", "--cores", "2",
+                 "--out-link", str(job_directory / "scope-fixture-result"),
+                 reference + "#legacyPackages.x86_64-linux.fileScopesNative"],
+                ["python3", str(release / "tools/guest/scope_fixture_result.py"), str(job_directory)]]
     if kind == "build-packages":
         names = [package] if package else list(PACKAGES)
         if any(name not in PACKAGES for name in names):

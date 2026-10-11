@@ -62,3 +62,19 @@ returns `access_blocked=true` and `purge_pending=true`; only its original client
 can retry that purge. Revocation of one root leaves other roots untouched.
 On broker restart, old derived rows are purged because volatile grants are lost;
 text on disk can never recreate permission. Original source files are untouched.
+
+The optional `file-scopes-native` development test runs the pinned NixOS test
+driver inside an enrolled development guest. Its synthetic node uses 768 MiB
+RAM, software emulation, two real UIDs and temporary mounts. The fixed probe
+tests pre-enrollment denial, a world-readable foreign-owned file, symlink
+escape, mount changes after handle creation, root replacement, persisted-cache
+revocation and foreign-user cache access. Driver mutations recheck the recorded
+NixOS, boot, installation, DMI, disk, management and SSH public-key identities.
+No host private directory or credential enters the node.
+
+Run it through `devctl test --suite integration --provider file-scopes-native --detach`, then
+inspect and pull the returned job with `devctl jobs status --job UUID` and
+`devctl jobs pull --job UUID`. Select the enrolled workspace with the normal
+`--workspace` option. This test is outside default fast checks. Its report is
+component evidence: internal scope enrollment does not qualify native UI consent,
+installed public D-Bus behavior, ranked indexing or CPU performance.
