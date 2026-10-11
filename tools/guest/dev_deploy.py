@@ -729,7 +729,11 @@ def dispatch(request, *, config_reader=read_config, identity_reader=root_identit
     developer_uid = caller_reader()
     config = config_reader()
     actual = identity_reader()
-    verify_target(request, config, actual)
+    # Status checks every stable field before ledger access, but the allowed
+    # closure comes from the sealed registration and independent guard below.
+    # Mutations still require the original target at this first boundary.
+    verify_target(request, config, actual,
+                  actual.get("current_system") if request["operation"] == "status" else None)
     state_directory(state, owner_uid)
     with deployment_lock(state, owner_uid):
         found = registration(state, owner_uid, request["transaction_id"])
@@ -775,6 +779,13 @@ def dispatch(request, *, config_reader=read_config, identity_reader=root_identit
             durable_guard = guard_state(receipt["commit_guard_id"])
         candidate_active = durable_guard in {"VERIFYING", "COMMITTED"}
         expected_system = receipt["candidate_closure"] if receipt["state"] == "COMMITTED" or candidate_active else prior["identity"]["current_system"]
+        failed_status = request["operation"] == "status" and (
+            receipt["state"] in {"REJECTED", "RECOVERY_REQUIRED"}
+            or durable_guard in {"REJECTED", "RECOVERY_REQUIRED"})
+        # A failed recovery can leave either exact recorded closure running.
+        # Observing it never qualifies recovery or enables another activation.
+        if failed_status and actual["current_system"] == receipt["candidate_closure"]:
+            expected_system = receipt["candidate_closure"]
         verify_target(prior, config, actual, expected_system)
         candidate = state / "releases" / prior["snapshot_digest"]
         descriptor = open_directory(candidate, owner_uid, 0o555)
@@ -821,6 +832,14 @@ def dispatch(request, *, config_reader=read_config, identity_reader=root_identit
 
 
         if request["operation"] in {"status", "register"}:
+            if request["operation"] == "status":
+                fresh = identity_reader()
+                fresh_system = expected_system
+                if failed_status:
+                    fresh_system = (receipt["candidate_closure"]
+                                    if fresh["current_system"] == receipt["candidate_closure"]
+                                    else prior["identity"]["current_system"])
+                verify_target(prior, config_reader(), fresh, fresh_system)
             return receipt
         if request["operation"] == "test":
             if receipt["state"] == "TESTED":

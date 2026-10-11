@@ -172,6 +172,43 @@ class HostDeploymentTests(unittest.TestCase):
                 self.call(mode)
             self.assertEqual(caught.exception.code, "DEPLOYMENT_RECEIPT_MISMATCH")
 
+    def test_status_only_accepts_registered_candidate_with_exact_target(self):
+        self.call()
+        candidate = "/nix/store/" + "a" * 32 + "-nixos-system-aios-dev-test"
+        actual = {**IDENTITY, "current_system": candidate}
+        for state in ("TESTING", "COMMITTING", "COMMITTED", "REJECTED", "RECOVERY_REQUIRED"):
+            receipt = {**self.receipt, "state": state, "candidate_closure": candidate,
+                "candidate_digest": "b" * 64, "build_source_digest": "c" * 64,
+                "test_guard_id": "11111111-1111-4111-8111-111111111111",
+                "baseline": {key: IDENTITY["current_system"] for key in ("running", "profile", "booted")},
+                "activation_performed": state in {"COMMITTING", "COMMITTED"}}
+            if state in {"COMMITTING", "COMMITTED"}:
+                receipt["commit_guard_id"] = "22222222-2222-4222-8222-222222222222"
+            if state == "COMMITTED":
+                receipt.update(committed_identity=actual, limitations=[])
+            self.exchange.return_value = (0, sync.contract.canonical(receipt), b"")
+            self.enrolled_identity.side_effect = None
+            self.enrolled_identity.return_value = (self.trust, actual)
+            with self.subTest(state=state):
+                result = self.call("status", acknowledge=False)[1]
+                self.assertEqual(result["state"], state)
+                self.assertEqual(result["activation_performed"], receipt["activation_performed"])
+                for position in (0, 1):
+                    for key, value in (("current_system", "/nix/store/" + "f" * 32 + "-unrelated"),
+                                       ("boot_id", "55555555-5555-4555-8555-555555555555")):
+                        readings = [(self.trust, actual), (self.trust, actual)]
+                        readings[position] = (self.trust, {**actual, key: value})
+                        self.enrolled_identity.side_effect = readings
+                        with self.assertRaises(DevctlError) as caught:
+                            self.call("status", acknowledge=False)
+                        self.assertEqual(caught.exception.code, "DEPLOYMENT_TARGET_CHANGED")
+                self.enrolled_identity.side_effect = None
+                if state != "COMMITTED":
+                    with self.assertRaises(DevctlError) as caught:
+                        self.call("test")
+                    self.assertEqual(caught.exception.code, "DEPLOYMENT_TARGET_CHANGED")
+
+
     def test_parser_exposes_typed_modes_without_shell_or_targets(self):
         args = parser().parse_args(["deploy", "--mode", "register", "--acknowledge-guest-root"])
         self.assertTrue(args.acknowledge_guest_root)

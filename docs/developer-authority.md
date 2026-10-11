@@ -19,6 +19,14 @@ swap does not count toward capacity. Existing per-VM memory limits remain in
 effect. This measured gate cannot reserve memory against concurrent launches or
 prevent unrelated host applications from growing later.
 
+Read-only deployment status may reconnect while the exact registered candidate
+is running. Every stable target and boot field is still checked before ledger
+access; candidate closure acceptance requires the sealed registration and an
+active or committed independent guard. A failed guard may report either the
+recorded baseline or candidate, with recovery still unqualified and retries
+denied. Unrelated closures, changed target fields and tampered source remain
+errors. This status observation does not authorize a mutation on the candidate.
+
 If QEMU pauses on root-disk no-space, `devctl vm resume-storage` requires restored
 host headroom, exact recorded process/peer/UUID/storage identity, and that specific
 pause reason. It resumes the existing process without restarting or changing its

@@ -187,6 +187,19 @@ def run(config, mode, transaction=None, acknowledge=False):
                               details={"upstream_exit": status, **evidence})
         receipt = validate_receipt(response, intent)
         expected_after = receipt["committed_identity"] if receipt["state"] == "COMMITTED" else receipt["identity"]
+        if mode == "status":
+            allowed_before = [receipt["identity"]]
+            if receipt["state"] in {"TESTING", "COMMITTING", "COMMITTED", "REJECTED", "RECOVERY_REQUIRED"}:
+                allowed_before.append({**receipt["identity"], "current_system": receipt["candidate_closure"]})
+            if identity not in allowed_before:
+                raise failure(ExitCode.TARGET_MISMATCH, "DEPLOYMENT_TARGET_CHANGED", "Status began on an unrelated system closure")
+        if mode == "status" and receipt["state"] in {"TESTING", "COMMITTING", "REJECTED", "RECOVERY_REQUIRED"}:
+            # A status observation can find the exact registered candidate
+            # active, including a failed recovery. Preserve the receipt's
+            # unqualified state; this does not authorize test/commit retries.
+            candidate_identity = {**receipt["identity"], "current_system": receipt["candidate_closure"]}
+            if after == candidate_identity:
+                expected_after = candidate_identity
         if after != expected_after:
             raise failure(ExitCode.TARGET_MISMATCH, "DEPLOYMENT_TARGET_CHANGED", "Development target changed during helper operation")
         receipts = private_directory(config.root, ".local/deployments/" + transaction + "/receipts")

@@ -304,6 +304,83 @@ class DeveloperBoundaryTests(unittest.TestCase):
         self.assertEqual(raised.exception.label, "DEPLOYMENT_STATE_INVALID")
         guard.assert_not_called()
 
+    def registered_built_status(self, phase):
+        request = {**self.request, "transaction_id": str(uuid.uuid4())}
+        receipt = self.call(request)
+        candidate = "/nix/store/" + "a" * 32 + "-nixos-system-aios-dev-test"
+        receipt.update(state=phase, candidate_closure=candidate,
+            candidate_digest=hashlib.sha256(candidate.encode()).hexdigest(),
+            build_source_digest="b" * 64,
+            baseline={key: IDENTITY["current_system"] for key in ("running", "profile", "booted")},
+            test_guard_id=deploy.guard_id(request["transaction_id"], "test"),
+            commit_guard_id=deploy.guard_id(request["transaction_id"], "commit") if phase in {"COMMITTING", "COMMITTED"} else None,
+            activation_performed=phase in {"TESTED", "COMMITTING", "COMMITTED"})
+        if phase == "COMMITTED":
+            receipt.update(committed_identity={**IDENTITY, "current_system": candidate}, limitations=[])
+        deploy.save_receipt(self.state, os.getuid(), request, receipt)
+        status = {key: request[key] for key in ("schema_version", "identity", "transaction_id")}
+        status["operation"] = "status"
+        return request, receipt, status
+
+    def test_status_reconnects_to_exact_active_candidate_without_effects(self):
+        for phase in ("TESTING", "COMMITTING", "COMMITTED"):
+            with self.subTest(phase=phase):
+                request, receipt, status = self.registered_built_status(phase)
+                actual = {**IDENTITY, "current_system": receipt["candidate_closure"]}
+                with patch.object(deploy, "guard_state", return_value="VERIFYING"), \
+                        patch.object(deploy, "complete_guard") as guard, \
+                        patch.object(deploy, "write_handoff") as handoff, \
+                        patch.object(deploy, "build_candidate") as build:
+                    self.assertEqual(self.call(status, identity_reader=lambda: actual), receipt)
+                    # Mutation gates still require the original closure.
+                    for operation in ("test", "commit"):
+                        with self.assertRaises(deploy.Denial) as caught:
+                            self.call({**request, "operation": operation}, identity_reader=lambda: actual)
+                        self.assertEqual(caught.exception.label, "DEVELOPMENT_TARGET_MISMATCH")
+                    guard.assert_not_called(); handoff.assert_not_called(); build.assert_not_called()
+
+    def test_status_reconciles_completed_commit_on_candidate_and_replays(self):
+        _, receipt, status = self.registered_built_status("COMMITTING")
+        actual = {**IDENTITY, "current_system": receipt["candidate_closure"]}
+        pointers = {**receipt["baseline"], "running": receipt["candidate_closure"], "profile": receipt["candidate_closure"]}
+        with patch.object(deploy, "guard_state", return_value="COMMITTED"), \
+                patch.dict(sys.modules, {"build_system": types.SimpleNamespace(pointers=lambda: pointers)}):
+            result = self.call(status, identity_reader=lambda: actual)
+        self.assertEqual(result["state"], "COMMITTED")
+        self.assertEqual(result["committed_identity"], actual)
+        self.assertEqual(self.call(status, identity_reader=lambda: actual), result)
+
+    def test_failed_recovery_on_candidate_is_observable_but_unqualified(self):
+        for phase in ("TESTING", "COMMITTING"):
+            _, receipt, status = self.registered_built_status(phase)
+            actual = {**IDENTITY, "current_system": receipt["candidate_closure"]}
+            with patch.object(deploy, "guard_state", return_value="RECOVERY_REQUIRED"):
+                result = self.call(status, identity_reader=lambda: actual)
+            self.assertEqual(result["state"], "RECOVERY_REQUIRED")
+            self.assertIsNone(result["committed_identity"])
+            self.assertEqual(result["activation_performed"], receipt["activation_performed"])
+            self.assertEqual(self.call(status, identity_reader=lambda: actual), result)
+
+    def test_status_refuses_unregistered_unrelated_changed_and_inactive_targets(self):
+        _, receipt, status = self.registered_built_status("TESTING")
+        actual = {**IDENTITY, "current_system": receipt["candidate_closure"]}
+        with patch.object(deploy, "guard_state", return_value="VERIFYING"):
+            for key, value in (("current_system", "/nix/store/" + "c" * 32 + "-unrelated"),
+                               ("boot_id", str(uuid.uuid4())), ("disk_serial", "WRONG"),
+                               ("management_channel", "other"), ("installation_uuid", str(uuid.uuid4()))):
+                wrong = {**actual, key: value}
+                with self.subTest(key=key), self.assertRaises(deploy.Denial):
+                    self.call(status, identity_reader=lambda: wrong)
+            readings = iter([actual, {**actual, "current_system": "/nix/store/" + "c" * 32 + "-unrelated"}])
+            with self.assertRaises(deploy.Denial):
+                self.call(status, identity_reader=lambda: next(readings))
+        with patch.object(deploy, "guard_state", return_value=None):
+            with self.assertRaises(deploy.Denial):
+                self.call(status, identity_reader=lambda: actual)
+        with self.assertRaises(deploy.Denial) as caught:
+            self.call({**status, "transaction_id": str(uuid.uuid4())}, identity_reader=lambda: actual)
+        self.assertEqual(caught.exception.label, "REGISTRATION_NOT_FOUND")
+
     def test_failed_guard_status_is_durable_and_never_restarts_or_qualifies(self):
         candidate = "/nix/store/" + "a" * 32 + "-nixos-system-aios-dev-test"
         for phase in ("TESTING", "COMMITTING"):
