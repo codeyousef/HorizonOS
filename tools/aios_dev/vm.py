@@ -595,6 +595,8 @@ def start(config, display, bootstrap, *, qualification=None):
     if tcp_probe(config.values["ssh_host"], config.values["ssh_port"])["reachable"] is not False:
         raise failure(ExitCode.UNMET_PREREQUISITE, "PORT_UNAVAILABLE", "Cannot prove the configured loopback port is free")
     args = qemu_arguments(config, record, display, bootstrap=bootstrap, qualification=qualification)
+    from .resources import require_vm_memory_headroom
+    require_vm_memory_headroom(config)
     run(qemu_service_arguments(config, args, record["plan"]["guest_uuid"]), timeout=15)
     controls = (pidfile, config.paths["qmp_socket"], config.paths["serial_socket"])
     deadline = time.monotonic() + 10

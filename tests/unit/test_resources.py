@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from aios_dev.config import VMConfig, load_config
 from aios_dev.errors import DevctlError
 from aios_dev.provision import prepare_plan, select_fresh_defaults
-from aios_dev.resources import GIB, recommend, require_build_headroom
+from aios_dev.resources import GIB, recommend, require_build_headroom, require_vm_memory_headroom
 
 
 def measured(cpu=32, memory=40, disk=200):
@@ -21,6 +21,52 @@ def measured(cpu=32, memory=40, disk=200):
 
 
 class ResourceTests(unittest.TestCase):
+    def test_vm_launch_memory_boundary_includes_overhead_and_host_reserve(self):
+        config = SimpleNamespace(values={"memory_mib": 16384})
+        for total, required in ((64 * GIB, 34 * GIB), (24 * GIB, 26 * GIB)):
+            with patch('aios_dev.doctor.memory_info', return_value={
+                    "total_bytes": total, "available_bytes": min(total, required - 1)}):
+                with self.subTest(total=total), self.assertRaises(DevctlError) as caught:
+                    require_vm_memory_headroom(config)
+                self.assertEqual(caught.exception.code, 'HOST_MEMORY_RESERVE_UNAVAILABLE')
+        with patch('aios_dev.doctor.memory_info', return_value={
+                "total_bytes": 64 * GIB, "available_bytes": 34 * GIB}):
+            result = require_vm_memory_headroom(config)
+            self.assertEqual(result['required_available_bytes'], 34 * GIB)
+            self.assertEqual(result['host_reserve_bytes'], 16 * GIB)
+
+    def test_vm_launch_unknown_or_inconsistent_memory_refuses(self):
+        config = SimpleNamespace(values={"memory_mib": 4096})
+        for total, available in ((None, None), (64 * GIB, True), (0, 8 * GIB),
+                                 (8 * GIB, 9 * GIB), (64 * GIB, 0)):
+            with patch('aios_dev.doctor.memory_info', return_value={
+                    "total_bytes": total, "available_bytes": available}):
+                with self.subTest(total=total, available=available), self.assertRaises(DevctlError) as caught:
+                    require_vm_memory_headroom(config)
+                self.assertEqual(caught.exception.code, 'HOST_MEMORY_DISCOVERY_FAILED')
+
+    def test_vm_start_refuses_pressure_before_launching_qemu(self):
+        from aios_dev import vm
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = SimpleNamespace(root=root, values={"memory_mib": 16384,
+                "ssh_host": "127.0.0.1", "ssh_port": 2222}, paths={
+                "qmp_socket": root / '.local/vm/qmp.sock',
+                "serial_socket": root / '.local/vm/serial.sock'})
+            with patch('aios_dev.vm.load_record', return_value={"plan": {"guest_uuid": 'fixture'}}), \
+                    patch('aios_dev.vm.qemu_capabilities', return_value={
+                        "probe_complete": True, "virtio_vga": True, "gtk": True}), \
+                    patch('aios_dev.vm.tcp_probe', return_value={"reachable": False}), \
+                    patch('aios_dev.vm.qemu_arguments', return_value=['qemu']), \
+                    patch('aios_dev.vm.run') as launch, \
+                    patch('aios_dev.doctor.memory_info', return_value={
+                        "total_bytes": 64 * GIB, "available_bytes": 20 * GIB}):
+                with self.assertRaises(DevctlError) as caught:
+                    vm.start(config, 'none', True)
+                self.assertEqual(caught.exception.code, 'HOST_MEMORY_RESERVE_UNAVAILABLE')
+                launch.assert_not_called()
+                self.assertFalse((root / '.local/vm/process.json').exists())
+
     def test_build_headroom_boundary_and_unknown_storage_refuse(self):
         config = SimpleNamespace(root=Path('/measured/workspace'))
         for free in (0, 8 * GIB - 1, True, None):

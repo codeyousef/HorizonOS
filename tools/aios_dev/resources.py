@@ -4,6 +4,32 @@ from .errors import DevctlError, ExitCode
 
 GIB = 1024**3
 HOST_BUILD_RESERVE_BYTES = 8 * GIB
+QEMU_OVERHEAD_BYTES = 2 * GIB
+
+
+def require_vm_memory_headroom(config):
+    """Measure RAM immediately before launch, including QEMU's cgroup allowance.
+
+    Swap is not launch capacity. This is a preflight, not an atomic reservation
+    or protection against unrelated processes growing after the measurement.
+    """
+    from .doctor import memory_info
+    memory = memory_info()
+    total, available = memory.get("total_bytes"), memory.get("available_bytes")
+    if any(type(value) is not int or value <= 0 for value in (total, available)) or available > total:
+        raise DevctlError(ExitCode.UNMET_PREREQUISITE, "HOST_MEMORY_DISCOVERY_FAILED",
+                          "Cannot measure host RAM for VM startup")
+    guest_bytes = config.values["memory_mib"] * 1024**2
+    reserve = max(8 * GIB, total // 4)
+    required = guest_bytes + QEMU_OVERHEAD_BYTES + reserve
+    details = {"available_bytes": available, "guest_bytes": guest_bytes,
+               "qemu_overhead_bytes": QEMU_OVERHEAD_BYTES,
+               "host_reserve_bytes": reserve, "required_available_bytes": required}
+    if available < required:
+        raise DevctlError(ExitCode.UNMET_PREREQUISITE, "HOST_MEMORY_RESERVE_UNAVAILABLE",
+                          "VM startup requires guest RAM, 2 GiB QEMU overhead and host recovery headroom",
+                          details=details)
+    return details
 
 
 def require_build_headroom(config):

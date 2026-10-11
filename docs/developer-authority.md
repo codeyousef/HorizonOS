@@ -12,6 +12,13 @@ delivery. Guest storage reserves are checked independently. This host preflight
 is a minimum floor, not a quota or a concurrency reservation; status and recovery
 observations remain available at low disk.
 
+Immediately before each VM launch, the host must have available physical RAM for
+the configured guest, 2 GiB of QEMU overhead and a host reserve of the larger of
+8 GiB or one quarter of total RAM. Unknown memory measurements refuse startup;
+swap does not count toward capacity. Existing per-VM memory limits remain in
+effect. This measured gate cannot reserve memory against concurrent launches or
+prevent unrelated host applications from growing later.
+
 If QEMU pauses on root-disk no-space, `devctl vm resume-storage` requires restored
 host headroom, exact recorded process/peer/UUID/storage identity, and that specific
 pause reason. It resumes the existing process without restarting or changing its
