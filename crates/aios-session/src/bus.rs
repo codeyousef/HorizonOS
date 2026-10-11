@@ -447,7 +447,7 @@ impl Files{
         if request.schema_version!=1||!crate::uuid(&request.file_handle)||request.max_bytes>262_144{return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();let handle=request.file_handle.clone();
         let bytes=blocking::unblock(move||{let now=aios_policy::boottime_ms()?;
-            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.read(&file_owner(&original)?,&request.file_handle,request.max_bytes,now)}).await?;
+            agent.files.lock().map_err(|_|ErrorCode::ResourceExhausted)?.read_and_cache(&file_owner(&original)?,&request.file_handle,request.max_bytes,now)}).await?;
         let content=String::from_utf8(bytes).map_err(|_|ErrorCode::UnsupportedCapability)?;
         file_json(serde_json::json!({"schema_version":1,"operation":"file_read","data":{"file_handle":handle,"bytes_read":content.len(),"content":content},"mutation_performed":false}))
     }
@@ -506,6 +506,9 @@ impl Power {
 
 pub fn export(address: &str, state: SharedState) -> zbus::Result<zbus::blocking::Connection> {
     let agent = Agent::new(state);
+    export_agent(address,agent)
+}
+fn export_agent(address:&str,agent:Agent)->zbus::Result<zbus::blocking::Connection> {
     zbus::blocking::connection::Builder::address(address)?.method_timeout(Duration::from_secs(2))
         .max_queued(64).allow_name_replacements(false).replace_existing_names(false)
         .serve_at("/org/aios/Files1",Files{agent:agent.clone()})?
@@ -521,7 +524,10 @@ pub fn export_user_bus(state: SharedState) -> zbus::Result<zbus::blocking::Conne
     // Ignore a caller-controlled DBUS_SESSION_BUS_ADDRESS. Default deployment
     // always selects this user's standard systemd runtime bus.
     let uid = nix::unistd::geteuid().as_raw();
-    export(&format!("unix:path=/run/user/{uid}/bus"), state)
+    let home=user_home(uid).map_err(|_|zbus::Error::Failure("private file cache account unavailable".into()))?;
+    let files=aios_files::Manager::for_user_home(&home).map_err(|_|zbus::Error::Failure("private file cache unavailable".into()))?;
+    let mut agent=Agent::new(state); agent.files=Arc::new(Mutex::new(files));
+    export_agent(&format!("unix:path=/run/user/{uid}/bus"),agent)
 }
 
 /// Headless client with a fixed bus endpoint and pinned live daemon owner.

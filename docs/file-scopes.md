@@ -44,3 +44,21 @@ associated private records. Persisted indexes and extraction workers must use
 these same authorization and identity checks before releasing snippets and must
 purge their own retained material when a root is revoked. This does not promise
 forensic erasure of storage, backups or SQLite free pages.
+
+The installed broker keeps consented UTF-8 reads in a private SQLite derived
+cache under the authenticated account's `.local/state/aios/files`, independent
+of caller environment variables. Directory traversal refuses symlinks/new
+mounts and foreign ownership; files are mode 0600 and the directory mode 0700.
+A single held lock prevents another broker from clearing live cache data.
+The cache is limited to 256 documents, 128 MiB database pages and 2 MiB retained
+text per document. Preview/snippet prefixes retain original Unicode. It is a
+read cache, not the ranked FTS5 index or a document extraction worker.
+
+Cache rows bind root, handle, full authenticated owner, source identity and
+expiry. Every snippet rechecks live authority and source identity before and
+after storage lookup. Revocation blocks handles first, then transactionally
+deletes the root's documents, chunks, previews and snippets. A failed purge
+returns `access_blocked=true` and `purge_pending=true`; only its original client
+can retry that purge. Revocation of one root leaves other roots untouched.
+On broker restart, old derived rows are purged because volatile grants are lost;
+text on disk can never recreate permission. Original source files are untouched.

@@ -55,6 +55,8 @@
       consentUi = pkgs.callPackage ./nix/packages/consent-ui.nix { };
       consentUiTests = pkgs.callPackage ./nix/packages/consent-ui.nix { testing = true; };
       core = (productPackage "aios-core" "aios-session" "aios-sessiond").overrideAttrs (old: {
+        nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
+        buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
         AIOS_CONSENT_UI = "${consentUi}/bin/aios-scope-dialog";
         AIOS_WPCTL = "${pkgs.wireplumber}/bin/wpctl";
         AIOS_KREADCONFIG = "${pkgs.kdePackages.kconfig}/bin/kreadconfig6";

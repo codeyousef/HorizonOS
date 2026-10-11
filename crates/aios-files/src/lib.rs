@@ -11,6 +11,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 use uuid::Uuid;
+mod cache;
 
 type Result<T> = std::result::Result<T, ErrorCode>;
 const MAX_PATH_BYTES: usize = 4096;
@@ -76,6 +77,7 @@ pub struct RevocationReceipt {
     pub handles_revoked: usize,
     pub cached_records_purged: usize,
     pub access_blocked: bool,
+    pub purge_pending: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,6 +108,8 @@ pub struct Manager {
     chunks: Vec<CachedRecord>,
     previews: Vec<CachedRecord>,
     snippets: Vec<CachedRecord>,
+    cache: Option<cache::Cache>,
+    pending_purges: HashMap<String, (Owner, usize)>,
 }
 
 fn bounded(value: &str, max: usize) -> bool {
@@ -202,6 +206,9 @@ fn open_root(path: &Path) -> Result<(File,Identity)> {
 }
 
 fn secret(relative: &Path) -> bool {
+    let names:Vec<_>=relative.components().filter_map(|part|match part {Component::Normal(name)=>Some(name.to_string_lossy().to_ascii_lowercase()),_=>None}).collect();
+    if names.windows(3).any(|parts|parts[0]==".local" && matches!(parts[1].as_str(),"state"|"share") && parts[2]=="aios")
+        || names.windows(2).any(|parts|parts[0]==".cache" && parts[1]=="aios") { return true; }
     relative.components().any(|component| {
         let Component::Normal(name) = component else { return true };
         let name = name.to_string_lossy().to_ascii_lowercase();
@@ -258,6 +265,38 @@ fn absolute_clean(path:&Path)->bool{
 }
 
 impl Manager {
+    /// Directory is a trusted private per-user service location, never a file
+    /// request argument. Old cached text cannot restore volatile authority.
+    pub fn with_cache(directory:&Path)->Result<Self> {
+        Ok(Self{cache:Some(cache::Cache::open(directory)?),..Self::default()})
+    }
+
+    pub fn for_user_home(home:&Path)->Result<Self> {
+        let uid=nix::unistd::geteuid().as_raw();
+        let (mut directory,home_identity)=open_root(home)?;
+        if !home.is_absolute() || home_identity.uid!=uid { return Err(ErrorCode::PermissionDenied); }
+        let mut path=home.to_path_buf();
+        for name in [".local","state","aios","files"] {
+            let component=CString::new(name).map_err(|_|ErrorCode::InvalidArgument)?;
+            // SAFETY: a fixed single component is resolved relative to a held
+            // directory; no caller-selected path or mode is accepted.
+            let result=unsafe{nix::libc::mkdirat(directory.as_raw_fd(),component.as_ptr(),0o700)};
+            if result!=0 && std::io::Error::last_os_error().raw_os_error()!=Some(nix::libc::EEXIST) {
+                return Err(ErrorCode::ResourceExhausted);
+            }
+            directory=openat2(directory.as_raw_fd(),Path::new(name),nix::libc::O_RDONLY|nix::libc::O_DIRECTORY|nix::libc::O_NOFOLLOW,
+                RESOLVE_BENEATH|RESOLVE_NO_XDEV|RESOLVE_NO_MAGICLINKS|RESOLVE_NO_SYMLINKS)?;
+            let current=identity(&directory)?;
+            if current.uid!=uid || current.mode&0o022!=0 || (name=="files" && current.mode&0o777!=0o700) {
+                return Err(ErrorCode::PermissionDenied);
+            }
+            directory.sync_all().map_err(|_|ErrorCode::ResourceExhausted)?; path.push(name);
+        }
+        let (_,named)=open_root(&path)?;
+        if !same_root(&named,&identity(&directory)?) { return Err(ErrorCode::TargetChanged); }
+        Self::with_cache(&path)
+    }
+
     pub fn propose_xdg_roots(&mut self, owner: Owner, home: &Path, now_ms: u64) -> Result<Proposal> {
         if !owner_valid(&owner) || !absolute_clean(home) { return Err(ErrorCode::InvalidArgument); }
         let (home_fd,home_identity)=open_root(home)?;
@@ -285,7 +324,7 @@ impl Manager {
             || allowed_access.is_empty() || allowed_access.len()>3 || allowed_access.iter().copied().collect::<HashSet<_>>().len()!=allowed_access.len(){return Err(ErrorCode::InvalidArgument);}
         let proposal=self.pending.get(proposal_id).ok_or(ErrorCode::PermissionDenied)?;
         if &proposal.owner!=owner{return Err(ErrorCode::PermissionDenied);}if now_ms>=proposal.expires{return Err(ErrorCode::ApprovalExpired);}
-        if self.roots.len().checked_add(approved.len()).ok_or(ErrorCode::ResourceExhausted)?>MAX_ROOTS{return Err(ErrorCode::ResourceExhausted);}
+        if self.roots.len().checked_add(self.pending_purges.len()).and_then(|v|v.checked_add(approved.len())).ok_or(ErrorCode::ResourceExhausted)?>MAX_ROOTS{return Err(ErrorCode::ResourceExhausted);}
         let expires=now_ms.checked_add(HANDLE_LIFETIME_MS).ok_or(ErrorCode::InvalidArgument)?;let mut prepared=Vec::new();
         for id in approved {
             let candidate=proposal.roots.iter().find(|root|&root.root.root_id==id).ok_or(ErrorCode::PermissionDenied)?;
@@ -377,23 +416,50 @@ impl Manager {
 
     pub fn revalidate_mutation(&self,owner:&Owner,handle:&str,now_ms:u64)->Result<()> { self.reopen(owner,handle,Access::Mutation,now_ms).map(drop) }
 
+    #[cfg(test)]
     pub fn cache_for_test(&mut self,handle:&str,chunk:&str,preview:&str,snippet:&str)->Result<()> {
         if !self.handles.contains_key(handle){return Err(ErrorCode::PermissionDenied);}
         self.chunks.push(CachedRecord{handle:handle.into(),value:chunk.into()});self.previews.push(CachedRecord{handle:handle.into(),value:preview.into()});self.snippets.push(CachedRecord{handle:handle.into(),value:snippet.into()});Ok(())
     }
 
-    pub fn cached_snippet(&self,owner:&Owner,handle:&str,now_ms:u64)->Result<&str>{
+    /// Retain only text obtained through the same live descriptor/grant gate.
+    /// No supplied string, arbitrary SQL or extracted model output enters here.
+    pub fn read_and_cache(&mut self,owner:&Owner,handle:&str,max_bytes:usize,now_ms:u64)->Result<Vec<u8>> {
+        let bytes=self.read(owner,handle,max_bytes,now_ms)?;
+        if let Some(cache)=&mut self.cache {
+            let text=std::str::from_utf8(&bytes).map_err(|_|ErrorCode::UnsupportedCapability)?;
+            let record=self.handles.get(handle).ok_or(ErrorCode::PermissionDenied)?;
+            cache.put(handle,&record.root_id,owner,&identity_sha256(&record.identity),record.expires,text,now_ms)?;
+        }
         self.reopen(owner,handle,Access::Content,now_ms)?;
-        self.snippets.iter().find(|entry|entry.handle==handle).map(|entry|entry.value.as_str()).ok_or(ErrorCode::TargetNotFound)
+        Ok(bytes)
+    }
+
+    pub fn cached_snippet(&self,owner:&Owner,handle:&str,now_ms:u64)->Result<String>{
+        self.reopen(owner,handle,Access::Content,now_ms)?;
+        let value=if let Some(cache)=&self.cache {
+            let record=self.handles.get(handle).ok_or(ErrorCode::PermissionDenied)?;
+            cache.snippet(handle,owner,&identity_sha256(&record.identity),now_ms)?
+        } else {
+            self.snippets.iter().find(|entry|entry.handle==handle).map(|entry|entry.value.clone()).ok_or(ErrorCode::TargetNotFound)?
+        };
+        self.reopen(owner,handle,Access::Content,now_ms)?; Ok(value)
     }
 
     pub fn revoke(&mut self,owner:&Owner,root_id:&str)->Result<RevocationReceipt>{
-        let root=self.roots.get(root_id).ok_or(ErrorCode::PermissionDenied)?;if &root.owner!=owner{return Err(ErrorCode::PermissionDenied);}
+        let enrolled=self.roots.get(root_id).map(|root|&root.owner).or_else(||self.pending_purges.get(root_id).map(|(owner,_)|owner)).ok_or(ErrorCode::PermissionDenied)?;
+        if enrolled!=owner{return Err(ErrorCode::PermissionDenied);}
         self.roots.remove(root_id);let revoked:HashSet<String>=self.handles.iter().filter(|(_,handle)|handle.root_id==root_id).map(|(id,_)|id.clone()).collect();
         for id in &revoked{self.handles.remove(id);}let before=self.chunks.len()+self.previews.len()+self.snippets.len();
         self.chunks.retain(|entry|!revoked.contains(&entry.handle));self.previews.retain(|entry|!revoked.contains(&entry.handle));self.snippets.retain(|entry|!revoked.contains(&entry.handle));
         let after=self.chunks.len()+self.previews.len()+self.snippets.len();
-        Ok(RevocationReceipt{root_id:root_id.into(),handles_revoked:revoked.len(),cached_records_purged:before-after,access_blocked:true})
+        let handles_revoked=self.pending_purges.get(root_id).map_or(revoked.len(),|(_,count)|*count);
+        let purge=self.cache.as_mut().map_or(Ok(0),|cache|cache.purge(root_id));
+        let (persisted,purge_pending)=match purge {
+            Ok(count)=>{self.pending_purges.remove(root_id);(count,false)},
+            Err(_)=>{self.pending_purges.insert(root_id.into(),(owner.clone(),handles_revoked));(0,true)},
+        };
+        Ok(RevocationReceipt{root_id:root_id.into(),handles_revoked,cached_records_purged:before-after+persisted,access_blocked:true,purge_pending})
     }
 
     pub fn active_roots(&self,owner:&Owner,now_ms:u64)->Vec<RootGrant>{
@@ -415,6 +481,123 @@ mod tests {
     fn enroll()->(tempfile::TempDir,Owner,Manager,RootGrant){
         let (temp,owner,mut manager,proposal)=setup();let id=proposal.roots.iter().find(|root|root.display_path.ends_with("Documents")).unwrap().root_id.clone();
         let grant=manager.enroll(&owner,&proposal.proposal_id,&[id],&[Access::Metadata,Access::Content,Access::Mutation],101).unwrap().remove(0);(temp,owner,manager,grant)
+    }
+
+    fn persistent()->(tempfile::TempDir,Owner,Manager,RootGrant,PathBuf) {
+        let (temp,owner,_,_)=setup();let directory=temp.path().join("cache");
+        fs::create_dir(&directory).unwrap();fs::set_permissions(&directory,fs::Permissions::from_mode(0o700)).unwrap();
+        let mut manager=Manager::with_cache(&directory).unwrap();
+        let proposal=manager.propose_xdg_roots(owner.clone(),temp.path(),100).unwrap();
+        let selected=proposal.roots.iter().find(|root|root.display_path.ends_with("Documents")).unwrap().root_id.clone();
+        let root=manager.enroll(&owner,&proposal.proposal_id,&[selected],&[Access::Content],101).unwrap().remove(0);
+        (temp,owner,manager,root,directory)
+    }
+    fn persisted_count(directory:&Path,table:&str)->usize {
+        let connection=rusqlite::Connection::open(directory.join("content.sqlite3")).unwrap();
+        let count:i64=connection.query_row(&format!("SELECT count(*) FROM {table}"),[],|r|r.get(0)).unwrap();
+        usize::try_from(count).unwrap()
+    }
+
+    #[test]
+    fn persisted_read_cache_rechecks_scope_and_revokes_all_material_without_originals() {
+        let (temp,owner,mut manager,root,directory)=persistent();
+        let handle=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,102).unwrap();
+        assert_eq!(manager.read_and_cache(&owner,&handle.file_handle,32,103).unwrap(),b"safe text");
+        assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,104).unwrap(),"safe text");
+        let mut foreign=owner.clone();foreign.client_binding_sha256="b".repeat(64);
+        assert_eq!(manager.cached_snippet(&foreign,&handle.file_handle,104),Err(ErrorCode::PermissionDenied));
+        assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,handle.expires_at_boottime_ms),Err(ErrorCode::ApprovalExpired));
+        for table in ["documents","chunks","previews","snippets"] { assert_eq!(persisted_count(&directory,table),1); }
+        let receipt=manager.revoke(&owner,&root.root_id).unwrap();
+        assert!(receipt.access_blocked && !receipt.purge_pending);assert_eq!(receipt.cached_records_purged,3);
+        assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,104),Err(ErrorCode::PermissionDenied));
+        for table in ["documents","chunks","previews","snippets"] { assert_eq!(persisted_count(&directory,table),0); }
+        assert_eq!(fs::read(temp.path().join("Documents/note.txt")).unwrap(),b"safe text");
+    }
+
+    #[test]
+    fn failed_purge_blocks_access_immediately_and_owner_can_retry_after_lock_release() {
+        let (_temp,owner,mut manager,root,directory)=persistent();
+        let handle=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,102).unwrap();
+        manager.read_and_cache(&owner,&handle.file_handle,32,103).unwrap();
+        let writer=rusqlite::Connection::open(directory.join("content.sqlite3")).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let receipt=manager.revoke(&owner,&root.root_id).unwrap();
+        assert!(receipt.access_blocked && receipt.purge_pending);assert_eq!(receipt.cached_records_purged,0);
+        assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,104),Err(ErrorCode::PermissionDenied));
+        let mut foreign=owner.clone();foreign.uid+=1;assert_eq!(manager.revoke(&foreign,&root.root_id),Err(ErrorCode::PermissionDenied));
+        writer.execute_batch("ROLLBACK").unwrap();
+        let receipt=manager.revoke(&owner,&root.root_id).unwrap();
+        assert!(receipt.access_blocked && !receipt.purge_pending);assert_eq!(receipt.cached_records_purged,3);
+    }
+
+    #[test]
+    fn cache_restart_purges_lost_grants_and_live_second_broker_is_refused() {
+        let (_temp,owner,mut manager,root,directory)=persistent();
+        let handle=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,102).unwrap();
+        manager.read_and_cache(&owner,&handle.file_handle,32,103).unwrap();
+        assert!(matches!(Manager::with_cache(&directory),Err(ErrorCode::Conflict)));
+        drop(manager);let restarted=Manager::with_cache(&directory).unwrap();
+        assert_eq!(restarted.cached_snippet(&owner,&handle.file_handle,104),Err(ErrorCode::PermissionDenied));
+        assert_eq!(persisted_count(&directory,"chunks"),0);
+    }
+
+    #[test]
+    fn cache_changes_and_private_key_content_cannot_be_retrieved_or_retained() {
+        let (temp,owner,mut manager,root,directory)=persistent();
+        let source=temp.path().join("Documents/note.txt");
+        fs::write(&source,["-----BEGIN ","PRIVATE KEY-----\nsecret"].concat()).unwrap();
+        let secret_handle=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,102).unwrap();
+        assert_eq!(manager.read_and_cache(&owner,&secret_handle.file_handle,128,103),Err(ErrorCode::SecretScopeDenied));
+        assert_eq!(persisted_count(&directory,"documents"),0);
+        fs::write(&source,"نص عربي mixed text").unwrap();
+        let handle=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,104).unwrap();
+        manager.read_and_cache(&owner,&handle.file_handle,128,105).unwrap();
+        assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,106).unwrap(),"نص عربي mixed text");
+        fs::write(&source,"changed").unwrap();
+        assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,106),Err(ErrorCode::TargetChanged));
+        assert!(secret(Path::new(".local/state/aios/files/content.sqlite3")));
+    }
+
+    #[test]
+    fn cache_directory_symlinks_unsafe_files_and_schema_drift_are_refused() {
+        let (temp,_,manager,_,directory)=persistent();drop(manager);
+        let alias=temp.path().join("alias");symlink(&directory,&alias).unwrap();
+        assert!(Manager::with_cache(&alias).is_err());
+        let path=directory.join("content.sqlite3");
+        fs::set_permissions(&path,fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(Manager::with_cache(&directory),Err(ErrorCode::PermissionDenied)));
+        fs::set_permissions(&path,fs::Permissions::from_mode(0o600)).unwrap();
+        let connection=rusqlite::Connection::open(&path).unwrap();
+        connection.execute_batch("ALTER TABLE snippets ADD COLUMN unrelated TEXT").unwrap();drop(connection);
+        assert!(matches!(Manager::with_cache(&directory),Err(ErrorCode::UnsupportedSchema)));
+    }
+
+    #[test]
+    fn root_purge_preserves_other_consented_root_and_original_files() {
+        let (temp,owner,mut manager,root,directory)=persistent();
+        fs::write(temp.path().join("Downloads/other.txt"),"other text").unwrap();
+        let proposal=manager.propose_xdg_roots(owner.clone(),temp.path(),101).unwrap();
+        let id=proposal.roots.iter().find(|r|r.display_path.ends_with("Downloads")).unwrap().root_id.clone();
+        let other=manager.enroll(&owner,&proposal.proposal_id,&[id],&[Access::Content],102).unwrap().remove(0);
+        let a=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,103).unwrap();
+        let b=manager.issue_handle(&owner,&other.root_id,Path::new("other.txt"),Access::Content,103).unwrap();
+        manager.read_and_cache(&owner,&a.file_handle,32,104).unwrap();manager.read_and_cache(&owner,&b.file_handle,32,104).unwrap();
+        assert_eq!(manager.revoke(&owner,&root.root_id).unwrap().cached_records_purged,3);
+        assert_eq!(manager.cached_snippet(&owner,&b.file_handle,105).unwrap(),"other text");
+        assert_eq!(persisted_count(&directory,"chunks"),1);
+    }
+
+    #[test]
+    fn installed_cache_path_is_private_and_cannot_follow_a_symlink() {
+        let home=tempfile::tempdir().unwrap();
+        let manager=Manager::for_user_home(home.path()).unwrap();
+        let cache=home.path().join(".local/state/aios/files");
+        assert_eq!(fs::metadata(&cache).unwrap().mode()&0o777,0o700);
+        assert_eq!(fs::metadata(cache.join("content.sqlite3")).unwrap().mode()&0o777,0o600);
+        drop(manager);
+        let other=tempfile::tempdir().unwrap();symlink(home.path().join(".local"),other.path().join(".local")).unwrap();
+        assert!(matches!(Manager::for_user_home(other.path()),Err(ErrorCode::PermissionDenied)));
     }
 
     #[test]
@@ -448,7 +631,7 @@ mod tests {
     #[test]
     fn revocation_blocks_direct_and_cached_reads_before_purging_all_records(){
         let (_temp,owner,mut manager,root)=enroll();let handle=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,102).unwrap();
-        manager.cache_for_test(&handle.file_handle,"chunk","preview","snippet").unwrap();assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,103),Ok("snippet"));
+        manager.cache_for_test(&handle.file_handle,"chunk","preview","snippet").unwrap();assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,103),Ok("snippet".into()));
         let receipt=manager.revoke(&owner,&root.root_id).unwrap();assert!(receipt.access_blocked);assert_eq!(receipt.handles_revoked,1);assert_eq!(receipt.cached_records_purged,3);
         assert_eq!(manager.read(&owner,&handle.file_handle,32,104),Err(ErrorCode::PermissionDenied));assert_eq!(manager.cached_snippet(&owner,&handle.file_handle,104),Err(ErrorCode::PermissionDenied));
     }
