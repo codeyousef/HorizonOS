@@ -19,9 +19,20 @@
       devTools = pkgs.callPackage ./nix/packages/dev-tools.nix { src = hostSource; };
       llamaBridge = pkgs.callPackage ./nix/packages/llama-bridge.nix { };
       conversionPython = pkgs.python3.withPackages (p: [ p.numpy p.safetensors p.transformers p.sentencepiece p.protobuf p.torch ]);
-      productSource = pkgs.lib.fileset.toSource {
+      qualificationSource = pkgs.lib.fileset.toSource {
         root = ./.;
         fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./crates
+          (pkgs.lib.fileset.fileFilter (file: file.hasExt "json") ./schemas)
+          (pkgs.lib.fileset.fileFilter (file: file.hasExt "json") ./models) ];
+      };
+      # Qualification clients are not production dependencies. Keep their
+      # complete source in the optional probes without invalidating every
+      # production Rust package when only a fixture changes.
+      productSource = pkgs.lib.fileset.toSource {
+        root = ./.;
+        fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock
+          (pkgs.lib.fileset.difference ./crates (pkgs.lib.fileset.unions [
+            ./crates/aios-files/examples ./crates/aios-session/examples ]))
           (pkgs.lib.fileset.fileFilter (file: file.hasExt "json") ./schemas)
           (pkgs.lib.fileset.fileFilter (file: file.hasExt "json") ./models) ];
       };
@@ -147,11 +158,19 @@
       checks.${system} = { host-unit = devTools; consent-ui = consentUiTests; };
       # Optional non-performance TCG fixture; excluded from default checks and
       # mandatory host tools. No host credentials or private directories enter it.
-      legacyPackages.${system}.fileScopesNative = import ./tests/nix/file-scopes-native.nix {
-        inherit pkgs;
-        source = productSource;
-        fixtureUuid = "e64a1bf0-814b-4dc0-94a3-04c539f41cd2";
-        installationUuid = "0d698869-1d37-4776-b3c7-30c7689a2d15";
+      legacyPackages.${system} = {
+        fileScopesNative = import ./tests/nix/file-scopes-native.nix {
+          inherit pkgs;
+          source = qualificationSource;
+          fixtureUuid = "e64a1bf0-814b-4dc0-94a3-04c539f41cd2";
+          installationUuid = "0d698869-1d37-4776-b3c7-30c7689a2d15";
+        };
+        fileScopesConsent = import ./tests/nix/file-scopes-consent.nix {
+          inherit pkgs core consentUi;
+          source = qualificationSource;
+          fixtureUuid = "f905c5bf-7f82-478b-96fa-4f8827d8e254";
+          installationUuid = "ec31bea9-a87a-4f8d-bd97-975eb9d69f8f";
+        };
       };
       lib.stateContract = stateContract;
       lib.catalogPackages = builtins.listToAttrs (map (entry: {

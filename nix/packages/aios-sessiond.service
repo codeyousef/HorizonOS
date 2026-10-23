@@ -24,7 +24,17 @@ PrivateDevices=no
 ProtectSystem=no
 ProtectHome=no
 ProtectProc=default
-RestrictSUIDSGID=yes
+# RestrictSUIDSGID blocks openat2 entirely with ENOSYS, including read-only
+# descriptor opens, because seccomp cannot inspect its indirect mode argument.
+# Files1 requires openat2's beneath/no-follow/no-new-mount guarantees. Retain
+# NoNewPrivileges and zero effective capabilities; fixed cache modes never create SUID
+# files and no caller may select a creation mode or execute a scoped file.
+RestrictSUIDSGID=no
+# An unprivileged user manager cannot drop the bounding set without a child
+# user namespace, which changes the UID/filesystem view Files1 must verify.
+# Qualification requires empty effective/permitted/inheritable/ambient sets;
+# NoNewPrivileges prevents acquiring capabilities from later execs.
+AmbientCapabilities=
 RestrictNamespaces=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes

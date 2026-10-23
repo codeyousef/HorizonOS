@@ -273,7 +273,8 @@ impl Manager {
 
     pub fn for_user_home(home:&Path)->Result<Self> {
         let uid=nix::unistd::geteuid().as_raw();
-        let (mut directory,home_identity)=open_root(home)?;
+        let (mut directory,home_identity)=open_root(home)
+            .inspect_err(|error|eprintln!("aios-files: private cache home identity ({error:?})"))?;
         if !home.is_absolute() || home_identity.uid!=uid { return Err(ErrorCode::PermissionDenied); }
         let mut path=home.to_path_buf();
         for name in [".local","state","aios","files"] {
@@ -285,16 +286,20 @@ impl Manager {
                 return Err(ErrorCode::ResourceExhausted);
             }
             directory=openat2(directory.as_raw_fd(),Path::new(name),nix::libc::O_RDONLY|nix::libc::O_DIRECTORY|nix::libc::O_NOFOLLOW,
-                RESOLVE_BENEATH|RESOLVE_NO_XDEV|RESOLVE_NO_MAGICLINKS|RESOLVE_NO_SYMLINKS)?;
-            let current=identity(&directory)?;
+                RESOLVE_BENEATH|RESOLVE_NO_XDEV|RESOLVE_NO_MAGICLINKS|RESOLVE_NO_SYMLINKS)
+                .inspect_err(|error|eprintln!("aios-files: private cache directory open ({error:?})"))?;
+            let current=identity(&directory)
+                .inspect_err(|error|eprintln!("aios-files: private cache directory identity ({error:?})"))?;
             if current.uid!=uid || current.mode&0o022!=0 || (name=="files" && current.mode&0o777!=0o700) {
                 return Err(ErrorCode::PermissionDenied);
             }
             directory.sync_all().map_err(|_|ErrorCode::ResourceExhausted)?; path.push(name);
         }
-        let (_,named)=open_root(&path)?;
+        let (_,named)=open_root(&path)
+            .inspect_err(|error|eprintln!("aios-files: private cache final directory identity ({error:?})"))?;
         if !same_root(&named,&identity(&directory)?) { return Err(ErrorCode::TargetChanged); }
         Self::with_cache(&path)
+            .inspect_err(|error|eprintln!("aios-files: private cache database initialization ({error:?})"))
     }
 
     pub fn propose_xdg_roots(&mut self, owner: Owner, home: &Path, now_ms: u64) -> Result<Proposal> {
@@ -356,7 +361,10 @@ impl Manager {
         if now_ms>=proposal.expires { return Err(ErrorCode::ApprovalExpired); }
         approved.iter().map(|id| {
             let candidate=proposal.roots.iter().find(|root|&root.root.root_id==id).ok_or(ErrorCode::PermissionDenied)?;
-            let (_,current)=open_root(&candidate.path)?;
+            // This path was reviewed while it existed. Disappearance or an
+            // unsafe replacement invalidates that identity, including the gap
+            // between renaming the original and installing its replacement.
+            let (_,current)=open_root(&candidate.path).map_err(|_|ErrorCode::TargetChanged)?;
             if !same_root(&current,&candidate.identity) { return Err(ErrorCode::TargetChanged); }
             Ok(candidate.root.clone())
         }).collect()
@@ -705,6 +713,7 @@ mod tests {
         assert_eq!(manager.issue_handle(&owner,&id,Path::new("note.txt"),Access::Content,102),Err(ErrorCode::PermissionDenied));
         assert_eq!(manager.review_enrollment(&owner,&proposal.proposal_id,&[id.clone()],&[Access::Content],proposal.expires_at_boottime_ms),Err(ErrorCode::ApprovalExpired));
         fs::rename(temp.path().join("Documents"),temp.path().join("OldDocuments")).unwrap();
+        assert_eq!(manager.review_enrollment(&owner,&proposal.proposal_id,&[id.clone()],&[Access::Content],103),Err(ErrorCode::TargetChanged));
         fs::create_dir(temp.path().join("Documents")).unwrap();
         assert_eq!(manager.review_enrollment(&owner,&proposal.proposal_id,&[id],&[Access::Content],103),Err(ErrorCode::TargetChanged));
     }

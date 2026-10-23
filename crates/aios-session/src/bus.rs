@@ -525,7 +525,8 @@ pub fn export_user_bus(state: SharedState) -> zbus::Result<zbus::blocking::Conne
     // always selects this user's standard systemd runtime bus.
     let uid = nix::unistd::geteuid().as_raw();
     let home=user_home(uid).map_err(|_|zbus::Error::Failure("private file cache account unavailable".into()))?;
-    let files=aios_files::Manager::for_user_home(&home).map_err(|_|zbus::Error::Failure("private file cache unavailable".into()))?;
+    let files=aios_files::Manager::for_user_home(&home)
+        .map_err(|error|zbus::Error::Failure(format!("private file cache unavailable ({error:?})")))?;
     let mut agent=Agent::new(state); agent.files=Arc::new(Mutex::new(files));
     export_agent(&format!("unix:path=/run/user/{uid}/bus"),agent)
 }

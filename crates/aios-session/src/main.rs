@@ -8,6 +8,10 @@ fn run() -> io::Result<()> {
     }
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.is_empty() {
+        // Clear inherited capabilities before starting any broker thread or
+        // admitting clients. The managed public unit must already enforce
+        // NoNewPrivileges; fail closed when that deployment contract is absent.
+        aios_session::native_startup::drop_capabilities()?;
         let runtime = PathBuf::from(format!("/run/user/{}", nix::unistd::geteuid()));
         let info = std::fs::symlink_metadata(&runtime)?;
         if std::fs::canonicalize(&runtime)? != runtime || !info.is_dir() || info.uid() != nix::unistd::geteuid().as_raw() || info.mode() & 0o077 != 0 {

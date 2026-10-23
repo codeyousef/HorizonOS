@@ -48,6 +48,14 @@ class JobTests(unittest.TestCase):
         self.assertEqual(commands[0][commands[0].index('--out-link')+1],'/owned/job/scope-fixture-result')
         self.assertFalse(any('fileScopesNative' in arg for command in controller.commands('test-unit',release) for arg in command))
 
+    def test_native_consent_job_selects_only_registered_desktop_and_result(self):
+        release = Path('/home/dev/aios-releases') / ('a' * 64)
+        commands = controller.commands('file-scopes-consent-smoke', release, job_directory=Path('/owned/job'))
+        self.assertEqual(commands[0][-1], 'path:' + str(release) + '#legacyPackages.x86_64-linux.fileScopesConsent')
+        self.assertEqual(commands[1], ['python3', str(release / 'tools/guest/scope_consent_result.py'), '/owned/job'])
+        self.assertEqual(commands[0][commands[0].index('--max-jobs')+1], '1')
+        self.assertEqual(commands[0][commands[0].index('--cores')+1], '2')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aios-job-")
         self.addCleanup(self.temp.cleanup)
