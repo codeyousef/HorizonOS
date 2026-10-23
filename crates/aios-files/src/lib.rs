@@ -12,6 +12,7 @@ use std::{
 };
 use uuid::Uuid;
 mod cache;
+pub mod extract;
 
 type Result<T> = std::result::Result<T, ErrorCode>;
 const MAX_PATH_BYTES: usize = 4096;

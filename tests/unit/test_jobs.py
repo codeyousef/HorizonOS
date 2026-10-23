@@ -56,6 +56,16 @@ class JobTests(unittest.TestCase):
         self.assertEqual(commands[0][commands[0].index('--max-jobs')+1], '1')
         self.assertEqual(commands[0][commands[0].index('--cores')+1], '2')
 
+    def test_extractor_job_uses_fixed_native_test_and_validator(self):
+        release = Path('/home/dev/aios-releases') / ('a' * 64)
+        with self.assertRaises(ValueError):
+            controller.commands('extract-native-smoke', release)
+        commands = controller.commands('extract-native-smoke', release, job_directory=Path('/owned/job'))
+        self.assertEqual(commands[0][-1], 'path:' + str(release) + '#legacyPackages.x86_64-linux.extractNative')
+        self.assertEqual(commands[1], ['python3', str(release / 'tools/guest/extract_result.py'), '/owned/job'])
+        self.assertEqual(commands[0][commands[0].index('--max-jobs')+1], '1')
+        self.assertFalse(any('extractNative' in arg for command in controller.commands('test-unit', release) for arg in command))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aios-job-")
         self.addCleanup(self.temp.cleanup)

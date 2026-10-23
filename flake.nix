@@ -63,6 +63,12 @@
         buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
       });
       cli = productPackage "aios-cli" "aios-cli" "aiosctl";
+      extract = (productPackage "aios-extract" "aios-files" "aios-extract").overrideAttrs (old: {
+        nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
+        buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
+        AIOS_PDFINFO = "${pkgs.poppler-utils}/bin/pdfinfo";
+        AIOS_PDFTOTEXT = "${pkgs.poppler-utils}/bin/pdftotext";
+      });
       consentUi = pkgs.callPackage ./nix/packages/consent-ui.nix { };
       consentUiTests = pkgs.callPackage ./nix/packages/consent-ui.nix { testing = true; };
       core = (productPackage "aios-core" "aios-session" "aios-sessiond").overrideAttrs (old: {
@@ -138,27 +144,32 @@
     in {
       nixosConfigurations.aios-dev = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosState = state; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
+        specialArgs = { aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosState = state; aiosPackages = { aios-extract = extract; aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ];
       };
       nixosConfigurations.aios-desktop-test = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { aiosBaseSystem = self.nixosConfigurations.aios-dev.config.system.build.toplevel; aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosState = state; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
+        specialArgs = { aiosBaseSystem = self.nixosConfigurations.aios-dev.config.system.build.toplevel; aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosState = state; aiosPackages = { aios-extract = extract; aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ./nix/machines/aios-desktop-test.nix ];
       };
       nixosConfigurations.aios-model-test = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { aiosBaseSystem = self.nixosConfigurations.aios-dev.config.system.build.toplevel; aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosState = state; aiosPackages = { aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
+        specialArgs = { aiosBaseSystem = self.nixosConfigurations.aios-dev.config.system.build.toplevel; aiosModel = model; aiosModelArtifact = modelArtifact; aiosExecutor = executor; aiosTemplate = systemTemplate; aiosStateContract = stateContract; aiosState = state; aiosPackages = { aios-extract = extract; aios-cli = cli; aios-core = core; aios-model = model; aios-guard = guard; }; };
         modules = [ ./nix/machines/aios-dev ./nix/machines/aios-desktop-test.nix ./nix/machines/aios-model-test.nix ];
       };
       nixosModules.default = import ./nix/modules/aios;
       nixosModules.development = import ./nix/modules/aios;
       nixosModules.production = import ./nix/modules/aios/production.nix;
-      packages.${system} = { aios-consent-ui = consentUi; aios-model-artifact = modelArtifact; aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { aiosGuard = guard; }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
+      packages.${system} = { aios-extract = extract; aios-consent-ui = consentUi; aios-model-artifact = modelArtifact; aios-template = systemTemplate; aios-exec = executor; aios-state = state; aios-dev-tools = devTools; aios-guard = guard; aios-dev-deploy = pkgs.callPackage ./nix/packages/dev-deploy.nix { aiosGuard = guard; }; aios-cli = cli; aios-core = core; aios-model = model; aios-llama-bridge = llamaBridge; default = devTools; };
       checks.${system} = { host-unit = devTools; consent-ui = consentUiTests; };
       # Optional non-performance TCG fixture; excluded from default checks and
       # mandatory host tools. No host credentials or private directories enter it.
       legacyPackages.${system} = {
+        extractNative = import ./tests/nix/extract.nix {
+          inherit pkgs extract;
+          fixtureUuid = "3a491b68-9b63-4d24-b232-8d7ce1ba044c";
+          installationUuid = "699932ee-271f-429c-b478-edb05b33c5d4";
+        };
         fileScopesNative = import ./tests/nix/file-scopes-native.nix {
           inherit pkgs;
           source = qualificationSource;

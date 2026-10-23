@@ -2,7 +2,7 @@
 let
   cfg = config.services.aios;
 in {
-  imports = [ ./development.nix ./model.nix ./session.nix ./graph.nix ./retention.nix ];
+  imports = [ ./development.nix ./model.nix ./session.nix ./graph.nix ./retention.nix ./extract.nix ];
   options.services.aios = {
     enable = lib.mkEnableOption "the Minnerite control plane";
     desktop = {
