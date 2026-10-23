@@ -60,6 +60,7 @@ in {
         TemporaryFileSystem = "/tmp:rw,nosuid,nodev,noexec,size=64M,mode=0700,uid=%U,gid=%G";
         WorkingDirectory = "/tmp";
         Environment = [ "TMPDIR=/tmp" ];
+        UnsetEnvironment = [ "LD_PRELOAD" "LD_LIBRARY_PATH" "LD_AUDIT" "GLIBC_TUNABLES" ];
         UMask = "0077";
         LimitCORE = 0;
         LimitNOFILE = 64;

@@ -52,6 +52,9 @@ struct HandleRequest { schema_version:u32,file_handle:String }
 struct ReadScopedRequest { schema_version:u32,file_handle:String,max_bytes:usize }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ExtractScopedRequest { schema_version:u32,file_handle:String,format:aios_files::extract::Format,range:Option<aios_files::extract::Selection>,max_bytes:usize }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RevokeRootRequest { schema_version:u32,root_id:String }
 pub(crate) fn file_owner(peer:&Peer)->std::result::Result<aios_files::Owner,ErrorCode>{
     let subject=peer.policy_subject()?;
@@ -451,8 +454,17 @@ impl Files{
         let content=String::from_utf8(bytes).map_err(|_|ErrorCode::UnsupportedCapability)?;
         file_json(serde_json::json!({"schema_version":1,"operation":"file_read","data":{"file_handle":handle,"bytes_read":content.len(),"content":content},"mutation_performed":false}))
     }
-    async fn revoke_root(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+    async fn extract_scoped(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
         let _admission=self.agent.admit()?;if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
+        let request:ExtractScopedRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
+        if request.schema_version!=1 || !crate::uuid(&request.file_handle) || request.max_bytes==0 || request.max_bytes>131072 {return Err(ErrorCode::InvalidArgument.into());}
+        let peer=Agent::peer(connection,&header).await?;let owner=file_owner(&peer)?;let files=self.agent.files.clone();
+        let data=blocking::unblock(move||crate::file_extraction::extract(files,owner,request.file_handle,
+            aios_files::extract::Request {schema_version:1,format:request.format,range:request.range},request.max_bytes)).await?;
+        file_json(serde_json::json!({"schema_version":1,"operation":"file_extracted","data":data,"mutation_performed":false}))
+    }
+    async fn revoke_root(&self,request_json:&str,#[zbus(connection)] connection:&Connection,#[zbus(header)] header:Header<'_>)->Result<String>{
+        let _admission=self.agent.admit_control()?;if request_json.len()>MAX_TASK_BYTES{return Err(ErrorCode::ResourceExhausted.into());}
         let request:RevokeRootRequest=serde_json::from_str(request_json).map_err(|_|ErrorCode::InvalidArgument)?;
         if request.schema_version!=1||!crate::uuid(&request.root_id){return Err(ErrorCode::InvalidArgument.into());}
         let peer=Agent::peer(connection,&header).await?;let original=peer.clone();let agent=self.agent.clone();

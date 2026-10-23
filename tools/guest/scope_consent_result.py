@@ -11,7 +11,8 @@ CASES = ('existing_xdg_only', 'preconsent_denied', 'forged_confirmation_denied',
          'native_enrollment_content_verified', 'secret_paths_and_renamed_key_denied',
          'ungranted_mutation_denied', 'foreign_client_denied', 'changed_source_denied',
          'revocation_blocked', 'stored_material_counts_verified', 'native_ui_consent_qualified',
-         'broker_security_verified', 'unmanaged_startup_refused')
+         'broker_security_verified', 'unmanaged_startup_refused',
+         'managed_extraction_provenance', 'broker_pdf_unicode_ranges', 'extraction_foreign_changed_revoked_denied', 'broker_survives_malformed_parser', 'unmanaged_worker_gets_no_descriptor', 'revocation_during_extraction_denied')
 
 
 def validate(result):

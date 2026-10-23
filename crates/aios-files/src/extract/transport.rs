@@ -5,7 +5,9 @@ use aios_protocol::contracts::ErrorCode;
 use nix::sys::socket::{recvmsg,ControlMessageOwned,MsgFlags,getsockopt,sockopt::PeerCredentials};
 use serde::{Deserialize,Serialize};
 use std::{fs::File,io::{Read,Write,IoSliceMut},os::{fd::{AsRawFd,FromRawFd,OwnedFd,RawFd},unix::net::UnixStream},time::Duration};
-const MARKER:u8=0xe1;
+pub const MARKER:u8=0xe1;
+/// Sent by the sandboxed process before the caller transfers any authority.
+pub const READY_MARKER:u8=0xe2;
 const MAX_REQUEST:usize=4096;
 #[derive(Debug,Deserialize,Serialize)]
 #[serde(deny_unknown_fields)]
@@ -57,8 +59,10 @@ fn require_profile()->std::io::Result<()> {
     Ok(())
 }
 
-pub fn serve_once(stream:UnixStream)->std::io::Result<()> {
+pub fn serve_once(mut stream:UnixStream)->std::io::Result<()> {
     require_profile()?;
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    stream.write_all(&[READY_MARKER])?;
     serve_response(stream)
 }
 

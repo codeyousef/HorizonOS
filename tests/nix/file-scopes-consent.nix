@@ -1,4 +1,4 @@
-{ pkgs, source, core, consentUi, fixtureUuid, installationUuid }:
+{ pkgs, source, core, extract, consentUi, fixtureUuid, installationUuid }:
 let
   probe = pkgs.rustPlatform.buildRustPackage {
     pname = "aios-files-consent-qualification";
@@ -27,10 +27,11 @@ let
 in pkgs.testers.runNixOSTest {
   name = "aios-file-scopes-native-consent";
   requiredFeatures.kvm = false;
-  node.specialArgs.aiosCore = core;
+  node.specialArgs = { aiosCore = core; aiosExtract = extract; };
   nodes.machine = { lib, ... }: {
     imports = [ ../../nix/modules/aios ];
     services.aios.session.enable = true;
+    services.aios.extract.enable = true;
     virtualisation.memorySize = 3072;
     virtualisation.cores = 2;
     virtualisation.diskSize = 2048;
@@ -98,6 +99,11 @@ in pkgs.testers.runNixOSTest {
     checked("install -d -o alice -g users -m 0700 /home/alice/scope-consent /home/alice/Desktop /home/alice/Documents /home/alice/Downloads /home/alice/Projects /home/alice/Documents/.local/state/aios")
     checked("printf 'consented installed content' > /home/alice/Documents/note.txt; printf excluded > /home/alice/Documents/.env; printf excluded > /home/alice/Documents/id_ed25519; printf excluded > /home/alice/Documents/wallet.dat; printf excluded > /home/alice/Documents/.local/state/aios/private.txt; printf '%s%s' '-----BEGIN ' 'OPENSSH PRIVATE KEY-----' > /home/alice/Documents/renamed.txt; chown -R alice:users /home/alice/Documents; ln -s /etc/passwd /home/alice/Documents/escape.txt")
     machine.wait_until_succeeds(gate + " verify >/dev/null && " + user + "'export XDG_RUNTIME_DIR=/run/user/1000; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus; systemctl --user is-active plasma-kwin_wayland.service'", timeout=180)
+    # KWin becoming active precedes the complete Plasma session and portal
+    # startup. Wait for those native readiness conditions before opening a
+    # consent dialog; production display lookups keep their bounded timeout.
+    machine.wait_until_succeeds(gate + " verify >/dev/null && " + user + "'export XDG_RUNTIME_DIR=/run/user/1000; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus; systemctl --user is-active plasma-workspace-wayland.target plasma-plasmashell.service xdg-desktop-autostart.target'", timeout=180)
+    machine.wait_until_succeeds(gate + " verify >/dev/null && " + user + "'export XDG_RUNTIME_DIR=/run/user/1000; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus; timeout 20 busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop org.freedesktop.DBus.Peer Ping'", timeout=180)
     try:
         machine.wait_until_succeeds(gate + " verify >/dev/null && " + user + "'export XDG_RUNTIME_DIR=/run/user/1000; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus; systemctl --user is-active aios-sessiond.service'", timeout=30)
     except Exception:

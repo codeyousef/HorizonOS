@@ -95,6 +95,68 @@ fn empty(size: u64) -> Extraction {
     Extraction { schema_version:1, extraction_version:VERSION.into(), source_bytes:size,
         source_sha256:None, complete:false, limitations:Vec::new(), pages:None, chunks:Vec::new() }
 }
+impl Extraction {
+    /// Check a managed worker's data envelope against the original request;
+    /// this validates data only and cannot establish file authority.
+    pub fn validate_for(&self,request:&Request,source_bytes:u64)->Result<()> {
+        request.validate()?;
+        if self.schema_version!=1 || self.extraction_version!=VERSION || self.source_bytes!=source_bytes || self.chunks.len()>4096
+            || self.source_sha256.as_deref().is_some_and(|h|h.len()!=64 || !h.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+            || (source_bytes>MAX_SOURCE && self.source_sha256.is_some())
+            || (source_bytes<=MAX_SOURCE && self.source_sha256.is_none())
+            || (request.format!=Format::Pdf && self.pages.is_some())
+            || (!self.chunks.is_empty() && (source_bytes>MAX_RANGE_SOURCE || (source_bytes>MAX_SOURCE && request.range.is_none())))
+            || (self.complete && self.limitations.iter().any(|l|*l!=Limitation::LayoutBestEffort)) {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        let mut total=0usize;let mut last_byte=None;let mut last_page=None;
+        for chunk in &self.chunks {
+            total=total.checked_add(chunk.text.len()).ok_or(ErrorCode::ResourceExhausted)?;
+            if total>MAX_TEXT {return Err(ErrorCode::ResourceExhausted);}
+            match (&chunk.locator,request.format,request.range) {
+                (Locator::Lines {start,end,byte_start,byte_end},Format::Text,selection) => {
+                    if *start==0 || end<start || byte_end<byte_start || *byte_end>source_bytes || byte_end-byte_start!=chunk.text.len() as u64
+                        || *end!=start.checked_add(chunk.text.bytes().filter(|b|*b==b'\n').count() as u64).and_then(|n|n.checked_sub(u64::from(chunk.text.ends_with('\n')))).ok_or(ErrorCode::InvalidArgument)?
+                        || last_byte.is_some_and(|b|*byte_start<b) {return Err(ErrorCode::InvalidArgument);}
+                    if let Some(Selection::Lines {start:a,end:b})=selection {if *start<a || *end>b {return Err(ErrorCode::InvalidArgument);}}
+                    last_byte=Some(*byte_end);
+                },
+                (Locator::Page {number},Format::Pdf,selection) => {
+                    if *number==0 || self.pages.is_none_or(|n|*number>n) || last_page.is_some_and(|p|*number<=p) {return Err(ErrorCode::InvalidArgument);}
+                    match selection {Some(Selection::Pages {start,end}) if *number<start || *number>end=>return Err(ErrorCode::InvalidArgument),None if *number>MAX_PAGES=>return Err(ErrorCode::InvalidArgument),_=>{}}
+                    last_page=Some(*number);
+                },
+                _=>return Err(ErrorCode::InvalidArgument),
+            }
+        }
+        if request.range.is_some() && self.complete {return Err(ErrorCode::InvalidArgument);}
+        Ok(())
+    }
+
+    /// Bound a public retrieval separately from the worker's retained-text
+    /// budget, preserving precise locators and marking the truncated result.
+    pub fn limit_response(&mut self,maximum:usize)->Result<()> {
+        if maximum==0 || maximum>131072 {return Err(ErrorCode::InvalidArgument);}
+        let mut remaining=maximum;let mut keep=0;let mut truncated=false;
+        for chunk in &mut self.chunks {
+            if remaining==0 {truncated=true;break;}
+            if chunk.text.len()>remaining {
+                let mut end=remaining;while !chunk.text.is_char_boundary(end) {end-=1;}
+                chunk.text.truncate(end);
+                if let Locator::Lines {start,end,byte_start,byte_end}=&mut chunk.locator {
+                    *end=*start+chunk.text.bytes().filter(|b|*b==b'\n').count() as u64-u64::from(chunk.text.ends_with('\n'));
+                    *byte_end=*byte_start+chunk.text.len() as u64;
+                }
+                truncated=true;
+            }
+            remaining-=chunk.text.len();keep+=1;
+            if truncated {break;}
+        }
+        self.chunks.truncate(keep);
+        if truncated {self.complete=false;if !self.limitations.contains(&Limitation::OutputLimit) {self.limitations.push(Limitation::OutputLimit);}}
+        Ok(())
+    }
+}
 fn unsupported(prefix: &[u8]) -> bool {
     [b"PK\x03\x04".as_slice(), b"\x7fELF", b"SQLite format 3\0", b"\x89PNG", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"\x1f\x8b", b"7z\xbc\xaf\x27\x1c", b"Rar!", b"MZ"].iter().any(|magic|prefix.starts_with(magic))
         || (prefix.starts_with(b"RIFF") && prefix.get(8..12)==Some(b"WEBP"))
@@ -342,4 +404,17 @@ mod tests {
         assert_eq!(unique_info_field("Title: spoof\nPages: 1\nPages: 2\n","Pages:"),None);
         assert_eq!(unique_info_field("Title: spoof\nEncrypted: no\nEncrypted: yes\n","Encrypted:"),None);
     }
+    #[test]fn response_validation_and_unicode_clipping_keep_exact_source_locations() {
+        let (_t,file)=input("a\nالعربية\nlast\n".as_bytes());let original=extract(&file,&req(None),None).unwrap();
+        original.validate_for(&req(None),original.source_bytes).unwrap();
+        for maximum in [1,2,3,5,8,16,131072] {
+            let mut clipped=original.clone();clipped.limit_response(maximum).unwrap();
+            let text=clipped.chunks.iter().map(|c|c.text.as_str()).collect::<String>();
+            assert!(text.len()<=maximum);assert!("a\nالعربية\nlast\n".starts_with(&text));
+            clipped.validate_for(&req(None),clipped.source_bytes).unwrap();
+            if text.len()<original.source_bytes as usize {assert!(!clipped.complete);assert!(clipped.limitations.contains(&Limitation::OutputLimit));}
+        }
+        assert!(original.clone().limit_response(0).is_err());
+    }
+
 }

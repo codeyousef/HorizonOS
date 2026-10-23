@@ -15,7 +15,11 @@ restricted view before receiving content. Private scratch is a 64 MiB noexec
 filesystem. Neither original source paths nor executable/options/password fields
 are part of the request protocol.
 
-The protocol starts with marker byte `0xe1` carrying exactly one kernel
+The worker first sends `0xe2`. The client enables `SO_PASSCRED` before connecting
+and authenticates that byte’s kernel sender credentials against the active
+managed worker, its compile-pinned executable and resource restrictions. The
+socket listener credentials identify the user manager and are insufficient on
+their own. Only after authentication does the client send `0xe1` carrying exactly one kernel
 `SCM_RIGHTS` descriptor, then a four-byte big-endian JSON length and that JSON.
 The caller closes its write half after the request. The request is limited to
 4096 bytes and contains `schema_version: 1`, a `format` (`text`, `pdf` or
@@ -24,8 +28,8 @@ inclusive and ordered. Page ranges contain at most 200 pages; line selections
 contain at most 100000 lines. Writable, nonregular and foreign-owner descriptors,
 extra rights, unknown fields and malformed requests are rejected. A response
 contains either typed extraction data or a stable error code. This internal
-socket is not a public model tool or an approval transport. A future broker
-client must authenticate the managed receiver before transferring a descriptor.
+socket is not a public model tool or an approval transport. The broker implements this handshake with bounded connection/read deadlines
+and no retries after an ambiguous transfer.
 
 Automatic extraction has a 50 MiB source limit. Larger sources return metadata
 with an explicit limitation. On-demand line/page ranges can inspect sources up
@@ -59,8 +63,17 @@ the complete JSON response to 16 MiB including escaping. The service has a
 a ten-second whole-tree deadline. Its 90% aggregate CPU quota leaves deadline
 scheduling headroom below the ten-second CPU budget. Deadline termination kills
 the whole cgroup; a parser crash or resource failure cannot run inside its
-caller. Resource failures must be surfaced by the eventual broker client rather
-than interpreted as an empty successful document.
+caller. The broker surfaces transport/resource failure as a stable error instead of
+an empty successful document.
+
+`Files1.ExtractScoped` accepts a live content handle, typed format/range and a
+response budget of 1–131072 bytes. Its one-use ticket retains the original
+read-only descriptor. After parsing, the broker rechecks owner, grant expiry,
+root/mount and source identity before publishing provenance and exact locators.
+The grant lock is released during parsing, and root revocation has separate
+admission capacity. Unicode-safe response clipping updates line/byte locators
+and marks incompleteness. This method does not persist or index extracted text
+and is not yet advertised to the model registry.
 
 The optional `extract-native` integration provider installs the actual package
 in a disposable, identity-verified NixOS test node. It exercises Unicode,

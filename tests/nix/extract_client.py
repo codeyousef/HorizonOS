@@ -22,7 +22,13 @@ def request(path, fmt='text', selection=None, writable=False, hold=False):
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
             channel.settimeout(15)
+            channel.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
             channel.connect(SOCKET)
+            ready, ancillary, flags, _ = channel.recvmsg(1, socket.CMSG_SPACE(struct.calcsize("3i")))
+            assert ready == b"\xe2" and not flags
+            assert len(ancillary) == 1 and ancillary[0][:2] == (socket.SOL_SOCKET, socket.SCM_CREDENTIALS)
+            worker_pid, worker_uid, _ = struct.unpack("3i", ancillary[0][2])
+            assert worker_pid > 0 and worker_uid == os.geteuid()
             if hold:
                 for _ in range(100):
                     units = subprocess.check_output(['systemctl', '--user', 'list-units', '--type=service', '--state=running', '--plain', '--no-legend', 'aios-extract@*'], text=True).splitlines()
@@ -33,7 +39,7 @@ def request(path, fmt='text', selection=None, writable=False, hold=False):
                 else:
                     raise AssertionError('worker unit not active')
                 pid = int(subprocess.check_output(['systemctl', '--user', 'show', unit, '-p', 'MainPID', '--value'], text=True))
-                assert pid > 0
+                assert pid == worker_pid
                 (BASE / 'worker.json').write_text(json.dumps({'unit': unit, 'pid': pid}))
                 deadline = time.monotonic() + 6
                 while not (BASE / 'inspected').exists():

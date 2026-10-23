@@ -98,6 +98,28 @@ struct Pending { owner: Owner, expires: u64, roots: Vec<Candidate> }
 struct Root { owner: Owner, path: PathBuf, identity: Identity, identity_sha256: String, allowed: HashSet<Access>, expires: u64, directory: File }
 struct Handle { owner: Owner, root_id: String, relative: String, identity: Identity, access: Access, expires: u64 }
 
+/// One broker-issued handoff, never deserialized or reconstructed from a model
+/// response. Consuming it cannot authorize anything after its grant is revoked.
+pub struct ExtractionTicket {
+    owner: Owner,
+    handle: String,
+    identity: Identity,
+    input: File,
+    request: extract::Request,
+}
+impl ExtractionTicket {
+    pub fn input(&self)->&File {&self.input}
+    pub fn request(&self)->&extract::Request {&self.request}
+}
+#[derive(Debug,Serialize)]
+pub struct ExtractedDocument {
+    pub file_handle: String,
+    pub root_id: String,
+    pub relative_path: String,
+    pub identity_sha256: String,
+    pub extraction: extract::Extraction,
+}
+
 #[derive(Clone)]
 struct CachedRecord { handle: String, value: String }
 
@@ -425,6 +447,32 @@ impl Manager {
 
     pub fn revalidate_mutation(&self,owner:&Owner,handle:&str,now_ms:u64)->Result<()> { self.reopen(owner,handle,Access::Mutation,now_ms).map(drop) }
 
+    pub fn begin_extraction(&self,owner:&Owner,handle:&str,request:extract::Request,now_ms:u64)->Result<ExtractionTicket> {
+        request.validate()?;
+        let input=self.reopen(owner,handle,Access::Content,now_ms)?;
+        let id=identity(&input)?;
+        Ok(ExtractionTicket {owner:owner.clone(),handle:handle.into(),identity:id,input,request})
+    }
+
+    /// Recheck a retained ticket immediately before transferring its descriptor.
+    /// Callers serialize this short transfer with revocation, not parsing.
+    pub fn revalidate_extraction(&self,owner:&Owner,ticket:&ExtractionTicket,now_ms:u64)->Result<()> {
+        if owner!=&ticket.owner {return Err(ErrorCode::PermissionDenied);}
+        let live=self.reopen(owner,&ticket.handle,Access::Content,now_ms)?;
+        if identity(&live)?!=ticket.identity || identity(&ticket.input)?!=ticket.identity {return Err(ErrorCode::TargetChanged);}Ok(())
+    }
+
+    /// Authenticate the worker before using this method. A worker result is
+    /// derived data, never a grant; original source/owner/expiry are checked
+    /// again after all blocking parsing work, before publication or caching.
+    pub fn finish_extraction(&self,owner:&Owner,ticket:ExtractionTicket,data:extract::Extraction,now_ms:u64)->Result<ExtractedDocument> {
+        self.revalidate_extraction(owner,&ticket,now_ms)?;
+        data.validate_for(&ticket.request,ticket.identity.size)?;
+        let record=self.handles.get(&ticket.handle).ok_or(ErrorCode::PermissionDenied)?;
+        Ok(ExtractedDocument {file_handle:ticket.handle,root_id:record.root_id.clone(),relative_path:record.relative.clone(),
+            identity_sha256:identity_sha256(&ticket.identity),extraction:data})
+    }
+
     #[cfg(test)]
     pub fn cache_for_test(&mut self,handle:&str,chunk:&str,preview:&str,snippet:&str)->Result<()> {
         if !self.handles.contains_key(handle){return Err(ErrorCode::PermissionDenied);}
@@ -490,6 +538,56 @@ mod tests {
     fn enroll()->(tempfile::TempDir,Owner,Manager,RootGrant){
         let (temp,owner,mut manager,proposal)=setup();let id=proposal.roots.iter().find(|root|root.display_path.ends_with("Documents")).unwrap().root_id.clone();
         let grant=manager.enroll(&owner,&proposal.proposal_id,&[id],&[Access::Metadata,Access::Content,Access::Mutation],101).unwrap().remove(0);(temp,owner,manager,grant)
+    }
+
+    fn text_request()->extract::Request {extract::Request {schema_version:1,format:extract::Format::Text,range:None}}
+    fn parse_ticket(ticket:&ExtractionTicket)->extract::Extraction {extract::extract(ticket.input(),ticket.request(),None).unwrap()}
+    #[test]
+    fn extraction_ticket_is_owner_bound_and_one_use_result_keeps_provenance() {
+        let (_temp,owner,mut manager,root)=enroll();
+        let h=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,102).unwrap();
+        let ticket=manager.begin_extraction(&owner,&h.file_handle,text_request(),103).unwrap();let data=parse_ticket(&ticket);
+        let document=manager.finish_extraction(&owner,ticket,data,104).unwrap();
+        assert_eq!(document.root_id,root.root_id);assert_eq!(document.relative_path,"note.txt");assert_eq!(document.extraction.chunks[0].text,"safe text");
+        let ticket=manager.begin_extraction(&owner,&h.file_handle,text_request(),103).unwrap();let data=parse_ticket(&ticket);
+        let mut other=owner.clone();other.client_binding_sha256="b".repeat(64);
+        assert!(matches!(manager.finish_extraction(&other,ticket,data,104),Err(ErrorCode::PermissionDenied)));
+        let metadata=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Metadata,102).unwrap();
+        assert!(matches!(manager.begin_extraction(&owner,&metadata.file_handle,text_request(),103),Err(ErrorCode::PermissionDenied)));
+    }
+    #[test]
+    fn extraction_cannot_publish_after_revoke_expiry_or_source_replacement() {
+        for scenario in ["revoke","expire","edit","replace","root"] {
+            let (temp,owner,mut manager,root)=enroll();
+            let h=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,102).unwrap();
+            let ticket=manager.begin_extraction(&owner,&h.file_handle,text_request(),103).unwrap();let data=parse_ticket(&ticket);
+            let now=match scenario {
+                "revoke"=>{manager.revoke(&owner,&root.root_id).unwrap();104},
+                "expire"=>h.expires_at_boottime_ms,
+                "edit"=>{fs::write(temp.path().join("Documents/note.txt"),b"changed source").unwrap();104},
+                "replace"=>{fs::remove_file(temp.path().join("Documents/note.txt")).unwrap();fs::write(temp.path().join("Documents/note.txt"),b"safe text").unwrap();104},
+                _=>{fs::rename(temp.path().join("Documents"),temp.path().join("old-documents")).unwrap();fs::create_dir(temp.path().join("Documents")).unwrap();104},
+            };
+            assert!(manager.revalidate_extraction(&owner,&ticket,now).is_err(),"{scenario}");
+            assert!(manager.finish_extraction(&owner,ticket,data,now).is_err(),"{scenario}");
+        }
+    }
+    #[test]
+    fn extraction_does_not_accept_worker_supplied_identity_or_invalid_locators() {
+        let (_temp,owner,mut manager,root)=enroll();
+        let h=manager.issue_handle(&owner,&root.root_id,Path::new("note.txt"),Access::Content,102).unwrap();
+        for scenario in ["size","hash","locator","range","line-end","budget"] {
+            let ticket=manager.begin_extraction(&owner,&h.file_handle,text_request(),103).unwrap();let mut data=parse_ticket(&ticket);
+            match scenario {
+                "size"=>data.source_bytes+=1,
+                "hash"=>data.source_sha256=Some("x".repeat(64)),
+                "locator"=>data.chunks[0].locator=extract::Locator::Page {number:1},
+                "range"=>data.chunks[0].locator=extract::Locator::Lines {start:0,end:1,byte_start:0,byte_end:9},
+                "line-end"=>data.chunks[0].locator=extract::Locator::Lines {start:1,end:999,byte_start:0,byte_end:9},
+                _=>data.chunks[0].text="x".repeat(extract::MAX_TEXT+1),
+            }
+            assert!(manager.finish_extraction(&owner,ticket,data,104).is_err(),"{scenario}");
+        }
     }
 
     fn persistent()->(tempfile::TempDir,Owner,Manager,RootGrant,PathBuf) {

@@ -74,6 +74,7 @@
       core = (productPackage "aios-core" "aios-session" "aios-sessiond").overrideAttrs (old: {
         nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ pkgs.pkg-config ];
         buildInputs = (old.buildInputs or []) ++ [ pkgs.sqlite ];
+        AIOS_EXTRACT = "${extract}/bin/aios-extract";
         AIOS_CONSENT_UI = "${consentUi}/bin/aios-scope-dialog";
         AIOS_WPCTL = "${pkgs.wireplumber}/bin/wpctl";
         AIOS_KREADCONFIG = "${pkgs.kdePackages.kconfig}/bin/kreadconfig6";
@@ -177,7 +178,7 @@
           installationUuid = "0d698869-1d37-4776-b3c7-30c7689a2d15";
         };
         fileScopesConsent = import ./tests/nix/file-scopes-consent.nix {
-          inherit pkgs core consentUi;
+          inherit pkgs core extract consentUi;
           source = qualificationSource;
           fixtureUuid = "f905c5bf-7f82-478b-96fa-4f8827d8e254";
           installationUuid = "ec31bea9-a87a-4f8d-bd97-975eb9d69f8f";
@@ -204,6 +205,7 @@
       lock-resolution = pkgs.mkShell { packages = [ pkgs.cargo pkgs.rustc ]; };
       default = pkgs.mkShell {
         packages = with pkgs; [ python3 git openssh cargo rustc rustfmt clippy pkg-config sqlite systemd ];
+        AIOS_EXTRACT = "${extract}/bin/aios-extract";
         AIOS_CONSENT_UI = "${consentUi}/bin/aios-scope-dialog";
         AIOS_CONSENT_NATIVE = "${consentUi}/bin/.aios-scope-dialog-wrapped";
         AIOS_USER_MANAGER = "${self.nixosConfigurations.aios-dev.config.systemd.package}/lib/systemd/systemd";

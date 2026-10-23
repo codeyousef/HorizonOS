@@ -18,6 +18,7 @@ mod processes;
 mod native_settings;
 mod power_profile_change;
 mod file_enrollment;
+mod file_extraction;
 mod process_selection;
 use aios_protocol::{MAX_TASK_BYTES, read_frame_with_limit, write_frame, contracts::{Action, ErrorCode, ProviderError, parse_tool_call, canonical_json}};
 use aios_system::services::{service_result, validate_service_name};

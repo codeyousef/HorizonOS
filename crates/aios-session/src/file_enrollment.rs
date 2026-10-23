@@ -9,6 +9,19 @@ struct Pending { peer:Peer,cancelled:Arc<AtomicBool>,native:Option<ReadCancellat
 #[derive(Clone,Default)]
 pub(crate) struct Controls(Arc<Mutex<HashMap<String,Pending>>>);
 struct Lease { controls:Controls,id:String,cancelled:Arc<AtomicBool> }
+impl Lease {
+    fn finish<T>(&self,result:Result<T>)->Result<T>{
+        let mut map=self.controls.0.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+        // An accepted cancellation can close the native dialog while a
+        // blocking display/peer check or poll is returning another error.
+        // Classify the terminal result and remove its control atomically.
+        let cancelled=self.cancelled.load(Ordering::Acquire);
+        if map.get(&self.id).is_some_and(|p|Arc::ptr_eq(&p.cancelled,&self.cancelled)){
+            if let Some(p)=map.remove(&self.id){if let Some(native)=p.native{native.cancel();}}
+        }
+        if cancelled {Err(ErrorCode::Cancelled)}else{result}
+    }
+}
 impl Drop for Lease {
     fn drop(&mut self){
         self.cancelled.store(true,Ordering::Release);
@@ -58,6 +71,7 @@ pub(crate) fn enroll(peer:Peer,session:GraphicalSession,manager:Arc<Mutex<Manage
         .review_enrollment(&owner,&proposal_id,&approved,&access,policy::boottime_ms()?)?
         .into_iter().map(|root|FileRoot{root_id:root.root_id,display_path:root.display_path,identity_sha256:root.identity_sha256}).collect();
     let lease=controls.reserve(peer.clone(),proposal_id.clone())?;
+    let result=(||{
     let subject=peer.policy_subject()?;let policy=policy::Policy::new(subject.boot_id.clone(),policy::registry_revision())?;
     let goal="Enroll only these roots for this originating client";
     let intent=policy.authenticated_user_intent(subject.clone(),proposal_id.clone(),goal,policy::Mode::Act)?;
@@ -83,14 +97,18 @@ pub(crate) fn enroll(peer:Peer,session:GraphicalSession,manager:Arc<Mutex<Manage
                 policy.consume_file_roots(decision,&subject,&resources)?;
                 // Cancellation and grant creation share this linearization
                 // boundary. Never hold it while waiting for native UI.
-                let map=controls.0.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
+                let mut map=controls.0.lock().map_err(|_|ErrorCode::ResourceExhausted)?;
                 if lease.cancelled.load(Ordering::Acquire){return Err(ErrorCode::Cancelled);}
                 let result=manager.lock().map_err(|_|ErrorCode::ResourceExhausted)?
                     .enroll(&owner,&proposal_id,&approved,&access,policy::boottime_ms()?);
-                drop(map);return result;
+                // A later cancellation must see a completed request rather
+                // than acknowledge cancellation after a grant was created.
+                map.remove(&proposal_id);drop(map);return result;
             }
         }
     }
+    })();
+    lease.finish(result)
 }
 
 #[cfg(test)] mod tests {
@@ -104,4 +122,19 @@ pub(crate) fn enroll(peer:Peer,session:GraphicalSession,manager:Arc<Mutex<Manage
         assert_eq!(controls.cancel(&owner,&id),Ok(()));assert!(lease.cancelled.load(Ordering::Acquire));
         drop(lease);assert_eq!(controls.cancel(&owner,&id),Err(ErrorCode::TargetNotFound));
     }
+    #[test] fn accepted_cancel_wins_a_concurrent_native_validation_error(){
+        let controls=Controls::default();let owner=peer();let id=uuid::Uuid::new_v4().to_string();let lease=controls.reserve(owner.clone(),id.clone()).unwrap();
+        controls.cancel(&owner,&id).unwrap();
+        assert_eq!(lease.finish::<()>(Err(ErrorCode::TargetChanged)),Err(ErrorCode::Cancelled));
+        assert_eq!(controls.cancel(&owner,&id),Err(ErrorCode::TargetNotFound));
+    }
+    #[test] fn completed_results_are_removed_before_a_later_cancel_can_be_accepted(){
+        for result in [Ok(()),Err(ErrorCode::TargetChanged)] {
+            let controls=Controls::default();let owner=peer();let id=uuid::Uuid::new_v4().to_string();let lease=controls.reserve(owner.clone(),id.clone()).unwrap();
+            assert_eq!(lease.finish(result),result);
+            assert_eq!(controls.cancel(&owner,&id),Err(ErrorCode::TargetNotFound));
+            assert!(!lease.cancelled.load(Ordering::Acquire));
+        }
+    }
+
 }
